@@ -1,0 +1,6 @@
+[Unit]
+Description=Refresh the inactive Claude logins remuda stores
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/remuda refresh

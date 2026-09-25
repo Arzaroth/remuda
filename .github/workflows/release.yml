@@ -1,0 +1,110 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and release (e.g. v0.1.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  binary:
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runs-on: ubuntu-latest
+          - arch: aarch64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
+          persist-credentials: false
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Check the binary runs and agrees with the tag
+        env:
+          REF_NAME: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          printed=$(target/release/remuda --version)
+          echo "$printed"
+          if [[ $printed != "remuda ${REF_NAME#v}" ]]; then
+            echo "::error::tag $REF_NAME does not match the binary's version ($printed)"
+            exit 1
+          fi
+
+      - name: Upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: remuda-${{ matrix.arch }}
+          path: target/release/remuda
+          if-no-files-found: error
+
+  release:
+    needs: binary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
+          persist-credentials: false
+
+      - name: Download the binaries
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: binaries
+
+      - name: Package
+        env:
+          REF_NAME: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          safe="${REF_NAME//[^A-Za-z0-9._-]/_}"
+          mkdir -p dist
+          for arch in x86_64 aarch64; do
+            stage="pack/$arch"
+            rm -rf "$stage"
+            mkdir -p "$stage/systemd"
+            install -m 755 "binaries/remuda-$arch/remuda" "$stage/remuda"
+            cp systemd/remuda-refresh.service systemd/remuda-refresh.timer "$stage/systemd/"
+            cp LICENSE LICENSE-MIT LICENSE-WTFPL "$stage/"
+            tar -czf "dist/remuda-$safe-linux-$arch.tar.gz" -C "$stage" .
+          done
+          ls -l dist
+
+      - name: Extract release notes from CHANGELOG
+        env:
+          REF_NAME: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          version="${REF_NAME#v}"
+          awk -v hdr="## [$version]" '
+            index($0, hdr) == 1 { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md >release-notes.md
+          if [[ ! -s release-notes.md ]]; then
+            echo "::warning::No CHANGELOG.md section for $version - falling back to auto-generated notes."
+          fi
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          body_path: release-notes.md
+          generate_release_notes: true
+          files: |
+            dist/*.tar.gz
