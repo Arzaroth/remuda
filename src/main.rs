@@ -4,6 +4,7 @@ mod fsx;
 mod live;
 mod ops;
 mod paths;
+mod project;
 mod store;
 
 use std::io::{self, BufRead};
@@ -14,6 +15,7 @@ use clap::{Parser, Subcommand};
 
 use crate::claude::Api;
 use crate::live::Live;
+use crate::project::REMUDA;
 use crate::store::Store;
 
 /// Keep several Claude Code logins and switch between them.
@@ -68,10 +70,40 @@ enum Cmd {
     /// Delete a stored credential.
     #[command(alias = "rm")]
     Remove { name: String },
+    /// Replace this binary with the latest release.
+    Update {
+        /// Only report whether a newer release exists.
+        #[arg(long)]
+        check: bool,
+    },
+}
+
+fn update(check_only: bool) -> Result<()> {
+    let cache = selvedge::state::update_cache_file(&REMUDA);
+    if check_only {
+        let status = selvedge::update::check_cached(&REMUDA, &cache, true)?;
+        match status.latest.as_deref() {
+            Some(latest) if status.available => {
+                println!("remuda {latest} is available (this is {})", status.current)
+            }
+            _ => println!("remuda {} is the latest release", status.current),
+        }
+        return Ok(());
+    }
+    let applied = selvedge::update::apply(&REMUDA, &cache)?;
+    if applied.version == REMUDA.version {
+        println!("remuda {} is the latest release", applied.version);
+    } else {
+        println!("updated remuda {} -> {}", REMUDA.version, applied.version);
+    }
+    Ok(())
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    if let Cmd::Update { check } = cli.command {
+        return update(check);
+    }
     let store = Store::open(&paths::store_root());
     let live = Live::from_env();
     let api = Api::claude()?;
@@ -124,6 +156,6 @@ fn main() -> Result<()> {
             commands::refresh(&store, &api, &state, scope, out, &mut io::stderr())
         }
         Cmd::Remove { name } => commands::remove(&store, &state, &name, out),
-        Cmd::Use { .. } => unreachable!(),
+        Cmd::Use { .. } | Cmd::Update { .. } => unreachable!(),
     }
 }
