@@ -154,3 +154,266 @@ pub fn switch(
     println!("switched to {name} ({})", target.meta.email);
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::claude::OAUTH_KEY;
+    use crate::fsx::{read_json, write_json};
+    use serde_json::json;
+
+    struct Fixed(Result<&'static str, &'static str>);
+    impl WhoAmI for Fixed {
+        fn account_uuid(&self, _: &str) -> Result<String> {
+            self.0.map(str::to_owned).map_err(|e| anyhow::anyhow!(e))
+        }
+    }
+    const OFFLINE: Fixed = Fixed(Err("offline"));
+
+    struct Env {
+        _tmp: tempfile::TempDir,
+        store: Store,
+        live: Live,
+    }
+
+    fn env() -> Env {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let live = Live {
+            creds: tmp.path().join(".credentials.json"),
+            config: tmp.path().join(".claude.json"),
+        };
+        Env {
+            _tmp: tmp,
+            store,
+            live,
+        }
+    }
+
+    fn oauth(access: &str, refresh: &str) -> Value {
+        json!({"accessToken": access, "refreshToken": refresh, "expiresAt": now_ms() + 3_600_000})
+    }
+
+    fn account(uuid: &str) -> Value {
+        json!({"accountUuid": uuid, "emailAddress": format!("{uuid}@example.com")})
+    }
+
+    fn sign_in(e: &Env, oauth: Value, account: Value) {
+        write_json(
+            &e.live.creds,
+            &json!({OAUTH_KEY: oauth, "mcpOAuth": {"srv": {"t": 1}}}),
+        )
+        .unwrap();
+        write_json(
+            &e.live.config,
+            &json!({"numStartups": 7, "oauthAccount": account}),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_rotated_live_token_is_copied_back_once_the_account_is_confirmed() {
+        let e = env();
+        e.store
+            .save(&Entry::new("work", oauth("a1", "r1"), account("u-work"), 1).unwrap())
+            .unwrap();
+        sign_in(&e, oauth("a2", "r2"), account("u-work"));
+
+        let state = sync_live(&e.store, &e.live, &Fixed(Ok("u-work"))).unwrap();
+
+        assert_eq!(
+            state,
+            LiveState::Stored {
+                name: "work".into(),
+                synced: true
+            }
+        );
+        assert_eq!(
+            e.store.get("work").unwrap().unwrap().token("refreshToken"),
+            Some("r2")
+        );
+    }
+
+    #[test]
+    fn an_unconfirmed_account_match_copies_nothing() {
+        let e = env();
+        e.store
+            .save(&Entry::new("work", oauth("a1", "r1"), account("u-work"), 1).unwrap())
+            .unwrap();
+        sign_in(&e, oauth("a2", "r2"), account("u-work"));
+
+        let state = sync_live(&e.store, &e.live, &OFFLINE).unwrap();
+
+        assert_eq!(
+            state,
+            LiveState::Stored {
+                name: "work".into(),
+                synced: false
+            }
+        );
+        assert_eq!(
+            e.store.get("work").unwrap().unwrap().token("refreshToken"),
+            Some("r1")
+        );
+    }
+
+    #[test]
+    fn a_stale_account_block_does_not_file_tokens_under_the_wrong_name() {
+        let e = env();
+        e.store
+            .save(&Entry::new("work", oauth("a1", "r1"), account("u-work"), 1).unwrap())
+            .unwrap();
+        sign_in(&e, oauth("a9", "r9"), account("u-work"));
+
+        let state = sync_live(&e.store, &e.live, &Fixed(Ok("u-other"))).unwrap();
+
+        assert!(matches!(state, LiveState::Unstored { .. }));
+        assert_eq!(
+            e.store.get("work").unwrap().unwrap().token("refreshToken"),
+            Some("r1")
+        );
+    }
+
+    #[test]
+    fn switching_swaps_the_login_and_the_account_and_keeps_everything_else() {
+        let e = env();
+        e.store
+            .save(&Entry::new("work", oauth("a1", "r1"), account("u-work"), 1).unwrap())
+            .unwrap();
+        e.store
+            .save(&Entry::new("perso", oauth("b1", "s1"), account("u-perso"), 1).unwrap())
+            .unwrap();
+        sign_in(&e, oauth("a2", "r2"), account("u-work"));
+
+        switch(
+            &e.store,
+            &e.live,
+            &Fixed(Ok("u-work")),
+            "perso",
+            false,
+            &|_| unreachable!(),
+        )
+        .unwrap();
+
+        let creds = read_json(&e.live.creds).unwrap().unwrap();
+        assert_eq!(creds[OAUTH_KEY]["refreshToken"], "s1");
+        assert_eq!(creds["mcpOAuth"]["srv"]["t"], 1);
+        let config = read_json(&e.live.config).unwrap().unwrap();
+        assert_eq!(config["oauthAccount"]["accountUuid"], "u-perso");
+        assert_eq!(config["numStartups"], 7);
+        assert_eq!(
+            e.store.get("work").unwrap().unwrap().token("refreshToken"),
+            Some("r2")
+        );
+    }
+
+    #[test]
+    fn switching_away_from_a_login_nobody_stored_is_refused() {
+        let e = env();
+        e.store
+            .save(&Entry::new("perso", oauth("b1", "s1"), account("u-perso"), 1).unwrap())
+            .unwrap();
+        sign_in(&e, oauth("x", "y"), account("u-new"));
+
+        let err = switch(
+            &e.store,
+            &e.live,
+            &OFFLINE,
+            "perso",
+            false,
+            &|_| unreachable!(),
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("not in the store"), "{err}");
+        assert_eq!(
+            read_json(&e.live.creds).unwrap().unwrap()[OAUTH_KEY]["refreshToken"],
+            "y"
+        );
+    }
+
+    #[test]
+    fn an_expired_target_is_refreshed_before_it_goes_live() {
+        let e = env();
+        let mut expired = oauth("b1", "s1");
+        expired["expiresAt"] = json!(now_ms() - 1);
+        e.store
+            .save(&Entry::new("perso", expired, account("u-perso"), 1).unwrap())
+            .unwrap();
+
+        switch(&e.store, &e.live, &OFFLINE, "perso", false, &|entry| {
+            entry
+                .oauth_mut()
+                .unwrap()
+                .insert("accessToken".into(), json!("fresh"));
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(
+            read_json(&e.live.creds).unwrap().unwrap()[OAUTH_KEY]["accessToken"],
+            "fresh"
+        );
+        assert_eq!(
+            e.store.get("perso").unwrap().unwrap().token("accessToken"),
+            Some("fresh")
+        );
+    }
+
+    #[test]
+    fn a_live_login_that_could_not_be_confirmed_is_not_switched_away_from() {
+        let e = env();
+        e.store
+            .save(&Entry::new("work", oauth("a1", "r1"), account("u-work"), 1).unwrap())
+            .unwrap();
+        e.store
+            .save(&Entry::new("perso", oauth("b1", "s1"), account("u-perso"), 1).unwrap())
+            .unwrap();
+        sign_in(&e, oauth("a2", "r2"), account("u-work"));
+
+        let err = switch(
+            &e.store,
+            &e.live,
+            &OFFLINE,
+            "perso",
+            false,
+            &|_| unreachable!(),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("could not be confirmed"), "{err}");
+        assert_eq!(
+            read_json(&e.live.creds).unwrap().unwrap()[OAUTH_KEY]["refreshToken"],
+            "r2"
+        );
+
+        switch(
+            &e.store,
+            &e.live,
+            &OFFLINE,
+            "perso",
+            true,
+            &|_| unreachable!(),
+        )
+        .unwrap();
+        assert_eq!(
+            read_json(&e.live.creds).unwrap().unwrap()[OAUTH_KEY]["refreshToken"],
+            "s1"
+        );
+    }
+
+    #[test]
+    fn a_changed_profile_travels_back_with_the_tokens() {
+        let e = env();
+        e.store
+            .save(&Entry::new("work", oauth("a1", "r1"), account("u-work"), 1).unwrap())
+            .unwrap();
+        let mut renamed = account("u-work");
+        renamed["displayName"] = json!("New name");
+        sign_in(&e, oauth("a1", "r1"), renamed);
+
+        sync_live(&e.store, &e.live, &OFFLINE).unwrap();
+
+        let stored = e.store.get("work").unwrap().unwrap();
+        assert_eq!(stored.meta.oauth_account["displayName"], "New name");
+    }
+}

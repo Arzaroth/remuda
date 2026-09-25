@@ -50,6 +50,15 @@ impl Api {
             profile_url: profile_url.to_owned(),
         })
     }
+
+    #[cfg(test)]
+    pub fn local(base: &str) -> Self {
+        Self::at(
+            &format!("{base}/v1/oauth/token"),
+            &format!("{base}/api/oauth/profile"),
+        )
+        .unwrap()
+    }
 }
 
 impl crate::ops::WhoAmI for Api {
@@ -307,4 +316,83 @@ pub fn finish_login(api: &Api, pkce: &Pkce, pasted: &str) -> Result<Login> {
         oauth: Value::Object(oauth),
         oauth_account: oauth_account_from_profile(&p)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_profile_maps_onto_the_block_claude_code_writes() {
+        let p = json!({
+            "account": {"uuid": "a-1", "email": "me@example.com", "display_name": "", "full_name": "Me", "created_at": "2025-01-01"},
+            "organization": {"uuid": "o-1", "organization_type": "claude_max", "rate_limit_tier": "default_claude_max_20x", "billing_type": "stripe_subscription"}
+        });
+        let a = oauth_account_from_profile(&p).unwrap();
+        assert_eq!(a["accountUuid"], "a-1");
+        assert_eq!(a["emailAddress"], "me@example.com");
+        assert_eq!(a["organizationUuid"], "o-1");
+        assert!(a.get("displayName").is_none());
+        assert_eq!(a["fullName"], "Me");
+        assert_eq!(a["hasExtraUsageEnabled"], false);
+        assert_eq!(a["billingType"], "stripe_subscription");
+    }
+
+    #[test]
+    fn a_refresh_keeps_the_old_refresh_token_when_none_comes_back() {
+        let mut oauth = Map::new();
+        oauth.insert("refreshToken".into(), json!("old"));
+        oauth.insert("subscriptionType".into(), json!("max"));
+        let t: TokenResponse = serde_json::from_value(json!({
+            "access_token": "new-access", "expires_in": 3600, "scope": "user:inference user:profile"
+        }))
+        .unwrap();
+        apply_tokens(&mut oauth, &t);
+        assert_eq!(oauth["refreshToken"], "old");
+        assert_eq!(oauth["accessToken"], "new-access");
+        assert_eq!(oauth["subscriptionType"], "max");
+        assert_eq!(oauth["scopes"], json!(["user:inference", "user:profile"]));
+    }
+
+    #[test]
+    fn a_failing_token_endpoint_says_what_it_answered() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/v1/oauth/token")
+            .with_status(503)
+            .with_body("upstream down")
+            .create();
+        let mut oauth = Map::new();
+        oauth.insert("refreshToken".into(), json!("r"));
+        let err = refresh(&Api::local(&server.url()), &mut oauth).unwrap_err();
+        assert!(err.to_string().contains("503"), "{err}");
+        assert!(err.to_string().contains("upstream down"), "{err}");
+        assert_eq!(oauth["refreshToken"], "r");
+    }
+
+    #[test]
+    fn every_organization_type_maps_onto_a_plan() {
+        for (org, plan) in [
+            ("claude_max", json!("max")),
+            ("claude_pro", json!("pro")),
+            ("claude_team", json!("team")),
+            ("claude_enterprise", json!("enterprise")),
+            ("api", Value::Null),
+        ] {
+            assert_eq!(subscription_type(Some(org)), plan, "{org}");
+        }
+    }
+
+    #[test]
+    fn the_authorize_url_carries_pkce() {
+        let pkce = start_login().unwrap();
+        let url = reqwest::Url::parse(&pkce.url).unwrap();
+        let q: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+        assert_eq!(q["code_challenge_method"], "S256");
+        assert_eq!(q["state"], pkce.state);
+        assert_eq!(
+            q["code_challenge"],
+            URL_SAFE_NO_PAD.encode(Sha256::digest(pkce.verifier.as_bytes()))
+        );
+    }
 }

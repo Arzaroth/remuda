@@ -171,3 +171,44 @@ impl Store {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(name: &str, uuid: &str) -> Entry {
+        Entry::new(
+            name,
+            json!({"accessToken": "a", "refreshToken": "r", "subscriptionType": "max", "rateLimitTier": "default_claude_max_20x"}),
+            json!({"accountUuid": uuid, "emailAddress": format!("{name}@example.com")}),
+            1,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn an_entry_round_trips_through_two_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(tmp.path());
+        store.save(&entry("work", "u-1")).unwrap();
+        store.save(&entry("perso", "u-2")).unwrap();
+        let all = store.list().unwrap();
+        assert_eq!(
+            all.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            ["perso", "work"]
+        );
+        let work = store.get("work").unwrap().unwrap();
+        assert_eq!(work.meta.account_uuid, "u-1");
+        assert_eq!(work.token("refreshToken"), Some("r"));
+        assert_eq!(work.plan(), "max 20x");
+        assert!(tmp.path().join("claude/work.meta.json").exists());
+    }
+
+    #[test]
+    fn names_cannot_escape_the_store_or_shadow_a_sidecar() {
+        for bad in ["", "../x", ".hidden", "a/b", "x.meta"] {
+            assert!(validate_name(bad).is_err(), "{bad} accepted");
+        }
+        validate_name("work-2.max").unwrap();
+    }
+}
