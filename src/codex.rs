@@ -47,6 +47,11 @@ impl Api {
         })
     }
 
+    #[cfg(test)]
+    pub fn local(base: &str) -> Self {
+        Self::at(base).unwrap()
+    }
+
     fn token_url(&self) -> String {
         format!("{}/oauth/token", self.issuer)
     }
@@ -104,6 +109,15 @@ impl Codex {
             api: Api::openai()?,
             callback_port: CALLBACK_PORT,
         })
+    }
+
+    #[cfg(test)]
+    pub fn at(dir: &std::path::Path, api: Api, callback_port: u16) -> Self {
+        Codex {
+            auth_path: dir.join("auth.json"),
+            api,
+            callback_port,
+        }
     }
 }
 
@@ -408,5 +422,285 @@ impl PendingLogin for CodexPending {
             ),
         }
         outcome
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ops::{self, LiveState};
+    use crate::store::Store;
+    use mockito::Matcher;
+
+    fn jwt(claims: Value) -> String {
+        let enc = |v: &Value| URL_SAFE_NO_PAD.encode(v.to_string());
+        format!("{}.{}.sig", enc(&json!({"alg": "none"})), enc(&claims))
+    }
+
+    fn id_token(account: &str, plan: &str) -> String {
+        jwt(json!({
+            "email": format!("{account}@example.com"),
+            AUTH_CLAIMS: {"chatgpt_account_id": account, "chatgpt_plan_type": plan},
+        }))
+    }
+
+    fn auth(account: &str, access: &str, refresh: &str, exp_secs: i64) -> Value {
+        json!({
+            "OPENAI_API_KEY": null,
+            "auth_mode": "chatgpt",
+            "tokens": {
+                "id_token": id_token(account, "plus"),
+                "access_token": jwt(json!({"exp": exp_secs, "tag": access})),
+                "refresh_token": refresh,
+                "account_id": account,
+            },
+            "last_refresh": "2026-09-01T00:00:00Z",
+        })
+    }
+
+    fn codex(dir: &std::path::Path, base: &str) -> Codex {
+        Codex::at(dir, Api::local(base), 0)
+    }
+
+    const OFFLINE: &str = "http://127.0.0.1:9";
+
+    #[test]
+    fn identity_plan_and_expiry_come_from_the_tokens() {
+        let tmp = tempfile::tempdir().unwrap();
+        let c = codex(tmp.path(), OFFLINE);
+        let creds = auth("acct-1", "a", "r", 1_900_000_000);
+        let id = c.live_identity(&creds).unwrap().unwrap();
+        assert_eq!(id.account_id, "acct-1");
+        assert_eq!(id.email, "acct-1@example.com");
+        assert!(id.oauth_account.is_none());
+        assert_eq!(c.plan(&creds), "plus");
+        assert_eq!(c.expires_at(&creds), Some(1_900_000_000_000));
+        assert_eq!(c.refresh_token(&creds), Some("r"));
+        assert_eq!(c.confirm(&creds).unwrap(), "acct-1");
+
+        let mut without = creds.clone();
+        without["tokens"]
+            .as_object_mut()
+            .unwrap()
+            .remove("account_id");
+        assert_eq!(c.confirm(&without).unwrap(), "acct-1");
+        assert_eq!(c.plan(&json!({})), "-");
+    }
+
+    #[test]
+    fn an_api_key_login_is_not_a_login_to_switch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let c = codex(tmp.path(), OFFLINE);
+        assert!(c.live().unwrap().is_none());
+        write_json(
+            &tmp.path().join("auth.json"),
+            &json!({"OPENAI_API_KEY": "sk-x", "tokens": null}),
+        )
+        .unwrap();
+        assert!(c.live().unwrap().is_none());
+    }
+
+    #[test]
+    fn a_rotated_live_login_is_carried_back_by_its_account_id_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let c = codex(tmp.path(), OFFLINE);
+        let stored = auth("acct-1", "a1", "r1", 1_900_000_000);
+        let identity = c.live_identity(&stored).unwrap().unwrap();
+        store
+            .save(&Entry::new("codex", "work", stored, identity, 1))
+            .unwrap();
+        write_json(
+            &tmp.path().join("auth.json"),
+            &auth("acct-1", "a2", "r2", 1_900_000_000),
+        )
+        .unwrap();
+
+        let state = ops::sync_live(&store, &c).unwrap();
+
+        assert_eq!(
+            state,
+            LiveState::Stored {
+                name: "work".into(),
+                synced: true
+            }
+        );
+        let work = store.get("codex", "work").unwrap().unwrap();
+        assert_eq!(c.refresh_token(&work.creds), Some("r2"));
+    }
+
+    #[test]
+    fn switching_replaces_auth_json_whole() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let c = codex(tmp.path(), OFFLINE);
+        for (name, account) in [("work", "acct-1"), ("perso", "acct-2")] {
+            let creds = auth(account, name, &format!("r-{name}"), 1_900_000_000);
+            let identity = c.live_identity(&creds).unwrap().unwrap();
+            store
+                .save(&Entry::new("codex", name, creds, identity, 1))
+                .unwrap();
+        }
+        let work = store.get("codex", "work").unwrap().unwrap();
+        c.install(&work).unwrap();
+
+        let said = ops::switch(&store, &c, "perso", false).unwrap();
+
+        assert_eq!(said, "switched Codex to perso (acct-2@example.com)");
+        let live = read_json(&tmp.path().join("auth.json")).unwrap().unwrap();
+        assert_eq!(live, store.get("codex", "perso").unwrap().unwrap().creds);
+    }
+
+    #[test]
+    fn a_refresh_keeps_what_the_endpoint_leaves_out() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("POST", "/oauth/token")
+            .match_body(Matcher::PartialJson(json!({
+                "grant_type": "refresh_token",
+                "refresh_token": "r1",
+                "client_id": CLIENT_ID,
+            })))
+            .with_body(
+                json!({"access_token": "new-access", "id_token": id_token("acct-1", "pro")})
+                    .to_string(),
+            )
+            .create();
+        let tmp = tempfile::tempdir().unwrap();
+        let c = codex(tmp.path(), &server.url());
+        let mut creds = auth("acct-1", "a1", "r1", 1);
+
+        let account = c.refresh(&mut creds).unwrap();
+
+        mock.assert();
+        assert_eq!(account.as_deref(), Some("acct-1"));
+        assert_eq!(creds["tokens"]["access_token"], "new-access");
+        assert_eq!(creds["tokens"]["refresh_token"], "r1");
+        assert_eq!(c.plan(&creds), "pro");
+        assert_ne!(creds["last_refresh"], "2026-09-01T00:00:00Z");
+    }
+
+    #[test]
+    fn a_refused_refresh_leaves_the_tokens_alone() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/oauth/token")
+            .with_status(401)
+            .with_body("refresh_token_reused")
+            .create();
+        let tmp = tempfile::tempdir().unwrap();
+        let c = codex(tmp.path(), &server.url());
+        let mut creds = auth("acct-1", "a1", "r1", 1);
+        let before = creds.clone();
+        let err = c.refresh(&mut creds).unwrap_err();
+        assert!(err.to_string().contains("refresh_token_reused"), "{err}");
+        assert_eq!(creds, before);
+    }
+
+    fn browse(url: &str) -> String {
+        let url = reqwest::Url::parse(url).unwrap();
+        let mut stream = TcpStream::connect(("127.0.0.1", url.port().unwrap())).unwrap();
+        let target = match url.query() {
+            Some(q) => format!("{}?{q}", url.path()),
+            None => url.path().to_owned(),
+        };
+        write!(stream, "GET {target} HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
+        let mut answer = String::new();
+        std::io::Read::read_to_string(&mut stream, &mut answer).unwrap();
+        answer
+    }
+
+    fn param(url: &str, key: &str) -> String {
+        reqwest::Url::parse(url)
+            .unwrap()
+            .query_pairs()
+            .find(|(k, _)| k == key)
+            .unwrap()
+            .1
+            .into_owned()
+    }
+
+    #[test]
+    fn a_login_completes_when_the_browser_calls_back() {
+        let mut server = mockito::Server::new();
+        let exchange = server
+            .mock("POST", "/oauth/token")
+            .match_body(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("grant_type".into(), "authorization_code".into()),
+                Matcher::UrlEncoded("code".into(), "the-code".into()),
+                Matcher::UrlEncoded("client_id".into(), CLIENT_ID.into()),
+            ]))
+            .with_body(
+                json!({
+                    "id_token": id_token("acct-9", "pro"),
+                    "access_token": jwt(json!({"exp": 1_900_000_000})),
+                    "refresh_token": "r-new",
+                })
+                .to_string(),
+            )
+            .create();
+        let tmp = tempfile::tempdir().unwrap();
+        let c = codex(tmp.path(), &server.url());
+        let pending = c.begin_login().unwrap();
+        assert!(!pending.needs_code());
+        let url = pending.url().to_owned();
+        assert!(url.starts_with(&format!("{}/oauth/authorize?", server.url())));
+        assert_eq!(param(&url, "code_challenge_method"), "S256");
+        let redirect = param(&url, "redirect_uri");
+        let state = param(&url, "state");
+
+        let browser = std::thread::spawn(move || {
+            let port = reqwest::Url::parse(&redirect).unwrap().port().unwrap();
+            let base = format!("http://127.0.0.1:{port}");
+            let missing = browse(&format!("{base}/favicon.ico"));
+            let done = browse(&format!("{base}/auth/callback?code=the-code&state={state}"));
+            (missing, done)
+        });
+        let login = pending.finish(None).unwrap();
+        let (missing, done) = browser.join().unwrap();
+
+        exchange.assert();
+        assert!(missing.starts_with("HTTP/1.1 404"), "{missing}");
+        assert!(done.starts_with("HTTP/1.1 200"), "{done}");
+        assert!(done.contains("Signed in"), "{done}");
+        assert_eq!(login.identity.account_id, "acct-9");
+        assert_eq!(login.creds["tokens"]["refresh_token"], "r-new");
+        assert_eq!(login.creds["tokens"]["account_id"], "acct-9");
+        assert_eq!(login.creds["auth_mode"], "chatgpt");
+        assert_eq!(c.plan(&login.creds), "pro");
+    }
+
+    #[test]
+    fn a_callback_from_another_attempt_or_a_refusal_stores_nothing() {
+        for (query, says) in [
+            ("code=c&state=forged", "another login attempt"),
+            (
+                "error=access_denied&error_description=no%20thanks",
+                "refused: no thanks",
+            ),
+        ] {
+            let tmp = tempfile::tempdir().unwrap();
+            let c = codex(tmp.path(), OFFLINE);
+            let pending = c.begin_login().unwrap();
+            let redirect = param(pending.url(), "redirect_uri");
+            let query = query.to_owned();
+            let browser = std::thread::spawn(move || {
+                browse(&format!("{redirect}?{query}").replace("localhost", "127.0.0.1"))
+            });
+            let err = pending.finish(None).err().unwrap();
+            let page = browser.join().unwrap();
+            assert!(err.to_string().contains(says), "{err}");
+            assert!(page.starts_with("HTTP/1.1 400"), "{page}");
+        }
+    }
+
+    #[test]
+    fn a_taken_callback_port_says_what_is_probably_holding_it() {
+        let held = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = held.local_addr().unwrap().port();
+        let tmp = tempfile::tempdir().unwrap();
+        let c = Codex::at(tmp.path(), Api::local(OFFLINE), port);
+        let err = c.begin_login().err().unwrap();
+        assert!(err.to_string().contains("codex login"), "{err}");
     }
 }

@@ -96,3 +96,15 @@ pub fn lock(dir: &Path) -> Result<File> {
     file.lock().context("failed to lock the store")?;
     Ok(file)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timestamps_are_utc_to_the_second() {
+        assert_eq!(rfc3339(0), "1970-01-01T00:00:00Z");
+        assert_eq!(rfc3339(951_782_400_000), "2000-02-29T00:00:00Z");
+        assert_eq!(rfc3339(1_790_503_509_999), "2026-09-27T10:05:09Z");
+    }
+}

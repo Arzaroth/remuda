@@ -260,3 +260,62 @@ fn a_corrupt_config_is_reported_not_overwritten() {
         "{ not json"
     );
 }
+
+fn jwt(claims: Value) -> String {
+    use base64::Engine;
+    let enc = |v: &Value| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(v.to_string());
+    format!("{}.{}.sig", enc(&json!({"alg": "none"})), enc(&claims))
+}
+
+fn codex_auth(account: &str, refresh: &str) -> Value {
+    json!({
+        "OPENAI_API_KEY": null,
+        "auth_mode": "chatgpt",
+        "tokens": {
+            "id_token": jwt(json!({
+                "email": format!("{account}@example.com"),
+                "https://api.openai.com/auth": {"chatgpt_account_id": account, "chatgpt_plan_type": "plus"},
+            })),
+            "access_token": jwt(json!({"exp": now_ms() / 1000 + 86_400, "sub": account})),
+            "refresh_token": refresh,
+            "account_id": account,
+        },
+    })
+}
+
+#[test]
+fn codex_logins_live_beside_claude_ones() {
+    let home = Home::new();
+    let auth = home.path(".codex/auth.json");
+    home.sign_in("a-work", "r-work", "u-work");
+    home.ok(&["import", "work"]);
+
+    write(&auth, &codex_auth("acct-work", "cr-work"));
+    assert_eq!(
+        home.ok(&["import", "-p", "codex", "work"]),
+        "stored codex/work (acct-work@example.com)\n"
+    );
+    write(&auth, &codex_auth("acct-perso", "cr-perso"));
+    home.ok(&["import", "--provider", "codex", "perso"]);
+
+    let ls = home.ok(&["ls"]);
+    assert!(ls.contains("Claude Code\n* work"), "{ls}");
+    assert!(ls.contains("Codex\n* perso"), "{ls}");
+    assert!(ls.contains("plus"), "{ls}");
+
+    let err = home.fails(&["use", "work"]);
+    assert!(err.contains("claude/work, codex/work"), "{err}");
+    assert_eq!(
+        home.ok(&["use", "codex/work"]),
+        "switched Codex to work (acct-work@example.com)\n"
+    );
+    assert_eq!(read(&auth)["tokens"]["refresh_token"], "cr-work");
+    assert_eq!(
+        read(&home.creds())["claudeAiOauth"]["refreshToken"],
+        "r-work"
+    );
+    assert!(
+        home.fails(&["import", "-p", "gemini", "x"])
+            .contains("gemini")
+    );
+}
