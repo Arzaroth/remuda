@@ -2,14 +2,12 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
-use sha2::{Digest, Sha256};
 
 use crate::fsx::{now_ms, read_json, write_json};
 use crate::paths;
+use crate::pkce;
 use crate::provider::{Identity, Login, PendingLogin, Provider};
 use crate::store::Entry;
 
@@ -229,12 +227,6 @@ fn subscription_type(org_type: Option<&str>) -> Value {
     }
 }
 
-fn random_b64() -> Result<String> {
-    let mut bytes = [0u8; 32];
-    getrandom::fill(&mut bytes).map_err(|e| anyhow::anyhow!("no randomness: {e}"))?;
-    Ok(URL_SAFE_NO_PAD.encode(bytes))
-}
-
 pub struct Pkce {
     pub url: String,
     verifier: String,
@@ -242,9 +234,9 @@ pub struct Pkce {
 }
 
 pub fn start_login() -> Result<Pkce> {
-    let verifier = random_b64()?;
-    let state = random_b64()?;
-    let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
+    let verifier = pkce::random()?;
+    let state = pkce::random()?;
+    let challenge = pkce::challenge(&verifier);
     let url = reqwest::Url::parse_with_params(
         AUTHORIZE_URL,
         &[
@@ -563,9 +555,6 @@ mod tests {
         let q: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
         assert_eq!(q["code_challenge_method"], "S256");
         assert_eq!(q["state"], pkce.state);
-        assert_eq!(
-            q["code_challenge"],
-            URL_SAFE_NO_PAD.encode(Sha256::digest(pkce.verifier.as_bytes()))
-        );
+        assert_eq!(q["code_challenge"], crate::pkce::challenge(&pkce.verifier));
     }
 }

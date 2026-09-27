@@ -3,6 +3,7 @@ mod commands;
 mod fsx;
 mod ops;
 mod paths;
+mod pkce;
 mod project;
 mod provider;
 mod store;
