@@ -112,7 +112,7 @@ fn two_accounts_imported_switched_and_removed() {
     let home = Home::new();
     let store = home.path(".local/share/remuda/credentials/claude");
 
-    assert!(home.ok(&["ls"]).contains("Claude Code is signed out"));
+    assert!(home.ok(&["ls"]).starts_with("no stored credentials in "));
 
     home.sign_in("a-work", "r-work", "u-work");
     assert!(
@@ -121,7 +121,7 @@ fn two_accounts_imported_switched_and_removed() {
     );
     assert_eq!(
         home.ok(&["import", "work"]),
-        "stored work (u-work@example.com)\n"
+        "stored claude/work (u-work@example.com)\n"
     );
     assert!(store.join("work.json").exists());
     assert!(
@@ -138,7 +138,7 @@ fn two_accounts_imported_switched_and_removed() {
 
     assert_eq!(
         home.ok(&["use", "work"]),
-        "switched to work (u-work@example.com)\n"
+        "switched Claude Code to work (u-work@example.com)\n"
     );
     let creds = read(&home.creds());
     assert_eq!(creds["claudeAiOauth"]["refreshToken"], "r-work");
@@ -160,7 +160,7 @@ fn two_accounts_imported_switched_and_removed() {
 
     assert_eq!(home.ok(&["refresh"]), "");
     assert!(home.fails(&["rm", "work"]).contains("is active"));
-    assert_eq!(home.ok(&["rm", "perso"]), "removed perso\n");
+    assert_eq!(home.ok(&["rm", "perso"]), "removed claude/perso\n");
     assert!(!store.join("perso.meta.json").exists());
     assert!(
         home.fails(&["use", "perso"])

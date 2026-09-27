@@ -1,10 +1,10 @@
 mod claude;
 mod commands;
 mod fsx;
-mod live;
 mod ops;
 mod paths;
 mod project;
+mod provider;
 mod store;
 
 use std::io::{self, BufRead};
@@ -13,9 +13,9 @@ use std::process::{Command, Stdio};
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-use crate::claude::Api;
-use crate::live::Live;
+use crate::claude::Claude;
 use crate::project::REMUDA;
+use crate::provider::Provider;
 use crate::store::Store;
 
 /// Keep several Claude Code logins and switch between them.
@@ -26,31 +26,37 @@ struct Cli {
     command: Cmd,
 }
 
+const PROVIDERS: [&str; 1] = ["claude"];
+
 #[derive(Subcommand)]
 enum Cmd {
-    /// List stored credentials and which one Claude Code is using.
+    /// List stored credentials and which one each CLI is using.
     #[command(alias = "ls")]
     List {
         #[arg(long)]
         json: bool,
     },
-    /// Store the login Claude Code is signed into right now.
+    /// Store the login a CLI is signed into right now.
     Import {
         name: String,
+        #[arg(short, long, default_value = "claude", value_parser = PROVIDERS)]
+        provider: String,
         /// Replace a stored credential of the same name.
         #[arg(long)]
         force: bool,
     },
-    /// Sign a new account in through the browser and store it, without touching Claude Code.
+    /// Sign a new account in through the browser and store it, without touching the CLI.
     Login {
         name: String,
+        #[arg(short, long, default_value = "claude", value_parser = PROVIDERS)]
+        provider: String,
         #[arg(long)]
         force: bool,
         /// Print the URL instead of opening it.
         #[arg(long)]
         no_browser: bool,
     },
-    /// Make a stored credential the one Claude Code uses.
+    /// Make a stored credential the one its CLI uses. NAME or PROVIDER/NAME.
     Use {
         name: String,
         /// Switch even when the live login is not in the store, dropping it.
@@ -67,7 +73,7 @@ enum Cmd {
         #[arg(long, default_value_t = 60)]
         within: i64,
     },
-    /// Delete a stored credential.
+    /// Delete a stored credential. NAME or PROVIDER/NAME.
     #[command(alias = "rm")]
     Remove { name: String },
     /// Replace this binary with the latest release.
@@ -99,28 +105,35 @@ fn update(check_only: bool) -> Result<()> {
     Ok(())
 }
 
+fn open_in_browser(url: &str) {
+    let _ = Command::new("xdg-open")
+        .arg(url)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     if let Cmd::Update { check } = cli.command {
         return update(check);
     }
     let store = Store::open(&paths::store_root());
-    let live = Live::from_env();
-    let api = Api::claude()?;
+    let claude = Claude::from_env()?;
+    let providers: [&dyn Provider; 1] = [&claude];
     let out = &mut io::stdout();
+
     if let Cmd::Login {
         name,
+        provider,
         force,
         no_browser,
     } = &cli.command
     {
+        let p = commands::find(&providers, provider)?;
         let open = |url: &str| {
             if !no_browser {
-                let _ = Command::new("xdg-open")
-                    .arg(url)
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn();
+                open_in_browser(url);
             }
         };
         let mut read_code = || {
@@ -132,31 +145,51 @@ fn main() -> Result<()> {
             open: &open,
             read_code: &mut read_code,
         };
-        return commands::login(&store, &api, name, *force, prompt, out);
+        return commands::login(&store, p, name, *force, prompt, out);
     }
+
     let _lock = store.lock()?;
-    if let Cmd::Use { name, discard } = &cli.command {
-        return ops::switch(&store, &live, &api, name, *discard, &|entry| {
-            commands::refresh_entry(&api, entry)
-        });
-    }
-    let state = ops::sync_live(&store, &live, &api)?;
     match cli.command {
-        Cmd::List { json } => commands::list(&store, &state, json, out),
-        Cmd::Import { name, force } => commands::import(&store, &live, &state, &name, force, out),
+        Cmd::Use { name, discard } => {
+            let (p, name) = commands::resolve(&store, &providers, &name)?;
+            println!("{}", ops::switch(&store, p, &name, discard)?);
+            Ok(())
+        }
+        Cmd::List { json } => {
+            let lives = commands::sync_all(&store, &providers)?;
+            commands::list(&store, &lives, json, out)
+        }
+        Cmd::Import {
+            name,
+            provider,
+            force,
+        } => {
+            let p = commands::find(&providers, &provider)?;
+            let state = ops::sync_live(&store, p)?;
+            commands::import(&store, p, &state, &name, force, out)
+        }
         Cmd::Refresh {
             name,
             force,
             within,
         } => {
+            let only = name
+                .as_deref()
+                .map(|spec| commands::resolve(&store, &providers, spec))
+                .transpose()?;
+            let lives = commands::sync_all(&store, &providers)?;
             let scope = commands::RefreshScope {
-                only: name.as_deref(),
+                only: only.as_ref().map(|(p, name)| (*p, name.as_str())),
                 force,
                 within_min: within,
             };
-            commands::refresh(&store, &api, &state, scope, out, &mut io::stderr())
+            commands::refresh(&store, &lives, scope, out, &mut io::stderr())
         }
-        Cmd::Remove { name } => commands::remove(&store, &state, &name, out),
-        Cmd::Use { .. } | Cmd::Login { .. } | Cmd::Update { .. } => unreachable!(),
+        Cmd::Remove { name } => {
+            let (p, name) = commands::resolve(&store, &providers, &name)?;
+            let state = ops::sync_live(&store, p)?;
+            commands::remove(&store, p, &state, &name, out)
+        }
+        Cmd::Login { .. } | Cmd::Update { .. } => unreachable!(),
     }
 }
