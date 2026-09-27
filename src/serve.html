@@ -275,7 +275,11 @@ $("add").addEventListener("submit", async (ev) => {
 });
 
 load();
-setInterval(load, 60000);
+setInterval(() => {
+  const editing = document.querySelector("#providers .inline")
+    || document.activeElement?.closest?.("#providers");
+  if (!editing) load();
+}, 60000);
 </script>
 </body>
 </html>
