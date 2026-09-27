@@ -73,6 +73,10 @@ enum Cmd {
         #[arg(long, default_value_t = 60)]
         within: i64,
     },
+    /// Set the label shown beside a credential, or clear it. NAME or PROVIDER/NAME.
+    Label { name: String, text: Option<String> },
+    /// Rename a stored credential. NAME or PROVIDER/NAME.
+    Rename { name: String, new_name: String },
     /// Delete a stored credential. NAME or PROVIDER/NAME.
     #[command(alias = "rm")]
     Remove { name: String },
@@ -189,6 +193,14 @@ fn main() -> Result<()> {
             let (p, name) = commands::resolve(&store, &providers, &name)?;
             let state = ops::sync_live(&store, p)?;
             commands::remove(&store, p, &state, &name, out)
+        }
+        Cmd::Label { name, text } => {
+            let (p, name) = commands::resolve(&store, &providers, &name)?;
+            commands::label(&store, p, &name, text.as_deref(), out)
+        }
+        Cmd::Rename { name, new_name } => {
+            let (p, name) = commands::resolve(&store, &providers, &name)?;
+            commands::rename(&store, p, &name, &new_name, out)
         }
         Cmd::Login { .. } | Cmd::Update { .. } => unreachable!(),
     }

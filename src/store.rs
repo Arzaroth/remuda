@@ -145,6 +145,21 @@ impl Store {
         write_json(&self.creds_path(&entry.provider, &entry.name), &entry.creds)
     }
 
+    pub fn rename(&self, provider: &str, from: &str, to: &str) -> Result<()> {
+        validate_name(from)?;
+        validate_name(to)?;
+        if self.get(provider, to)?.is_some() {
+            bail!("{provider}/{to} already exists");
+        }
+        fs::rename(
+            self.creds_path(provider, from),
+            self.creds_path(provider, to),
+        )
+        .with_context(|| format!("no credential named {provider}/{from}"))?;
+        fs::rename(self.meta_path(provider, from), self.meta_path(provider, to))
+            .with_context(|| format!("{provider}/{from} has no sidecar to move"))
+    }
+
     pub fn remove(&self, provider: &str, name: &str) -> Result<()> {
         validate_name(name)?;
         fs::remove_file(self.creds_path(provider, name))

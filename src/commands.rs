@@ -81,6 +81,13 @@ fn human(ms: i64) -> String {
     }
 }
 
+fn display_name(e: &Entry) -> String {
+    match &e.meta.label {
+        Some(label) => format!("{} ({label})", e.name),
+        None => e.name.clone(),
+    }
+}
+
 fn import_hint(p: &dyn Provider) -> String {
     if p.id() == "claude" {
         "`remuda import <name>`".to_owned()
@@ -146,13 +153,14 @@ pub fn list(store: &Store, lives: &[Live], as_json: bool, out: &mut dyn Write) -
         }
         printed = true;
         writeln!(out, "{}", p.name())?;
-        let w = entries.iter().map(|e| e.name.len()).max().unwrap_or(0);
+        let shown: Vec<String> = entries.iter().map(display_name).collect();
+        let w = shown.iter().map(String::len).max().unwrap_or(0);
         let we = entries
             .iter()
             .map(|e| e.meta.email.len())
             .max()
             .unwrap_or(0);
-        for e in &entries {
+        for (e, shown) in entries.iter().zip(&shown) {
             let mark = if live.state.active_name() == Some(e.name.as_str()) {
                 "*"
             } else {
@@ -169,7 +177,7 @@ pub fn list(store: &Store, lives: &[Live], as_json: bool, out: &mut dyn Write) -
             writeln!(
                 out,
                 "{mark} {:w$}  {:we$}  {:8}  token {access}{refresh}",
-                e.name,
+                shown,
                 e.meta.email,
                 p.plan(&e.creds)
             )?;
@@ -365,6 +373,40 @@ pub fn refresh(
     if failed > 0 {
         bail!("{failed} credential(s) failed to refresh");
     }
+    Ok(())
+}
+
+pub fn label(
+    store: &Store,
+    p: &dyn Provider,
+    name: &str,
+    text: Option<&str>,
+    out: &mut dyn Write,
+) -> Result<()> {
+    let mut entry = store
+        .get(p.id(), name)?
+        .with_context(|| format!("no credential named {}/{name}", p.id()))?;
+    entry.meta.label = text
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(str::to_owned);
+    store.save(&entry)?;
+    match &entry.meta.label {
+        Some(label) => writeln!(out, "labelled {} {label:?}", entry.qualified())?,
+        None => writeln!(out, "cleared the label of {}", entry.qualified())?,
+    }
+    Ok(())
+}
+
+pub fn rename(
+    store: &Store,
+    p: &dyn Provider,
+    from: &str,
+    to: &str,
+    out: &mut dyn Write,
+) -> Result<()> {
+    store.rename(p.id(), from, to)?;
+    writeln!(out, "renamed {0}/{from} to {0}/{to}", p.id())?;
     Ok(())
 }
 
