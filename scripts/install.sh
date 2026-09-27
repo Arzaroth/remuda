@@ -1,8 +1,9 @@
 #!/bin/bash
 # Usage: curl -fsSL https://raw.githubusercontent.com/Arzaroth/remuda/main/scripts/install.sh | bash
-#        ... | bash -s -- [--version vX.Y.Z] [--no-timer]
+#        ... | bash -s -- [--version vX.Y.Z] [--no-timer] [--no-completions]
 #
-# Installs the latest release into ~/.local/bin and enables the refresh timer.
+# Installs the latest release into ~/.local/bin, enables the refresh timer and
+# installs completions for the shells it finds.
 
 set -euo pipefail
 
@@ -11,6 +12,7 @@ bindir="$HOME/.local/bin"
 unitdir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 tag=""
 want_timer=true
+want_completions=true
 
 while (($# > 0)); do
   case "$1" in
@@ -19,8 +21,9 @@ while (($# > 0)); do
     shift
     ;;
   --no-timer) want_timer=false ;;
+  --no-completions) want_completions=false ;;
   -h | --help)
-    echo "usage: install.sh [--version vX.Y.Z] [--no-timer]"
+    echo "usage: install.sh [--version vX.Y.Z] [--no-timer] [--no-completions]"
     exit 0
     ;;
   *)
@@ -92,10 +95,30 @@ if $want_timer; then
   fi
 fi
 
+if $want_completions; then
+  data="${XDG_DATA_HOME:-$HOME/.local/share}"
+  if command -v bash >/dev/null 2>&1; then
+    mkdir -p "$data/bash-completion/completions"
+    "$bindir/remuda" completions bash >"$data/bash-completion/completions/remuda"
+  fi
+  if command -v zsh >/dev/null 2>&1; then
+    mkdir -p "$data/zsh/site-functions"
+    "$bindir/remuda" completions zsh >"$data/zsh/site-functions/_remuda"
+    echo "zsh completions are in $data/zsh/site-functions; add it to fpath if it is not there yet"
+  fi
+  if command -v fish >/dev/null 2>&1; then
+    fishdir="${XDG_CONFIG_HOME:-$HOME/.config}/fish/completions"
+    mkdir -p "$fishdir"
+    "$bindir/remuda" completions fish >"$fishdir/remuda.fish"
+  fi
+fi
+
 cat <<'EOF'
 
 Next:
-  remuda import main      store the account Claude Code is signed into
-  remuda login other      sign another account in through the browser
-  remuda use other        switch Claude Code to it
+  remuda import main            store the account Claude Code is signed into
+  remuda import -p codex main   the same for Codex
+  remuda login other            sign another account in through the browser
+  remuda use other              switch to it
+  remuda serve                  do all of that from a page in the browser
 EOF

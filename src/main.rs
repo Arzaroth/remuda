@@ -14,7 +14,7 @@ use std::io::{self, BufRead};
 use std::process::{Command, Stdio};
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 
 use crate::claude::Claude;
 use crate::codex::Codex;
@@ -92,6 +92,8 @@ enum Cmd {
         #[arg(long)]
         no_browser: bool,
     },
+    /// Print a completion script for a shell.
+    Completions { shell: clap_complete::Shell },
     /// Replace this binary with the latest release.
     Update {
         /// Only report whether a newer release exists.
@@ -133,6 +135,10 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     if let Cmd::Update { check } = cli.command {
         return update(check);
+    }
+    if let Cmd::Completions { shell } = cli.command {
+        clap_complete::generate(shell, &mut Cli::command(), "remuda", &mut io::stdout());
+        return Ok(());
     }
     let store = Store::open(&paths::store_root());
     if let Cmd::Serve { port, no_browser } = cli.command {
@@ -231,6 +237,8 @@ fn main() -> Result<()> {
             let (p, name) = commands::resolve(&store, &providers, &name)?;
             commands::rename(&store, p, &name, &new_name, out)
         }
-        Cmd::Login { .. } | Cmd::Serve { .. } | Cmd::Update { .. } => unreachable!(),
+        Cmd::Login { .. } | Cmd::Serve { .. } | Cmd::Completions { .. } | Cmd::Update { .. } => {
+            unreachable!()
+        }
     }
 }
