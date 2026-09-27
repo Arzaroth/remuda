@@ -319,3 +319,16 @@ fn codex_logins_live_beside_claude_ones() {
             .contains("gemini")
     );
 }
+
+#[test]
+fn completions_cover_every_command() {
+    let home = Home::new();
+    let zsh = home.ok(&["completions", "zsh"]);
+    for command in [
+        "import", "login", "use", "label", "rename", "serve", "update",
+    ] {
+        assert!(zsh.contains(command), "zsh completions miss {command}");
+    }
+    assert!(home.ok(&["completions", "bash"]).contains("_remuda"));
+    assert!(home.fails(&["completions", "tcsh"]).contains("tcsh"));
+}
