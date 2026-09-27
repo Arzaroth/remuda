@@ -230,6 +230,25 @@ mod tests {
     }
 
     #[test]
+    fn renaming_moves_both_files_and_never_overwrites() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(tmp.path());
+        store.save(&entry("work", "u-1")).unwrap();
+        store.save(&entry("perso", "u-2")).unwrap();
+
+        let err = store.rename("claude", "work", "perso").unwrap_err();
+        assert!(err.to_string().contains("already exists"), "{err}");
+        assert!(store.rename("claude", "nope", "other").is_err());
+
+        store.rename("claude", "work", "job").unwrap();
+        assert!(store.get("claude", "work").unwrap().is_none());
+        assert_eq!(
+            store.get("claude", "job").unwrap().unwrap().meta.account_id,
+            "u-1"
+        );
+    }
+
+    #[test]
     fn removing_takes_the_sidecar_with_it() {
         let tmp = tempfile::tempdir().unwrap();
         let store = Store::open(tmp.path());

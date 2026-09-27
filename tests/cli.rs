@@ -159,6 +159,10 @@ fn two_accounts_imported_switched_and_removed() {
     assert_eq!(active, ["work"]);
 
     assert_eq!(home.ok(&["refresh"]), "");
+    home.ok(&["label", "work", "Job"]);
+    assert!(home.ok(&["ls"]).contains("* work (Job)"));
+    home.ok(&["rename", "claude/perso", "home"]);
+    home.ok(&["rename", "home", "perso"]);
     assert!(home.fails(&["rm", "work"]).contains("is active"));
     assert_eq!(home.ok(&["rm", "perso"]), "removed claude/perso\n");
     assert!(!store.join("perso.meta.json").exists());

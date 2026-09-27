@@ -859,6 +859,47 @@ mod tests {
     }
 
     #[test]
+    fn a_label_shows_beside_the_name_until_it_is_cleared() {
+        let e = env(OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let mut out = Vec::new();
+        label(&e.store, &e.claude, "work", Some("  Job Max  "), &mut out).unwrap();
+        assert_eq!(text(out), "labelled claude/work \"Job Max\"\n");
+
+        let mut out = Vec::new();
+        list(&e.store, &live(&e, active("work")), false, &mut out).unwrap();
+        assert!(text(out).contains("* work (Job Max)  "));
+        let mut out = Vec::new();
+        list(&e.store, &live(&e, active("work")), true, &mut out).unwrap();
+        let v: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(v["credentials"][0]["label"], "Job Max");
+
+        let mut out = Vec::new();
+        label(&e.store, &e.claude, "work", Some(" "), &mut out).unwrap();
+        assert_eq!(text(out), "cleared the label of claude/work\n");
+        assert!(
+            e.store
+                .get("claude", "work")
+                .unwrap()
+                .unwrap()
+                .meta
+                .label
+                .is_none()
+        );
+        assert!(label(&e.store, &e.claude, "nope", None, &mut Vec::new()).is_err());
+    }
+
+    #[test]
+    fn rename_says_where_the_credential_went() {
+        let e = env(OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let mut out = Vec::new();
+        rename(&e.store, &e.claude, "work", "job", &mut out).unwrap();
+        assert_eq!(text(out), "renamed claude/work to claude/job\n");
+        assert!(rename(&e.store, &e.claude, "job", "../x", &mut Vec::new()).is_err());
+    }
+
+    #[test]
     fn a_name_resolves_bare_or_qualified() {
         let e = env(OFFLINE);
         e.stored("work", "u-work", HOUR);
