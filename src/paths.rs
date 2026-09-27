@@ -24,6 +24,14 @@ pub fn claude_config() -> PathBuf {
     }
 }
 
+pub fn codex_auth() -> PathBuf {
+    env::var_os("CODEX_HOME")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home().join(".codex"))
+        .join("auth.json")
+}
+
 pub fn store_root() -> PathBuf {
     if let Some(dir) = env::var_os("REMUDA_STORE").filter(|v| !v.is_empty()) {
         return PathBuf::from(dir);

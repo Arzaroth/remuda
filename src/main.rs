@@ -1,4 +1,5 @@
 mod claude;
+mod codex;
 mod commands;
 mod fsx;
 mod ops;
@@ -15,11 +16,12 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 use crate::claude::Claude;
+use crate::codex::Codex;
 use crate::project::REMUDA;
 use crate::provider::Provider;
 use crate::store::Store;
 
-/// Keep several Claude Code logins and switch between them.
+/// Keep several Claude Code and Codex logins and switch between them.
 #[derive(Parser)]
 #[command(version)]
 struct Cli {
@@ -27,7 +29,7 @@ struct Cli {
     command: Cmd,
 }
 
-const PROVIDERS: [&str; 1] = ["claude"];
+const PROVIDERS: [&str; 2] = ["claude", "codex"];
 
 #[derive(Subcommand)]
 enum Cmd {
@@ -125,7 +127,8 @@ fn main() -> Result<()> {
     }
     let store = Store::open(&paths::store_root());
     let claude = Claude::from_env()?;
-    let providers: [&dyn Provider; 1] = [&claude];
+    let codex = Codex::from_env()?;
+    let providers: [&dyn Provider; 2] = [&claude, &codex];
     let out = &mut io::stdout();
 
     if let Cmd::Login {
