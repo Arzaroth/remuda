@@ -7,6 +7,7 @@ mod paths;
 mod pkce;
 mod project;
 mod provider;
+mod serve;
 mod store;
 
 use std::io::{self, BufRead};
@@ -83,6 +84,14 @@ enum Cmd {
     /// Delete a stored credential. NAME or PROVIDER/NAME.
     #[command(alias = "rm")]
     Remove { name: String },
+    /// Serve a local page to list, switch and sign in credentials from the browser.
+    Serve {
+        #[arg(long, default_value_t = 7429)]
+        port: u16,
+        /// Print the URL instead of opening it.
+        #[arg(long)]
+        no_browser: bool,
+    },
     /// Replace this binary with the latest release.
     Update {
         /// Only report whether a newer release exists.
@@ -126,6 +135,22 @@ fn main() -> Result<()> {
         return update(check);
     }
     let store = Store::open(&paths::store_root());
+    if let Cmd::Serve { port, no_browser } = cli.command {
+        let providers: Vec<Box<dyn Provider>> =
+            vec![Box::new(Claude::from_env()?), Box::new(Codex::from_env()?)];
+        let (server, port) = serve::bind(port)?;
+        let url = format!("http://127.0.0.1:{port}/#{}", pkce::random()?);
+        let token = url.rsplit('#').next().unwrap_or_default().to_owned();
+        println!(
+            "remuda is serving {url}\nThe link carries its access token; keep it to yourself. Ctrl-C stops it."
+        );
+        if !no_browser {
+            open_in_browser(&url);
+        }
+        let app = serve::App::new(store, providers, token, port);
+        serve::serve(std::sync::Arc::new(app), server);
+        return Ok(());
+    }
     let claude = Claude::from_env()?;
     let codex = Codex::from_env()?;
     let providers: [&dyn Provider; 2] = [&claude, &codex];
@@ -206,6 +231,6 @@ fn main() -> Result<()> {
             let (p, name) = commands::resolve(&store, &providers, &name)?;
             commands::rename(&store, p, &name, &new_name, out)
         }
-        Cmd::Login { .. } | Cmd::Update { .. } => unreachable!(),
+        Cmd::Login { .. } | Cmd::Serve { .. } | Cmd::Update { .. } => unreachable!(),
     }
 }

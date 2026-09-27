@@ -23,6 +23,10 @@ pub trait PendingLogin: Send {
     fn url(&self) -> &str;
     fn needs_code(&self) -> bool;
     fn finish(self: Box<Self>, code: Option<&str>) -> Result<Login>;
+    /// Stops a `finish` that is still waiting, from another thread.
+    fn canceller(&self) -> Box<dyn Fn() + Send + Sync> {
+        Box::new(|| {})
+    }
 }
 
 /// One coding CLI whose login remuda keeps copies of. `creds` is always the

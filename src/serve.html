@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>remuda</title>
+<style>
+:root {
+  --bg: #f6f5f1; --panel: #fffefb; --ink: #1d1c19; --muted: #6d6a62; --line: #e3e0d7;
+  --accent: #8a4b1f; --accent-ink: #fff; --good: #2f6b3a; --warn: #9a5b00; --bad: #a3262a;
+  --chip: #efece4;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161513; --panel: #1f1e1b; --ink: #ece9e1; --muted: #9c978c; --line: #33312c;
+    --accent: #d99557; --accent-ink: #1b140e; --good: #7cc48a; --warn: #e0a95a; --bad: #ef7c7f;
+    --chip: #2a2925;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 880px; margin: 0 auto; padding: 32px 16px 64px; }
+header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+h1 { font-size: 26px; margin: 0; letter-spacing: -0.01em; }
+h1 small { font-size: 14px; font-weight: 400; color: var(--muted); margin-left: 8px; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0 0 10px; }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px; margin-top: 18px; }
+.row { display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; padding: 12px 0; border-top: 1px solid var(--line); align-items: center; }
+.row:first-of-type { border-top: 0; }
+.who { min-width: 0; }
+.name { font-weight: 600; }
+.label { color: var(--muted); font-weight: 400; }
+.meta { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.chip { display: inline-block; background: var(--chip); border-radius: 999px; padding: 1px 8px; font-size: 12px; margin-left: 6px; color: var(--ink); }
+.chip.active { background: var(--accent); color: var(--accent-ink); }
+.expired { color: var(--bad); }
+.soon { color: var(--warn); }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+button, select, input { font: inherit; color: inherit; }
+button { background: transparent; border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--muted); }
+button:disabled { opacity: 0.45; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+button.danger { color: var(--bad); }
+input, select { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; min-width: 0; }
+.inline { display: flex; gap: 6px; flex-wrap: wrap; grid-column: 1 / -1; }
+.inline input { flex: 1 1 180px; }
+.note { font-size: 14px; color: var(--muted); padding: 10px 0 0; }
+.empty { color: var(--muted); padding: 6px 0; }
+#toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: min(92vw, 640px);
+  background: var(--ink); color: var(--bg); padding: 10px 14px; border-radius: 10px; font-size: 14px;
+  opacity: 0; pointer-events: none; transition: opacity 0.2s; white-space: pre-wrap; }
+#toast.show { opacity: 1; }
+#toast.error { background: var(--bad); color: #fff; }
+form.add { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+form.add input { flex: 1 1 160px; }
+.signin { margin-top: 12px; display: grid; gap: 8px; }
+.signin a { color: var(--accent); overflow-wrap: anywhere; }
+@media (max-width: 560px) { .row { grid-template-columns: 1fr; } .actions { justify-content: flex-start; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>remuda <small>logins on this machine</small></h1>
+    <button id="refresh-all" title="Refresh the inactive logins that expire within the hour">Refresh tokens</button>
+  </header>
+  <div id="providers"></div>
+  <section>
+    <h2>Add an account</h2>
+    <form class="add" id="add">
+      <select id="add-provider" aria-label="CLI"></select>
+      <input id="add-name" placeholder="name, e.g. work" required pattern="[A-Za-z0-9_][A-Za-z0-9._\-]*" aria-label="Name">
+      <button class="primary" type="submit">Sign in</button>
+    </form>
+    <div id="signin"></div>
+  </section>
+</main>
+<div id="toast" role="status"></div>
+<script>
+"use strict";
+const token = (() => {
+  const fromHash = location.hash.slice(1);
+  try {
+    if (fromHash) sessionStorage.setItem("remuda-token", fromHash);
+    return fromHash || sessionStorage.getItem("remuda-token") || "";
+  } catch { return fromHash; }
+})();
+if (location.hash) history.replaceState(null, "", location.pathname);
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+  ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[c]);
+
+async function api(path, body) {
+  const init = { headers: { "X-Remuda-Token": token } };
+  if (body !== undefined) {
+    init.method = "POST";
+    init.headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(body);
+  }
+  const r = await fetch(path, init);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data;
+}
+
+let toastTimer;
+function toast(message, error = false) {
+  const t = $("toast");
+  t.textContent = message;
+  t.className = "show" + (error ? " error" : "");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (t.className = error ? "error" : ""), error ? 7000 : 3500);
+}
+
+async function act(path, body) {
+  try {
+    const r = await api(path, body);
+    if (r.message) toast(r.message);
+  } catch (e) {
+    toast(e.message, true);
+  }
+  await load();
+}
+
+function when(ms) {
+  if (ms == null) return "";
+  const d = ms - Date.now(), a = Math.abs(d) / 1000;
+  const span = a < 60 ? `${Math.floor(a)}s` : a < 3600 ? `${Math.floor(a / 60)}m`
+    : a < 86400 ? `${Math.floor(a / 3600)}h` : `${Math.floor(a / 86400)}d`;
+  return d < 0 ? `expired ${span} ago` : `in ${span}`;
+}
+
+function liveNote(p, live) {
+  if (!live) return "";
+  if (live.state === "signed_out") return `<div class="note">${esc(p.name)} is signed out.</div>`;
+  if (live.state === "stored" && !live.confirmed)
+    return `<div class="note">Looks signed into ${esc(live.name)}, but that could not be confirmed.</div>`;
+  if (live.state === "unstored")
+    return `<div class="note">Signed into ${esc(live.email || "an account")}, which is not stored.
+      <span class="inline" style="margin-top:8px">
+        <input data-import-name="${esc(p.id)}" placeholder="name to store it as">
+        <button data-import="${esc(p.id)}">Import</button></span></div>`;
+  return "";
+}
+
+function row(c) {
+  const spec = `${c.provider}/${c.name}`;
+  const exp = c.expiresAt == null ? "" : c.expiresAt < Date.now() ? "expired"
+    : c.expiresAt - Date.now() < 3600e3 ? "soon" : "";
+  return `<div class="row" data-spec="${esc(spec)}">
+    <div class="who">
+      <span class="name">${esc(c.name)}</span>${c.label ? ` <span class="label">${esc(c.label)}</span>` : ""}
+      <span class="chip">${esc(c.plan)}</span>${c.active ? '<span class="chip active">active</span>' : ""}
+      <div class="meta">${esc(c.email)} · <span class="${exp}">token ${esc(when(c.expiresAt))}</span>${
+        c.refreshTokenExpiresAt ? ` · refresh ${esc(when(c.refreshTokenExpiresAt))}` : ""}</div>
+    </div>
+    <div class="actions">
+      <button class="primary" data-act="use" ${c.active ? "disabled" : ""}>Use</button>
+      <button data-act="refresh" ${c.active ? 'disabled title="The CLI refreshes the active login itself"' : ""}>Refresh</button>
+      <button data-act="label">Label</button>
+      <button data-act="rename">Rename</button>
+      <button class="danger" data-act="remove" ${c.active ? 'disabled title="Switch away first"' : ""}>Remove</button>
+    </div>
+  </div>`;
+}
+
+async function load() {
+  let state;
+  try {
+    state = await api("/api/state");
+  } catch (e) {
+    $("providers").innerHTML = `<section><div class="empty">${esc(e.message)}. Open the link remuda printed when it started.</div></section>`;
+    return;
+  }
+  const select = $("add-provider");
+  if (!select.options.length)
+    select.innerHTML = state.providers.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
+  $("providers").innerHTML = state.providers.map((p) => {
+    const creds = state.credentials.filter((c) => c.provider === p.id);
+    const live = state.live.find((l) => l.provider === p.id);
+    return `<section><h2>${esc(p.name)}</h2>
+      ${creds.length ? creds.map(row).join("") : '<div class="empty">No stored logins.</div>'}
+      ${liveNote(p, live)}</section>`;
+  }).join("");
+}
+
+$("providers").addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("button");
+  if (!btn) return;
+  if (btn.dataset.import) {
+    const input = document.querySelector(`[data-import-name="${btn.dataset.import}"]`);
+    if (!input.value.trim()) return input.focus();
+    return act("/api/import", { provider: btn.dataset.import, name: input.value.trim() });
+  }
+  const r = btn.closest(".row");
+  const spec = r?.dataset.spec;
+  if (!spec) return;
+  switch (btn.dataset.act) {
+    case "use": return act("/api/use", { name: spec });
+    case "refresh": return act("/api/refresh", { name: spec, force: true });
+    case "remove":
+      if (btn.dataset.armed) return act("/api/remove", { name: spec });
+      btn.dataset.armed = "1";
+      btn.textContent = "Remove for good?";
+      return setTimeout(() => { delete btn.dataset.armed; btn.textContent = "Remove"; }, 4000);
+    case "label":
+    case "rename": {
+      r.querySelector(".inline")?.remove();
+      const rename = btn.dataset.act === "rename";
+      const box = document.createElement("div");
+      box.className = "inline";
+      box.innerHTML = `<input placeholder="${rename ? "new name" : "label (empty clears it)"}">
+        <button class="primary">${rename ? "Rename" : "Save"}</button><button>Cancel</button>`;
+      r.append(box);
+      const [input, ok, cancel] = box.children;
+      input.focus();
+      const submit = () => rename
+        ? act("/api/rename", { name: spec, to: input.value.trim() })
+        : act("/api/label", { name: spec, text: input.value });
+      ok.onclick = submit;
+      input.onkeydown = (e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") box.remove(); };
+      cancel.onclick = () => box.remove();
+    }
+  }
+});
+
+$("refresh-all").onclick = () => act("/api/refresh", {});
+
+let openLogin = null;
+$("add").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const provider = $("add-provider").value, name = $("add-name").value.trim();
+  const box = $("signin");
+  if (openLogin) await api("/api/login/cancel", { id: openLogin }).catch(() => {});
+  let login;
+  try {
+    login = await api("/api/login", { provider, name });
+  } catch (e) {
+    return toast(e.message, true);
+  }
+  openLogin = login.id;
+  window.open(login.url, "_blank", "noopener");
+  const tail = login.needsCode
+    ? `<div class="inline"><input id="code" placeholder="paste the code the page shows"><button class="primary" id="finish">Finish</button><button id="cancel">Cancel</button></div>`
+    : `<div class="meta">Waiting for the browser to finish signing in... <button id="cancel">Cancel</button></div>`;
+  box.innerHTML = `<div class="signin"><div class="meta">Sign in with the account to store as <b>${esc(name)}</b>.
+    A private window keeps the account you are signed into out of the way.
+    If no tab opened: <a href="${esc(login.url)}" target="_blank" rel="noopener">open the sign-in page</a>.</div>${tail}</div>`;
+  const done = async (code) => {
+    try {
+      const r = await api("/api/login/finish", { id: login.id, code });
+      toast(r.message);
+      box.innerHTML = "";
+      $("add-name").value = "";
+    } catch (e) {
+      if (openLogin === login.id) toast(e.message, true);
+    }
+    if (openLogin === login.id) openLogin = null;
+    load();
+  };
+  $("cancel").onclick = async () => {
+    openLogin = null;
+    box.innerHTML = "";
+    await api("/api/login/cancel", { id: login.id }).catch(() => {});
+  };
+  if (login.needsCode) {
+    $("finish").onclick = () => done($("code").value);
+    $("code").focus();
+  } else {
+    done(undefined);
+  }
+});
+
+load();
+setInterval(load, 60000);
+</script>
+</body>
+</html>

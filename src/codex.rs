@@ -1,6 +1,8 @@
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
@@ -258,6 +260,7 @@ impl Provider for Codex {
         .to_string();
         Ok(Box::new(CodexPending {
             api: self.api.clone(),
+            cancelled: Arc::new(AtomicBool::new(false)),
             listener,
             redirect_uri,
             verifier,
@@ -269,6 +272,7 @@ impl Provider for Codex {
 
 struct CodexPending {
     api: Api,
+    cancelled: Arc<AtomicBool>,
     listener: TcpListener,
     redirect_uri: String,
     verifier: String,
@@ -304,6 +308,9 @@ impl CodexPending {
             let stream = match self.listener.accept() {
                 Ok((stream, _)) => stream,
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    if self.cancelled.load(Ordering::Relaxed) {
+                        bail!("the sign-in was cancelled");
+                    }
                     if Instant::now() > deadline {
                         bail!("gave up waiting for the browser to finish signing in");
                     }
@@ -389,6 +396,11 @@ impl PendingLogin for CodexPending {
 
     fn needs_code(&self) -> bool {
         false
+    }
+
+    fn canceller(&self) -> Box<dyn Fn() + Send + Sync> {
+        let cancelled = Arc::clone(&self.cancelled);
+        Box::new(move || cancelled.store(true, Ordering::Relaxed))
     }
 
     fn finish(self: Box<Self>, _code: Option<&str>) -> Result<Login> {
