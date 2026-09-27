@@ -107,8 +107,34 @@ fn main() -> Result<()> {
     let store = Store::open(&paths::store_root());
     let live = Live::from_env();
     let api = Api::claude()?;
-    let _lock = fsx::lock(store.dir())?;
     let out = &mut io::stdout();
+    if let Cmd::Login {
+        name,
+        force,
+        no_browser,
+    } = &cli.command
+    {
+        let open = |url: &str| {
+            if !no_browser {
+                let _ = Command::new("xdg-open")
+                    .arg(url)
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn();
+            }
+        };
+        let mut read_code = || {
+            let mut line = String::new();
+            io::stdin().lock().read_line(&mut line)?;
+            Ok(line)
+        };
+        let prompt = commands::Prompt {
+            open: &open,
+            read_code: &mut read_code,
+        };
+        return commands::login(&store, &api, name, *force, prompt, out);
+    }
+    let _lock = store.lock()?;
     if let Cmd::Use { name, discard } = &cli.command {
         return ops::switch(&store, &live, &api, name, *discard, &|entry| {
             commands::refresh_entry(&api, entry)
@@ -118,31 +144,6 @@ fn main() -> Result<()> {
     match cli.command {
         Cmd::List { json } => commands::list(&store, &state, json, out),
         Cmd::Import { name, force } => commands::import(&store, &live, &state, &name, force, out),
-        Cmd::Login {
-            name,
-            force,
-            no_browser,
-        } => {
-            let open = |url: &str| {
-                if !no_browser {
-                    let _ = Command::new("xdg-open")
-                        .arg(url)
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null())
-                        .spawn();
-                }
-            };
-            let mut read_code = || {
-                let mut line = String::new();
-                io::stdin().lock().read_line(&mut line)?;
-                Ok(line)
-            };
-            let prompt = commands::Prompt {
-                open: &open,
-                read_code: &mut read_code,
-            };
-            commands::login(&store, &api, &name, force, prompt, out)
-        }
         Cmd::Refresh {
             name,
             force,
@@ -156,6 +157,6 @@ fn main() -> Result<()> {
             commands::refresh(&store, &api, &state, scope, out, &mut io::stderr())
         }
         Cmd::Remove { name } => commands::remove(&store, &state, &name, out),
-        Cmd::Use { .. } | Cmd::Update { .. } => unreachable!(),
+        Cmd::Use { .. } | Cmd::Login { .. } | Cmd::Update { .. } => unreachable!(),
     }
 }

@@ -106,6 +106,12 @@ impl Store {
         }
     }
 
+    /// Held for the length of a command, never across a wait on the user, or
+    /// the refresh timer stalls behind it.
+    pub fn lock(&self) -> Result<fs::File> {
+        crate::fsx::lock(&self.dir)
+    }
+
     pub fn dir(&self) -> &Path {
         &self.dir
     }

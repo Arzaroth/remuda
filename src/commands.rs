@@ -178,6 +178,10 @@ pub fn login(
     let pasted = (prompt.read_code)()?;
     let result = claude::finish_login(api, &pkce, &pasted)?;
     let entry = Entry::new(name, result.oauth, result.oauth_account, now_ms())?;
+    let _lock = store.lock()?;
+    if !force && store.get(name)?.is_some() {
+        bail!("{name} was stored while this login was in progress");
+    }
     if let Some(other) = store
         .list()?
         .into_iter()
