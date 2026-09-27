@@ -317,3 +317,272 @@ pub fn bind(port: u16) -> Result<(tiny_http::Server, u16)> {
         .port();
     Ok((server, port))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::claude::{Api, Claude};
+    use crate::ops::testing::*;
+
+    const PORT: u16 = 7429;
+    const TOKEN: &str = "t0ken";
+
+    fn app(e: &Env, api_base: &str) -> App {
+        let providers: Vec<Box<dyn Provider>> =
+            vec![Box::new(Claude::at(e.tmp.path(), Api::local(api_base)))];
+        App::new(Store::open(e.store.root()), providers, TOKEN.into(), PORT)
+    }
+
+    fn call(app: &App, method: &str, path: &str, body: Value) -> (u16, Value) {
+        let body = body.to_string();
+        let resp = app.handle(&Request {
+            method,
+            path,
+            host: Some("127.0.0.1:7429"),
+            origin: Some("http://127.0.0.1:7429"),
+            token: Some(TOKEN),
+            body: &body,
+        });
+        (
+            resp.status,
+            serde_json::from_str(&resp.body).unwrap_or(Value::Null),
+        )
+    }
+
+    #[test]
+    fn only_a_local_request_carrying_the_token_is_served() {
+        let e = env(OFFLINE);
+        let app = app(&e, OFFLINE);
+        let status = |host: Option<&str>, origin: Option<&str>, token: Option<&str>, path: &str| {
+            app.handle(&Request {
+                method: "GET",
+                path,
+                host,
+                origin,
+                token,
+                body: "",
+            })
+            .status
+        };
+        let local = Some("localhost:7429");
+        assert_eq!(status(local, None, None, "/"), 200);
+        assert_eq!(status(local, None, None, "/api/state"), 401);
+        assert_eq!(status(local, None, Some("nope"), "/api/state"), 401);
+        assert_eq!(status(local, None, Some(TOKEN), "/api/state"), 200);
+        assert_eq!(
+            status(
+                Some("rebound.example:7429"),
+                None,
+                Some(TOKEN),
+                "/api/state"
+            ),
+            403
+        );
+        assert_eq!(
+            status(Some("127.0.0.1:1"), None, Some(TOKEN), "/api/state"),
+            403
+        );
+        assert_eq!(status(None, None, Some(TOKEN), "/api/state"), 403);
+        assert_eq!(
+            status(
+                local,
+                Some("https://evil.example"),
+                Some(TOKEN),
+                "/api/state"
+            ),
+            403
+        );
+        assert_eq!(status(local, None, Some(TOKEN), "/elsewhere"), 404);
+    }
+
+    #[test]
+    fn the_page_is_self_contained() {
+        let e = env(OFFLINE);
+        let resp = app(&e, OFFLINE).handle(&Request {
+            method: "GET",
+            path: "/",
+            host: Some("127.0.0.1:7429"),
+            origin: None,
+            token: None,
+            body: "",
+        });
+        assert!(resp.content_type.starts_with("text/html"));
+        assert!(resp.body.contains("X-Remuda-Token"));
+        assert!(!resp.body.contains("<script src"));
+        assert!(!resp.body.contains("<link"));
+    }
+
+    #[test]
+    fn credentials_are_listed_switched_labelled_renamed_and_removed() {
+        let e = env(OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        e.stored("perso", "u-perso", HOUR);
+        let work = e.store.get("claude", "work").unwrap().unwrap();
+        e.sign_in(work.creds, account("u-work"));
+        let app = app(&e, OFFLINE);
+
+        let (status, state) = call(&app, "GET", "/api/state", Value::Null);
+        assert_eq!(status, 200);
+        assert_eq!(state["providers"][0]["id"], "claude");
+        assert_eq!(state["credentials"].as_array().unwrap().len(), 2);
+
+        let (_, r) = call(&app, "POST", "/api/use", json!({"name": "perso"}));
+        assert_eq!(
+            r["message"],
+            "switched Claude Code to perso (u-perso@example.com)"
+        );
+        assert_eq!(e.live_refresh_token().as_deref(), Some("r-perso"));
+
+        let (_, r) = call(
+            &app,
+            "POST",
+            "/api/label",
+            json!({"name": "work", "text": "Job"}),
+        );
+        assert_eq!(r["message"], "labelled claude/work \"Job\"");
+        let (_, r) = call(
+            &app,
+            "POST",
+            "/api/rename",
+            json!({"name": "work", "to": "job"}),
+        );
+        assert_eq!(r["message"], "renamed claude/work to claude/job");
+        let (status, r) = call(&app, "POST", "/api/remove", json!({"name": "perso"}));
+        assert_eq!(
+            (status, r["error"].as_str().unwrap().contains("is active")),
+            (400, true)
+        );
+        let (_, r) = call(&app, "POST", "/api/remove", json!({"name": "job"}));
+        assert_eq!(r["message"], "removed claude/job");
+
+        let (_, r) = call(&app, "POST", "/api/refresh", json!({}));
+        assert_eq!(r["message"], "nothing was due");
+        let (status, r) = call(&app, "POST", "/api/use", json!({}));
+        assert_eq!(
+            (status, r["error"].as_str()),
+            (400, Some("name is required"))
+        );
+        let (status, _) = call(&app, "POST", "/api/nothing", json!({}));
+        assert_eq!(status, 400);
+    }
+
+    #[test]
+    fn a_live_login_nobody_stored_can_be_imported() {
+        let e = env(OFFLINE);
+        e.sign_in(oauth("a1", "r1", HOUR), account("u-new"));
+        let app = app(&e, OFFLINE);
+        let (_, state) = call(&app, "GET", "/api/state", Value::Null);
+        assert_eq!(state["live"][0]["state"], "unstored");
+        assert_eq!(state["live"][0]["email"], "u-new@example.com");
+        let (_, r) = call(&app, "POST", "/api/import", json!({"name": "new"}));
+        assert_eq!(r["message"], "stored claude/new (u-new@example.com)");
+    }
+
+    #[test]
+    fn a_sign_in_runs_in_two_calls() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/v1/oauth/token")
+            .with_body(
+                json!({"access_token": "a-login", "refresh_token": "r-login", "expires_in": 28800})
+                    .to_string(),
+            )
+            .create();
+        server
+            .mock("GET", "/api/oauth/profile")
+            .with_body(profile_body("u-new"))
+            .create();
+        let e = env(&server.url());
+        let app = app(&e, &server.url());
+
+        let (status, begun) = call(&app, "POST", "/api/login", json!({"name": "new"}));
+        assert_eq!(status, 200);
+        assert_eq!(begun["needsCode"], true);
+        let url = reqwest::Url::parse(begun["url"].as_str().unwrap()).unwrap();
+        let state = url.query_pairs().find(|(k, _)| k == "state").unwrap().1;
+        let id = begun["id"].as_str().unwrap();
+
+        let (_, r) = call(
+            &app,
+            "POST",
+            "/api/login/finish",
+            json!({"id": id, "code": format!("c#{state}")}),
+        );
+        assert_eq!(r["message"], "stored claude/new (u-new@example.com)");
+        let (status, r) = call(&app, "POST", "/api/login/finish", json!({"id": id}));
+        assert_eq!(status, 400);
+        assert!(r["error"].as_str().unwrap().contains("no longer open"));
+
+        let (status, r) = call(&app, "POST", "/api/login", json!({"name": "new"}));
+        assert_eq!(status, 400);
+        assert!(r["error"].as_str().unwrap().contains("already exists"));
+    }
+
+    #[test]
+    fn a_cancelled_sign_in_stops_waiting() {
+        use crate::codex::{Api as CodexApi, Codex};
+        let e = env(OFFLINE);
+        let providers: Vec<Box<dyn Provider>> = vec![Box::new(Codex::at(
+            e.tmp.path(),
+            CodexApi::local(OFFLINE),
+            0,
+        ))];
+        let app = Arc::new(App::new(
+            Store::open(e.store.root()),
+            providers,
+            TOKEN.into(),
+            PORT,
+        ));
+        let (_, begun) = call(
+            &app,
+            "POST",
+            "/api/login",
+            json!({"provider": "codex", "name": "x"}),
+        );
+        let id = begun["id"].as_str().unwrap().to_owned();
+        let waiting = {
+            let app = Arc::clone(&app);
+            let id = id.clone();
+            std::thread::spawn(move || call(&app, "POST", "/api/login/finish", json!({"id": id})))
+        };
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        call(&app, "POST", "/api/login/cancel", json!({"id": id}));
+        let (status, r) = waiting.join().unwrap();
+        assert_eq!(status, 400);
+        assert_eq!(r["error"], "the sign-in was cancelled");
+    }
+
+    #[test]
+    fn the_listener_answers_over_a_real_socket() {
+        let e = env(OFFLINE);
+        let (server, port) = bind(0).unwrap();
+        let providers: Vec<Box<dyn Provider>> =
+            vec![Box::new(Claude::at(e.tmp.path(), Api::local(OFFLINE)))];
+        let app = Arc::new(App::new(
+            Store::open(e.store.root()),
+            providers,
+            TOKEN.into(),
+            port,
+        ));
+        std::thread::spawn(move || serve(app, server));
+
+        let get = |path: &str, token: &str| {
+            let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+            write!(
+                s,
+                "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nX-Remuda-Token: {token}\r\nConnection: close\r\n\r\n"
+            )
+            .unwrap();
+            let mut answer = String::new();
+            s.read_to_string(&mut answer).unwrap();
+            answer
+        };
+        let page = get("/", "");
+        assert!(page.starts_with("HTTP/1.1 200"), "{page}");
+        assert!(page.contains("Cache-Control: no-store"), "{page}");
+        assert!(get("/api/state", "wrong").starts_with("HTTP/1.1 401"));
+        let state = get("/api/state", TOKEN);
+        assert!(state.starts_with("HTTP/1.1 200"), "{state}");
+        assert!(state.contains("\"providers\""), "{state}");
+    }
+}
