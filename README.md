@@ -36,6 +36,10 @@ completions for bash, zsh and fish when it finds them. Pass `--no-timer`,
 (`... | bash -s -- --no-timer`). Afterwards, `remuda update` replaces the binary
 with the latest release.
 
+If your shell sets `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `REMUDA_STORE`, the
+installer copies them to `~/.config/environment.d/60-remuda.conf` so the timer
+looks where you do. Re-run it (or edit that file) if you change them later.
+
 ## Commands
 
 A credential is addressed by its name when only one CLI has that name, and as
@@ -45,14 +49,14 @@ A credential is addressed by its name when only one CLI has that name, and as
 | Command | Does |
 | --- | --- |
 | `remuda import <name> [-p codex]` | Store the login the CLI is signed into right now |
-| `remuda login <name> [-p codex]` | Sign another account in through the browser and store it, without touching the CLI |
+| `remuda login <name> [-p codex] [--no-browser]` | Sign another account in through the browser and store it, without touching the CLI |
 | `remuda use <name>` | Make a stored credential the one its CLI uses |
 | `remuda ls [--json]` | List stored credentials, marking the active ones |
 | `remuda refresh [name] [--force] [--within MIN]` | Refresh the inactive credentials expiring within `MIN` minutes (default 60) |
 | `remuda label <name> [text]` | Set the label shown beside a credential, or clear it |
 | `remuda rename <name> <new>` | Rename a stored credential |
 | `remuda rm <name>` | Delete a stored credential |
-| `remuda serve [--port N]` | Do all of the above from a page in the browser |
+| `remuda serve [--port N] [--no-browser]` | Do all of the above from a page in the browser |
 | `remuda completions <shell>` | Print a completion script |
 | `remuda update [--check]` | Replace the binary with the latest release |
 
@@ -82,7 +86,9 @@ the new login.
 
 For Codex, the whole of `~/.codex/auth.json` belongs to the login, so a switch
 replaces it. It honours `CODEX_HOME`. Only ChatGPT sign-ins are stored: an API
-key or personal access token has no account to switch between.
+key or personal access token has no account to switch between, and `use` asks
+for `--discard` before replacing one. A Codex account is a seat: two people in
+one ChatGPT Team workspace are two accounts.
 
 Each CLI rotates the refresh token of the account it is signed into, so before
 every command remuda copies the live login back into the credential it belongs

@@ -2,10 +2,13 @@
 
 ## `remuda import <name> [-p codex] [--force]`
 
-Stores the login the CLI is signed into now. Refuses when that login is already
-stored (under any name), when the name is taken (unless `--force`), when the
-account is already stored under another name (even with `--force`), and when
-the CLI is signed out or its files do not say whose login it is.
+Stores the login the CLI is signed into now, under the account the provider
+says the tokens belong to (`Provider::identify`), keeping the CLI's own account
+block when it agrees. Offline, it trusts the CLI's files only while the store
+holds nothing for that CLI, and otherwise refuses. Also refuses when that login
+is already stored (under any name), when the name is taken (unless `--force`),
+when the account is already stored under another name (even with `--force`),
+and when the CLI is signed out.
 
 ## `remuda ls [--json]`
 
@@ -17,9 +20,11 @@ at all it prints the store path.
 
 `--json` prints `{store, credentials: [...], live: [...]}`. Each credential has
 `provider`, `name`, `label`, `email`, `accountId`, `plan`, `active`,
-`expiresAt`, `refreshTokenExpiresAt`; each live entry has `provider`, `state`
-(`signed_out`, `stored`, `unstored`) and `name`/`confirmed` or `email`. The page
-reads the same JSON.
+`expiresAt`, `refreshTokenExpiresAt`; each live entry has `provider` and a
+`state`: `signed_out`, `stored` (with `name` and `confirmed`), `unstored` (with
+`email`), `foreign` (with `what`, e.g. "an API key") or `unreadable` (with
+`error`). A CLI whose files cannot be read is reported and the others are still
+listed. The page reads the same JSON.
 
 ## `remuda rm <name>`
 

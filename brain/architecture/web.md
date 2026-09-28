@@ -1,10 +1,15 @@
 # The local page
 
-`remuda serve [--port 7429]` binds `127.0.0.1` only (tiny_http), prints
-`http://127.0.0.1:<port>/#<token>`, and opens it. The token is 32 random bytes,
-base64url. The page reads it from the fragment (fragments never reach a server
-log or a `Referer`), keeps it in `sessionStorage`, strips it from the address
-bar, and sends it as `X-Remuda-Token`.
+`remuda serve [--port 7429] [--no-browser]` binds `127.0.0.1` only (tiny_http),
+prints `http://127.0.0.1:<port>/#<token>`, and opens it. The token is 32 random
+bytes, base64url. The browser is not given the URL as an argument (every local
+user can read a command line): remuda writes a redirect page to
+`$XDG_RUNTIME_DIR/remuda/open.html` (0600, in a 0700 directory) and opens
+that. The same goes for the sign-in URLs `login` opens.
+
+The page reads the token from the fragment (fragments never reach a server log
+or a `Referer`), keeps it in `sessionStorage`, strips it from the address bar,
+and sends it as `X-Remuda-Token`.
 
 ## Guards (`App::handle`)
 
@@ -33,8 +38,14 @@ are capped at 64 KiB. Each request runs on its own thread, because a Codex
 | `POST /api/login/cancel` `{id}` | Abandon it; a waiting Codex callback stops |
 
 Pending sign-ins live in memory, one per provider; starting another cancels the
-previous one. Every mutating route takes the store lock except `login` and
-`login/finish`, which lock only to save.
+previous one. `App::api` takes the store lock once for every route except the
+`/api/login` ones, which lock only to save (`commands::save_login`). The name
+check before a sign-in and the "stored ..." message are `commands::begin_login`
+and `commands::stored_message`, shared with the CLI.
+
+`/api/state` reports each CLI's live login as `signed_out`, `stored` (with
+`confirmed`), `unstored`, `foreign` (an API key; the page says only
+`remuda use --discard` replaces it) or `unreadable` (with the error).
 
 The page is one self-contained file (`include_str!`), no external requests,
 light and dark. It reloads the state every minute unless an editor is open.

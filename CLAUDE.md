@@ -16,20 +16,26 @@ grepping the tree; the `brain` skill has the full routine.
 
 ## Credentials are other people's files
 
-remuda writes into Claude Code's and Codex's own credential files. Two rules
-follow, and both have tests:
+remuda writes into Claude Code's and Codex's own credential files. These rules
+follow, and each has tests:
 
 - A switch changes the login's keys and nothing else (`claudeAiOauth`,
   `oauthAccount`; Codex's `auth.json` whole). Never rewrite a file from a
   reconstructed object.
 - Never lose a refresh token: sync the live login back before anything reads
   the store, never refresh the active credential, never file tokens under a
-  credential whose account was not confirmed.
+  credential whose account was not confirmed (`Provider::identify`, never the
+  CLI's files alone), never drop tokens a refresh already rotated.
+- Never put a token, state or verifier on a command line; open the browser
+  through a private file.
 
 Tests never touch the developer's real files or the network: providers are
-built with `::at(dir, Api::local(url))`, and there is deliberately no env var
-that redirects an OAuth endpoint. Manual smoke tests use `REMUDA_STORE` pointed
-at a scratch directory.
+built with `::at(dir, Api::local(url))`, and `tests/cli.rs` points the binary
+at a mock through `REMUDA_TEST_CLAUDE_API` / `REMUDA_TEST_OPENAI_API`, which
+exist in debug builds only. A release build has no way to redirect an OAuth
+endpoint; keep it that way. The suite must pass under `unshare -rn` with an
+empty `HOME`. Manual smoke tests use `REMUDA_STORE` pointed at a scratch
+directory.
 
 ## The store is a contract
 

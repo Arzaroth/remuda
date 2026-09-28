@@ -5,20 +5,29 @@ network or touches the developer's own logins.
 
 - **Providers take their endpoints and paths as values.** `claude::Api::local`
   and `codex::Api::local` point at a mockito server, `Claude::at` and
-  `Codex::at` at a temp directory. Production constructors are the only ones
-  that name the real endpoints; there is deliberately no env var that could
-  redirect a token request.
-- **Offline means `http://127.0.0.1:9`** (`ops::testing::OFFLINE`), which
-  refuses connections, for the paths that must behave when confirmation fails.
+  `Codex::at` at a temp directory.
+- **Only debug builds can be redirected.** `Api::claude()` and `Api::openai()`
+  read `REMUDA_TEST_CLAUDE_API` / `REMUDA_TEST_OPENAI_API` under
+  `#[cfg(debug_assertions)]`, which is how `tests/cli.rs` puts a mock in front
+  of the built binary. A release build has no way to send a token elsewhere.
+- **Offline is a released ephemeral port** (`ops::testing::OFFLINE`): bound once
+  to reserve a number, then dropped, so connecting is refused at once. It
+  serves the paths that must behave when a confirmation fails.
 - **`ops::testing`** holds the shared fixtures: an `Env` with a temp store and a
   `Claude` pointed at it, `oauth(...)`, `account(...)`, `stored(...)`,
   `sign_in(...)`, and a profile body.
 - **Codex sign-in** is completed for real: the test binds the callback listener
   on an ephemeral port, drives it with a raw TCP request, and the exchange hits
   the mock. JWTs are fabricated unsigned.
-- **`tests/cli.rs`** runs the built binary with `env_clear()` and a temp `HOME`,
-  passing `LLVM_PROFILE_FILE` through so coverage counts it. Its scenarios stay
-  offline by matching live logins to stored ones by token.
+- **`tests/cli.rs`** runs the built binary with `env_clear()`, a temp `HOME`
+  and both providers pointed at a mockito server that knows the profile behind
+  each token `sign_in` writes and errors on anything else. `LLVM_PROFILE_FILE`
+  passes through so coverage counts the binary.
+- **PKCE is checked the way the real endpoints check it**: the mocks recompute
+  the challenge from the verifier the exchange sent and compare it with the one
+  in the authorize URL, and match the redirect URI.
+- The whole suite passes under `unshare -rn` with an empty `HOME`, which is the
+  check that nothing reaches the network or a real login.
 - **`serve`** is tested through `App::handle` with synthetic requests, plus one
   real socket round trip.
 

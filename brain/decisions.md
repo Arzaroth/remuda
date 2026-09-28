@@ -16,17 +16,39 @@ the store then holds a refresh token the server has already spent, and
 switching back to it would fail. So every command first copies the live tokens
 into the credential they belong to ([ops.rs](../src/ops.rs) `sync_live`).
 
-## Match by token, then by confirmed account id
+## Match by token, then by who the tokens say they are
 
 Matching the live login to a credential tries the refresh and access tokens
-first. When they have rotated, it falls back to the account id, but for Claude
-the account id lives in `.claude.json` while the tokens live in
-`.credentials.json`, and the two can disagree (a login done by another tool, a
-half-written switch). Filing new tokens under the wrong name would destroy a
-credential, so the fallback asks the profile endpoint whose tokens they are
-before copying anything. Offline, it copies nothing and `use` refuses to switch
-away (`--discard` overrides). Codex keeps the account id inside `auth.json`
-with its tokens, so its confirmation needs no network.
+first. When they have rotated, it asks `Provider::identify` whose tokens they
+are and files them under that account's credential. It does not trust the
+account the CLI's files name: for Claude that is `.claude.json`, a different
+file from the tokens, and it lags them whenever another session or tool writes
+one and not the other. Filing tokens under the wrong name destroys a
+credential; leaving them unfiled, as an earlier version did, left the rightful
+one holding a spent token. Offline, nothing is copied and `use` refuses to
+switch away (`--discard` overrides). `import` asks the same question before
+storing, and trusts the files offline only while nothing is stored to collide
+with.
+
+## A Codex account is a seat, not a workspace
+
+`auth.json`'s `tokens.account_id` is the ChatGPT workspace, which every seat of
+a Team plan shares, so keying on it made two people one account. The identity
+is the access token's `chatgpt_account_user_id`. It is read out of the token
+that authenticates, so no file can disagree with it and no network is needed.
+
+## An older copy never overwrites a newer one
+
+Tokens only move forward, and the newer copy expires later. If the live login
+expires before the stored copy of the same account (a store refreshed by a
+timer that could not see the live login), copying it back would replace a
+working refresh token with a spent one, so the stored copy is kept.
+
+## Tokens rotated for the wrong account are kept
+
+A refresh whose answer names another account than the credential's cannot be
+saved there, but the server has already spent the old refresh token, so the
+new tokens are the only copy. They go to a hidden `.set-aside-...` file.
 
 ## Never refresh the active credential
 
@@ -61,6 +83,13 @@ Usage meters per credential belong to TokenGauge, whose ADR 0003 defines the
 store as a contract. remuda owns every write, TokenGauge only reads, so there
 is exactly one process that refreshes a stored token.
 
+## No secret on a command line
+
+Every local user can read another's command lines in `/proc`, and a browser
+started by `xdg-open url` keeps that URL in its arguments for its whole
+session. The page's URL carries its token and a sign-in URL carries its state,
+so the browser is handed a 0600 redirect file under `$XDG_RUNTIME_DIR` instead.
+
 ## The page is guarded by a token, Host and Origin
 
 A page on any site can make the browser send requests to `127.0.0.1`, and DNS
@@ -74,6 +103,15 @@ Users do not have cargo, so releases ship prebuilt archives, `install.sh`
 fetches them, and `remuda update` uses selvedge, the updater TokenGauge and
 TailGauge share, pinned by tag. remuda has no desktop frontends, so selvedge
 replaces the binary alone.
+
+## Only debug builds take a test endpoint
+
+The rule is that nothing can redirect a token request, because a request
+carries a refresh token. The end-to-end tests still need the built binary to
+talk to a mock, so `Api::claude()` and `Api::openai()` read
+`REMUDA_TEST_CLAUDE_API` / `REMUDA_TEST_OPENAI_API` under
+`#[cfg(debug_assertions)]` only. The released binary is built with `--release`
+and has no such variable.
 
 ## OAuth constants are copied from the installed CLIs
 

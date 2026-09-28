@@ -26,7 +26,14 @@ asset name, so a rename that would break `update` fails `cargo test`.
 `uname -m`, runs the binary once to prove it works on this libc, installs it
 into `~/.local/bin`, enables `remuda-refresh.timer` (every 30 minutes, runs
 `remuda refresh`), and writes completions for bash, zsh and fish when present.
-Flags: `--version`, `--no-timer`, `--no-completions`.
+Flags: `--version` (with or without its `v`), `--no-timer`, `--no-completions`.
+
+A systemd user service does not see what a shell exports, so the installer
+writes whichever of `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `REMUDA_STORE` are set
+to `~/.config/environment.d/60-remuda.conf` and into the running user manager.
+Without that, the timer would look at the default locations, miss the live
+login, and refresh the active credential. A variable changed after installing
+is not picked up (issue #5).
 
 ## Update
 
