@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use crate::fsx::{now_ms, read_json, write_json};
+use crate::fsx::{now_ms, read_json, update_json};
 use crate::oauth;
 use crate::paths;
 use crate::pkce;
@@ -409,17 +409,21 @@ impl Provider for Claude {
             .oauth_account
             .clone()
             .context("stored credential has no oauthAccount")?;
-        let mut config = read_json(&self.config_path)?.unwrap_or_else(|| json!({}));
-        let mut file = read_json(&self.creds_path)?.unwrap_or_else(|| json!({}));
-        for (value, path) in [(&config, &self.config_path), (&file, &self.creds_path)] {
-            if !value.is_object() {
+        for path in [&self.config_path, &self.creds_path] {
+            if read_json(path)?.is_some_and(|v| !v.is_object()) {
                 bail!("{} is not a JSON object", path.display());
             }
         }
-        config["oauthAccount"] = account;
-        file[OAUTH_KEY] = Value::Object(oauth);
-        write_json(&self.config_path, &config)?;
-        write_json(&self.creds_path, &file)
+        // Claude Code rewrites both files on its own and takes no lock, so each
+        // is edited in place rather than overwritten with an older read.
+        update_json(&self.config_path, |config| {
+            config["oauthAccount"] = account.clone();
+            Ok(())
+        })?;
+        update_json(&self.creds_path, |file| {
+            file[OAUTH_KEY] = Value::Object(oauth.clone());
+            Ok(())
+        })
     }
 
     fn refresh(&self, creds: &mut Value) -> Result<Option<String>> {

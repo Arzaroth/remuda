@@ -62,6 +62,52 @@ pub fn write_json(path: &Path, value: &Value) -> Result<()> {
 /// when it exists and 0600 otherwise. A symlinked target is written where the
 /// link points, so the link survives.
 pub fn write_private(path: &Path, body: &str) -> Result<()> {
+    write_private_if(path, body, || true).map(|_| ())
+}
+
+/// A file's identity and content stamp: a writer that replaced or rewrote it
+/// since the stamp was taken changes at least one of these.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Stamp {
+    inode: u64,
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+}
+
+pub fn stamp(path: &Path) -> Option<Stamp> {
+    use std::os::unix::fs::MetadataExt;
+    let m = fs::metadata(path).ok()?;
+    Some(Stamp {
+        inode: m.ino(),
+        len: m.len(),
+        modified: m.modified().ok(),
+    })
+}
+
+/// Rewrites a JSON object another program also writes, and takes no lock on:
+/// read, edit, and rename into place only if the file is still the one that
+/// was read, starting over otherwise.
+pub fn update_json(path: &Path, edit: impl Fn(&mut Value) -> Result<()>) -> Result<()> {
+    for _ in 0..10 {
+        let before = stamp(path);
+        let mut value = read_json(path)?.unwrap_or_else(|| serde_json::json!({}));
+        if !value.is_object() {
+            anyhow::bail!("{} is not a JSON object", path.display());
+        }
+        edit(&mut value)?;
+        let mut body = serde_json::to_string_pretty(&value)?;
+        body.push('\n');
+        if write_private_if(path, &body, || stamp(path) == before)? {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    anyhow::bail!("{} kept changing while remuda wrote it", path.display())
+}
+
+/// Returns false, writing nothing, when `still` says no just before the
+/// rename.
+fn write_private_if(path: &Path, body: &str, still: impl Fn() -> bool) -> Result<bool> {
     let resolved;
     let path = match fs::symlink_metadata(path) {
         Ok(m) if m.file_type().is_symlink() => {
@@ -90,9 +136,12 @@ pub fn write_private(path: &Path, body: &str) -> Result<()> {
         file.set_permissions(fs::Permissions::from_mode(mode))?;
         file.write_all(body.as_bytes())?;
         file.sync_all()?;
-        fs::rename(&tmp, path)
+        if !still() {
+            return Ok(false);
+        }
+        fs::rename(&tmp, path).map(|()| true)
     })();
-    if result.is_err() {
+    if !matches!(result, Ok(true)) {
         let _ = fs::remove_file(&tmp);
     }
     result.with_context(|| format!("failed to write {}", path.display()))
@@ -132,6 +181,33 @@ mod tests {
                 .is_symlink()
         );
         assert_eq!(read_json(&real).unwrap().unwrap()["v"], 2);
+    }
+
+    #[test]
+    fn an_update_never_reverts_what_another_writer_just_saved() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.json");
+        write_json(&path, &serde_json::json!({"numStartups": 1})).unwrap();
+        let runs = std::cell::Cell::new(0);
+
+        update_json(&path, |v| {
+            runs.set(runs.get() + 1);
+            if runs.get() == 1 {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                fs::write(&path, r#"{"numStartups": 2, "projects": {}}"#).unwrap();
+            }
+            v["oauthAccount"] = serde_json::json!({"accountUuid": "u"});
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(runs.get(), 2);
+        let v = read_json(&path).unwrap().unwrap();
+        assert_eq!(v["numStartups"], 2);
+        assert!(v.get("projects").is_some());
+        assert_eq!(v["oauthAccount"]["accountUuid"], "u");
+        let leftovers = fs::read_dir(tmp.path()).unwrap().count();
+        assert_eq!(leftovers, 1, "a temp file was left behind");
     }
 
     #[test]
