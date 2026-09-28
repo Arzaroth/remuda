@@ -1,11 +1,11 @@
 use std::path::PathBuf;
-use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 use crate::fsx::{now_ms, read_json, write_json};
+use crate::oauth;
 use crate::paths;
 use crate::pkce;
 use crate::provider::{Identity, Login, PendingLogin, Provider};
@@ -42,13 +42,8 @@ impl Api {
     }
 
     fn at(token_url: &str, profile_url: &str) -> Result<Self> {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(30))
-            .user_agent(concat!("remuda/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .context("failed to build the HTTP client")?;
         Ok(Api {
-            client,
+            client: oauth::client()?,
             token_url: token_url.to_owned(),
             profile_url: profile_url.to_owned(),
         })
@@ -80,24 +75,8 @@ struct TokenAccount {
 }
 
 fn post_token(api: &Api, body: &Value) -> Result<TokenResponse> {
-    let resp = api
-        .client
-        .post(&api.token_url)
-        .json(body)
-        .send()
-        .context("token request failed")?;
-    let status = resp.status();
-    let text = resp.text().unwrap_or_default();
-    if !status.is_success() {
-        if text.contains("invalid_grant") {
-            bail!("the refresh token was rejected (invalid_grant): log this credential in again");
-        }
-        bail!(
-            "token endpoint answered {status}: {}",
-            text.chars().take(200).collect::<String>()
-        );
-    }
-    serde_json::from_str(&text).context("malformed token response")
+    let answer = oauth::token_request(api.client.post(&api.token_url).json(body))?;
+    serde_json::from_value(answer).context("malformed token response")
 }
 
 fn apply_tokens(oauth: &mut Map<String, Value>, t: &TokenResponse) {

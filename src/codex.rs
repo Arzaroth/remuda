@@ -11,6 +11,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde_json::{Map, Value, json};
 
 use crate::fsx::{now_ms, read_json, rfc3339, write_json};
+use crate::oauth;
 use crate::paths;
 use crate::pkce;
 use crate::provider::{Identity, Login, PendingLogin, Provider};
@@ -38,13 +39,8 @@ impl Api {
     }
 
     fn at(issuer: &str) -> Result<Self> {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(30))
-            .user_agent(concat!("remuda/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .context("failed to build the HTTP client")?;
         Ok(Api {
-            client,
+            client: oauth::client()?,
             issuer: issuer.to_owned(),
         })
     }
@@ -184,34 +180,14 @@ impl Provider for Codex {
         let refresh_token = token(creds, "refresh_token")
             .context("credential has no refresh token")?
             .to_owned();
-        let resp = self
-            .api
-            .client
-            .post(self.api.token_url())
-            .json(&json!({
+        let answer =
+            oauth::token_request(self.api.client.post(self.api.token_url()).json(&json!({
                 "client_id": CLIENT_ID,
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
                 "scope": REFRESH_SCOPE,
-            }))
-            .send()
-            .context("token request failed")?;
-        let status = resp.status();
-        let body = resp.text().unwrap_or_default();
-        if !status.is_success() {
-            bail!(
-                "token endpoint answered {status}: {}",
-                body.chars().take(200).collect::<String>()
-            );
-        }
-        let answer: Value = serde_json::from_str(&body).context("malformed token response")?;
-        let fresh = |k: &str| {
-            answer
-                .get(k)
-                .and_then(Value::as_str)
-                .filter(|t| !t.is_empty())
-                .map(str::to_owned)
-        };
+            })))?;
+        let fresh = |k: &str| oauth::text(&answer, k);
         let access = fresh("access_token").context("the token endpoint sent no access token")?;
         let tokens = creds
             .get_mut("tokens")
@@ -338,37 +314,18 @@ impl CodexPending {
     }
 
     fn exchange(&self, code: &str) -> Result<Value> {
-        let resp = self
-            .api
-            .client
-            .post(self.api.token_url())
-            .form(&[
-                ("grant_type", "authorization_code"),
-                ("code", code),
-                ("redirect_uri", &self.redirect_uri),
-                ("client_id", CLIENT_ID),
-                ("code_verifier", &self.verifier),
-            ])
-            .send()
-            .context("token request failed")?;
-        let status = resp.status();
-        let body = resp.text().unwrap_or_default();
-        if !status.is_success() {
-            bail!(
-                "token endpoint answered {status}: {}",
-                body.chars().take(200).collect::<String>()
-            );
-        }
-        let answer: Value = serde_json::from_str(&body).context("malformed token response")?;
+        let answer = oauth::token_request(self.api.client.post(self.api.token_url()).form(&[
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("redirect_uri", &self.redirect_uri),
+            ("client_id", CLIENT_ID),
+            ("code_verifier", &self.verifier),
+        ]))?;
         let get = |k: &str| {
-            answer
-                .get(k)
-                .and_then(Value::as_str)
-                .filter(|t| !t.is_empty())
-                .with_context(|| format!("the token endpoint sent no {k}"))
+            oauth::text(&answer, k).with_context(|| format!("the token endpoint sent no {k}"))
         };
         let id_token = get("id_token")?;
-        let account_id = claims(id_token)
+        let account_id = claims(&id_token)
             .and_then(|c| {
                 auth_claim(&c, "chatgpt_account_id")?
                     .as_str()
@@ -605,7 +562,10 @@ mod tests {
         let mut creds = auth("acct-1", "a1", "r1", 1);
         let before = creds.clone();
         let err = c.refresh(&mut creds).unwrap_err();
-        assert!(err.to_string().contains("refresh_token_reused"), "{err}");
+        assert!(
+            err.to_string().contains("sign this credential in again"),
+            "{err}"
+        );
         assert_eq!(creds, before);
     }
 

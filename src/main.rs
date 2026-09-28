@@ -2,6 +2,7 @@ mod claude;
 mod codex;
 mod commands;
 mod fsx;
+mod oauth;
 mod ops;
 mod paths;
 mod pkce;
