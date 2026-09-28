@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::io::{Read, Write};
-use std::sync::{Arc, Mutex};
+use std::io::Write;
+use std::sync::Mutex;
 
 use anyhow::{Context, Result, anyhow, bail};
 use serde_json::{Value, json};
@@ -12,7 +12,6 @@ use crate::provider::{PendingLogin, Provider};
 use crate::store::Store;
 
 const PAGE: &str = include_str!("serve.html");
-const MAX_BODY: u64 = 64 * 1024;
 
 /// `login` is taken out while its `finish` runs; `cancel` stays behind so a
 /// cancel can still reach it.
@@ -87,16 +86,34 @@ impl App {
         host == format!("127.0.0.1:{}", self.port) || host == format!("localhost:{}", self.port)
     }
 
-    pub fn handle(&self, req: &Request) -> Response {
+    /// The refusal for a request that may not be served, decided from its head
+    /// alone so no body is read first.
+    pub fn check(&self, req: &Request) -> Option<Response> {
         if !req.host.is_some_and(|h| self.is_local(h)) {
-            return Response::json(403, json!({"error": "not a local request"}));
+            return Some(Response::json(403, json!({"error": "not a local request"})));
         }
         if let Some(origin) = req.origin
             && !origin
                 .strip_prefix("http://")
                 .is_some_and(|h| self.is_local(h))
         {
-            return Response::json(403, json!({"error": "cross-origin request refused"}));
+            return Some(Response::json(
+                403,
+                json!({"error": "cross-origin request refused"}),
+            ));
+        }
+        if req.path.starts_with("/api/") && req.token != Some(self.token.as_str()) {
+            return Some(Response::json(
+                401,
+                json!({"error": "missing or wrong token"}),
+            ));
+        }
+        None
+    }
+
+    pub fn handle(&self, req: &Request) -> Response {
+        if let Some(refused) = self.check(req) {
+            return refused;
         }
         match (req.method, req.path) {
             ("GET", "/") => Response {
@@ -104,15 +121,10 @@ impl App {
                 content_type: "text/html; charset=utf-8",
                 body: PAGE.to_owned(),
             },
-            (_, path) if path.starts_with("/api/") => {
-                if req.token != Some(self.token.as_str()) {
-                    return Response::json(401, json!({"error": "missing or wrong token"}));
-                }
-                match self.api(req.method, path, req.body) {
-                    Ok(v) => Response::json(200, v),
-                    Err(e) => Response::json(400, json!({"error": format!("{e:#}")})),
-                }
-            }
+            (_, path) if path.starts_with("/api/") => match self.api(req.method, path, req.body) {
+                Ok(v) => Response::json(200, v),
+                Err(e) => Response::json(400, json!({"error": format!("{e:#}")})),
+            },
             _ => Response::json(404, json!({"error": "not found"})),
         }
     }
@@ -260,68 +272,12 @@ impl App {
     }
 }
 
-fn header(rq: &tiny_http::Request, name: &'static str) -> Option<String> {
-    rq.headers()
-        .iter()
-        .find(|h| h.field.equiv(name))
-        .map(|h| h.value.as_str().to_owned())
-}
-
-/// One thread per request: a Codex sign-in holds its request open until the
-/// browser calls back.
-pub fn serve(app: Arc<App>, server: tiny_http::Server) {
-    for mut rq in server.incoming_requests() {
-        let app = Arc::clone(&app);
-        std::thread::spawn(move || {
-            let mut body = String::new();
-            let _ = rq.as_reader().take(MAX_BODY).read_to_string(&mut body);
-            let (host, origin, token) = (
-                header(&rq, "Host"),
-                header(&rq, "Origin"),
-                header(&rq, "X-Remuda-Token"),
-            );
-            let method = rq.method().as_str().to_owned();
-            let path = rq.url().split('?').next().unwrap_or_default().to_owned();
-            let resp = app.handle(&Request {
-                method: &method,
-                path: &path,
-                host: host.as_deref(),
-                origin: origin.as_deref(),
-                token: token.as_deref(),
-                body: &body,
-            });
-            let mut out = tiny_http::Response::from_string(resp.body).with_status_code(resp.status);
-            for (k, v) in [
-                ("Content-Type", resp.content_type),
-                ("Cache-Control", "no-store"),
-                ("X-Content-Type-Options", "nosniff"),
-                ("Referrer-Policy", "no-referrer"),
-            ] {
-                if let Ok(h) = tiny_http::Header::from_bytes(k, v) {
-                    out.add_header(h);
-                }
-            }
-            let _ = rq.respond(out);
-        });
-    }
-}
-
-pub fn bind(port: u16) -> Result<(tiny_http::Server, u16)> {
-    let server = tiny_http::Server::http(("127.0.0.1", port))
-        .map_err(|e| anyhow!("cannot listen on 127.0.0.1:{port} ({e}); pick another --port"))?;
-    let port = server
-        .server_addr()
-        .to_ip()
-        .context("not an IP listener")?
-        .port();
-    Ok((server, port))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::claude::{Api, Claude};
     use crate::ops::testing::*;
+    use std::sync::Arc;
 
     const PORT: u16 = 7429;
     const TOKEN: &str = "t0ken";
@@ -577,39 +533,5 @@ mod tests {
         let (status, r) = waiting.join().unwrap();
         assert_eq!(status, 400);
         assert_eq!(r["error"], "the sign-in was cancelled");
-    }
-
-    #[test]
-    fn the_listener_answers_over_a_real_socket() {
-        let e = env(&OFFLINE);
-        let (server, port) = bind(0).unwrap();
-        let providers: Vec<Box<dyn Provider>> =
-            vec![Box::new(Claude::at(e.tmp.path(), Api::local(&OFFLINE)))];
-        let app = Arc::new(App::new(
-            Store::open(e.store.root()),
-            providers,
-            TOKEN.into(),
-            port,
-        ));
-        std::thread::spawn(move || serve(app, server));
-
-        let get = |path: &str, token: &str| {
-            let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
-            write!(
-                s,
-                "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nX-Remuda-Token: {token}\r\nConnection: close\r\n\r\n"
-            )
-            .unwrap();
-            let mut answer = String::new();
-            s.read_to_string(&mut answer).unwrap();
-            answer
-        };
-        let page = get("/", "");
-        assert!(page.starts_with("HTTP/1.1 200"), "{page}");
-        assert!(page.contains("Cache-Control: no-store"), "{page}");
-        assert!(get("/api/state", "wrong").starts_with("HTTP/1.1 401"));
-        let state = get("/api/state", TOKEN);
-        assert!(state.starts_with("HTTP/1.1 200"), "{state}");
-        assert!(state.contains("\"providers\""), "{state}");
     }
 }

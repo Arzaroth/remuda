@@ -2,6 +2,7 @@ mod claude;
 mod codex;
 mod commands;
 mod fsx;
+mod http;
 mod oauth;
 mod ops;
 mod paths;
@@ -167,7 +168,7 @@ fn main() -> Result<()> {
     if let Cmd::Serve { port, no_browser } = cli.command {
         let providers: Vec<Box<dyn Provider>> =
             vec![Box::new(Claude::from_env()?), Box::new(Codex::from_env()?)];
-        let (server, port) = serve::bind(port)?;
+        let (listener, port) = http::bind(port)?;
         let token = pkce::random()?;
         let url = format!("http://127.0.0.1:{port}/#{token}");
         println!(
@@ -177,7 +178,7 @@ fn main() -> Result<()> {
             open_in_browser(&url);
         }
         let app = serve::App::new(store, providers, token, port);
-        serve::serve(std::sync::Arc::new(app), server);
+        http::serve(std::sync::Arc::new(app), listener, http::Limits::default());
         return Ok(());
     }
     let claude = Claude::from_env()?;
