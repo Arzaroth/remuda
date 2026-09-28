@@ -177,6 +177,29 @@ impl Provider for Codex {
         Ok(token(&file, "access_token").is_some().then_some(file))
     }
 
+    fn foreign_login(&self) -> Result<Option<String>> {
+        let Some(file) = read_json(&self.auth_path)? else {
+            return Ok(None);
+        };
+        if token(&file, "access_token").is_some() {
+            return Ok(None);
+        }
+        let set = |k: &str| {
+            file.get(k)
+                .and_then(Value::as_str)
+                .is_some_and(|v| !v.is_empty())
+        };
+        Ok(
+            if set("personal_access_token") || set("personalAccessToken") {
+                Some("a personal access token".to_owned())
+            } else if set("OPENAI_API_KEY") {
+                Some("an API key".to_owned())
+            } else {
+                None
+            },
+        )
+    }
+
     fn live_identity(&self, creds: &Value) -> Result<Option<Identity>> {
         Ok(identity_of(creds))
     }
@@ -522,12 +545,36 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let c = codex(tmp.path(), OFFLINE);
         assert!(c.live().unwrap().is_none());
+        assert!(c.foreign_login().unwrap().is_none());
+        let key = json!({"OPENAI_API_KEY": "sk-x", "tokens": null});
+        write_json(&tmp.path().join("auth.json"), &key).unwrap();
+        assert!(c.live().unwrap().is_none());
+        assert_eq!(c.foreign_login().unwrap().as_deref(), Some("an API key"));
+
+        let store = Store::open(&tmp.path().join("store"));
+        let creds = auth("acct-1", "a", "r", 1_900_000_000);
+        let identity = c.live_identity(&creds).unwrap().unwrap();
+        store
+            .save(&Entry::new("codex", "work", creds, identity, 1))
+            .unwrap();
+        let err = ops::switch(&store, &c, "work", false).unwrap_err();
+        assert!(err.to_string().contains("an API key"), "{err}");
+        assert_eq!(
+            read_json(&tmp.path().join("auth.json")).unwrap().unwrap(),
+            key
+        );
+        ops::switch(&store, &c, "work", true).unwrap();
+        assert!(c.live().unwrap().is_some());
+
         write_json(
             &tmp.path().join("auth.json"),
-            &json!({"OPENAI_API_KEY": "sk-x", "tokens": null}),
+            &json!({"personal_access_token": "pat-x"}),
         )
         .unwrap();
-        assert!(c.live().unwrap().is_none());
+        assert_eq!(
+            c.foreign_login().unwrap().as_deref(),
+            Some("a personal access token")
+        );
     }
 
     #[test]

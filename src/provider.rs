@@ -44,6 +44,11 @@ pub trait Provider: Send + Sync {
     fn plan(&self, creds: &Value) -> String;
     /// The login the CLI is signed into, or None when it is signed out.
     fn live(&self) -> Result<Option<Value>>;
+    /// A login the CLI holds that `live` does not return because it cannot be
+    /// stored, described for the user.
+    fn foreign_login(&self) -> Result<Option<String>> {
+        Ok(None)
+    }
     /// Who the CLI's own files say that login belongs to, without asking the
     /// provider.
     fn live_identity(&self, creds: &Value) -> Result<Option<Identity>>;

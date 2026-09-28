@@ -16,6 +16,10 @@ pub enum LiveState {
     Unstored {
         email: Option<String>,
     },
+    /// A login remuda cannot store, such as an API key.
+    Foreign {
+        what: String,
+    },
 }
 
 impl LiveState {
@@ -32,7 +36,10 @@ impl LiveState {
 /// copy dead unless it is brought forward before anything else reads it.
 pub fn sync_live(store: &Store, p: &dyn Provider) -> Result<LiveState> {
     let Some(creds) = p.live()? else {
-        return Ok(LiveState::SignedOut);
+        return Ok(match p.foreign_login()? {
+            Some(what) => LiveState::Foreign { what },
+            None => LiveState::SignedOut,
+        });
     };
     let identity = p.live_identity(&creds)?;
     let entries = store.list(p.id())?;
@@ -157,6 +164,12 @@ pub fn switch(store: &Store, p: &dyn Provider, name: &str, discard: bool) -> Res
         } if !discard => {
             bail!(
                 "the live {} login looks like {current} but could not be confirmed, so switching could lose its newest tokens; retry online or pass --discard",
+                p.name()
+            );
+        }
+        LiveState::Foreign { what } if !discard => {
+            bail!(
+                "{} is signed in with {what}, which remuda cannot store; pass --discard to replace it",
                 p.name()
             );
         }

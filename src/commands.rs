@@ -100,6 +100,7 @@ fn state_json(live: &Live) -> Value {
     let id = live.provider.id();
     match &live.state {
         LiveState::SignedOut => json!({"provider": id, "state": "signed_out"}),
+        LiveState::Foreign { what } => json!({"provider": id, "state": "foreign", "what": what}),
         LiveState::Stored { name, synced } => {
             json!({"provider": id, "state": "stored", "name": name, "confirmed": synced})
         }
@@ -184,6 +185,9 @@ pub fn list(store: &Store, lives: &[Live], as_json: bool, out: &mut dyn Write) -
         }
         match &live.state {
             LiveState::SignedOut => writeln!(out, "  signed out")?,
+            LiveState::Foreign { what } => {
+                writeln!(out, "  signed in with {what}, which remuda cannot store")?
+            }
             LiveState::Unstored { email } => writeln!(
                 out,
                 "  signed into {}, which is not stored: {}",
@@ -505,6 +509,12 @@ mod tests {
                 "signed into x@example.com, which is not stored: `remuda import <name>`",
             ),
             (LiveState::Unstored { email: None }, "an unknown account"),
+            (
+                LiveState::Foreign {
+                    what: "an API key".into(),
+                },
+                "signed in with an API key, which remuda cannot store",
+            ),
             (
                 LiveState::Stored {
                     name: "work".into(),

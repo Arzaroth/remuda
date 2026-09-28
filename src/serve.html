@@ -136,6 +136,8 @@ function when(ms) {
 function liveNote(p, live) {
   if (!live) return "";
   if (live.state === "signed_out") return `<div class="note">${esc(p.name)} is signed out.</div>`;
+  if (live.state === "foreign")
+    return `<div class="note">${esc(p.name)} is signed in with ${esc(live.what)}, which remuda cannot store; only <code>remuda use --discard</code> replaces it.</div>`;
   if (live.state === "stored" && !live.confirmed)
     return `<div class="note">Looks signed into ${esc(live.name)}, but that could not be confirmed.</div>`;
   if (live.state === "unstored")
