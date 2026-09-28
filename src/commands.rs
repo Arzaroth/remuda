@@ -370,7 +370,7 @@ pub fn refresh(
             if !scope.force && !due {
                 continue;
             }
-            match ops::refresh_entry(p, &mut entry).and_then(|()| store.save(&entry)) {
+            match ops::refresh_entry(store, p, &mut entry).and_then(|()| store.save(&entry)) {
                 Ok(()) => writeln!(out, "{}: refreshed", entry.qualified())?,
                 Err(e) => {
                     failed += 1;

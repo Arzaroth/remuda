@@ -145,6 +145,26 @@ impl Store {
         write_json(&self.creds_path(&entry.provider, &entry.name), &entry.creds)
     }
 
+    /// Keeps tokens nothing else would hold, in a file `list` does not show.
+    pub fn set_aside(&self, provider: &str, account: &str, creds: &Value) -> Result<PathBuf> {
+        let account: String = account
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        let path = self.root.join(provider).join(format!(
+            ".set-aside-{account}-{}.json",
+            crate::fsx::now_ms()
+        ));
+        write_json(&path, creds)?;
+        Ok(path)
+    }
+
     pub fn rename(&self, provider: &str, from: &str, to: &str) -> Result<()> {
         validate_name(from)?;
         validate_name(to)?;

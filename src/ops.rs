@@ -125,14 +125,18 @@ pub fn expires_in_ms(p: &dyn Provider, entry: &Entry) -> Option<i64> {
     p.expires_at(&entry.creds).map(|at| at - now_ms())
 }
 
-/// Leaves `entry` unusable on error; only save it on success.
-pub fn refresh_entry(p: &dyn Provider, entry: &mut Entry) -> Result<()> {
+/// Leaves `entry` unusable on error; only save it on success. Tokens that
+/// turn out to belong to another account are already rotated by then, so they
+/// are kept aside rather than dropped.
+pub fn refresh_entry(store: &Store, p: &dyn Provider, entry: &mut Entry) -> Result<()> {
     if let Some(account) = p.refresh(&mut entry.creds)?
         && account != entry.meta.account_id
     {
+        let kept = store.set_aside(p.id(), &account, &entry.creds)?;
         bail!(
-            "the token endpoint answered for account {account}, not {}",
-            entry.meta.account_id
+            "the token endpoint answered for account {account}, not {}; its new tokens are in {}",
+            entry.meta.account_id,
+            kept.display()
         );
     }
     Ok(())
@@ -166,7 +170,7 @@ pub fn switch(store: &Store, p: &dyn Provider, name: &str, discard: bool) -> Res
         _ => {}
     }
     if expires_in_ms(p, &target).is_some_and(|ms| ms < 5 * 60 * 1000) {
-        refresh_entry(p, &mut target)?;
+        refresh_entry(store, p, &mut target)?;
         store.save(&target)?;
     }
     p.install(&target)?;
@@ -481,7 +485,14 @@ mod tests {
         let e = env(&server.url());
         e.stored("work", "u-work", HOUR);
         let mut entry = e.store.get("claude", "work").unwrap().unwrap();
-        let err = refresh_entry(&e.claude, &mut entry).unwrap_err();
+        let err = refresh_entry(&e.store, &e.claude, &mut entry).unwrap_err();
         assert!(err.to_string().contains("u-someone"), "{err}");
+        let kept: Vec<_> = std::fs::read_dir(e.store.root().join("claude"))
+            .unwrap()
+            .filter_map(|f| f.ok()?.file_name().into_string().ok())
+            .filter(|f| f.starts_with(".set-aside-u-someone-"))
+            .collect();
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert_eq!(e.store.list("claude").unwrap().len(), 1);
     }
 }
