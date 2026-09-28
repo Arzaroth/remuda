@@ -363,36 +363,77 @@ fn the_scheduled_refresh_stops_where_the_shell_looked_elsewhere() {
         }
         cmd.output().unwrap()
     };
+    let stderr = |out: &Output| String::from_utf8_lossy(&out.stderr).into_owned();
 
-    let out = run(&["ls"], &[("CLAUDE_CONFIG_DIR", &elsewhere)]);
-    assert!(out.status.success());
     let out = run(&["refresh", "--scheduled"], &[]);
-    let err = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success());
-    assert!(err.contains("claude: not refreshing"), "{err}");
-    assert!(err.contains("work-claude"), "{err}");
-    assert!(!err.contains("codex: not refreshing"), "{err}");
+    assert!(
+        stderr(&out).contains("there is no store"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(!home.path(".local/share/remuda").exists());
+
+    home.sign_in("a-work", "r-work", "u-work");
+    home.ok(&["import", "work"]);
+    std::fs::remove_file(home.path(".local/share/remuda/credentials/.dirs.json")).unwrap();
+    let out = run(&["refresh", "--scheduled"], &[]);
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("run `remuda ls` once"),
+        "{}",
+        stderr(&out)
+    );
+
+    assert!(
+        run(&["ls"], &[("CLAUDE_CONFIG_DIR", &elsewhere)])
+            .status
+            .success()
+    );
+    let out = run(&["refresh", "--scheduled"], &[]);
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("claude: not refreshing"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(stderr(&out).contains("work-claude"), "{}", stderr(&out));
+    assert!(
+        !stderr(&out).contains("codex: not refreshing"),
+        "{}",
+        stderr(&out)
+    );
 
     let out = run(
         &["refresh", "--scheduled"],
         &[("CLAUDE_CONFIG_DIR", &elsewhere)],
     );
+    assert!(out.status.success(), "{}", stderr(&out));
+
+    // A unit from 0.1.0 runs plain `refresh`: under systemd it is checked the
+    // same way and records nothing.
+    let out = run(&["refresh"], &[("INVOCATION_ID", Path::new("abc"))]);
+    assert!(!out.status.success(), "{}", stderr(&out));
     assert!(
-        out.status.success(),
+        stderr(&out).contains("claude: not refreshing"),
         "{}",
-        String::from_utf8_lossy(&out.stderr)
+        stderr(&out)
     );
 
-    let other_store = home.path("other-store");
+    // A smoke test against a scratch store leaves the real store's record be.
+    let scratch = home.path("scratch");
+    assert!(run(&["ls"], &[("REMUDA_STORE", &scratch)]).status.success());
+    let out = run(
+        &["refresh", "--scheduled"],
+        &[("CLAUDE_CONFIG_DIR", &elsewhere)],
+    );
+    assert!(out.status.success(), "{}", stderr(&out));
+
+    let relative = run(&["ls"], &[("CLAUDE_CONFIG_DIR", Path::new("work-claude"))]);
+    assert!(relative.status.success());
+    let record = read(&home.path(".local/share/remuda/credentials/.dirs.json"));
     assert!(
-        run(&["ls"], &[("REMUDA_STORE", &other_store)])
-            .status
-            .success()
+        Path::new(record["homes"]["claude"].as_str().unwrap()).is_absolute(),
+        "{record}"
     );
-    let out = run(&["refresh", "--scheduled"], &[]);
-    let err = String::from_utf8_lossy(&out.stderr);
-    assert!(!out.status.success());
-    assert!(err.contains("other-store"), "{err}");
-
-    assert!(run(&["refresh"], &[]).status.success());
 }

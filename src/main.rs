@@ -173,20 +173,19 @@ fn main() -> Result<()> {
     let claude = Claude::from_env()?;
     let codex = Codex::from_env()?;
     let providers: [&dyn Provider; 2] = [&claude, &codex];
-    let seen = dirs::now(&store, &providers);
-    let scheduled = matches!(
+    let seen = dirs::now(&providers);
+    let scheduled = dirs::is_scheduled(matches!(
         cli.command,
         Cmd::Refresh {
             scheduled: true,
             ..
         }
-    );
+    ));
     if !scheduled {
-        dirs::record(&paths::dirs_record(), &seen)?;
+        dirs::record(&store, &seen);
     }
     if let Cmd::Serve { port, no_browser } = cli.command {
-        let providers: Vec<Box<dyn Provider>> =
-            vec![Box::new(Claude::from_env()?), Box::new(Codex::from_env()?)];
+        let providers: Vec<Box<dyn Provider>> = vec![Box::new(claude), Box::new(codex)];
         let (listener, port) = http::bind(port)?;
         let token = pkce::random()?;
         let url = format!("http://127.0.0.1:{port}/#{token}");
@@ -227,6 +226,12 @@ fn main() -> Result<()> {
         return commands::login(&store, p, name, *force, prompt, out);
     }
 
+    if scheduled && !store.root().exists() {
+        bail!(
+            "not refreshing: there is no store at {}; set REMUDA_STORE in ~/.config/environment.d/60-remuda.conf if yours is elsewhere",
+            store.root().display()
+        );
+    }
     let _lock = store.lock()?;
     match cli.command {
         Cmd::Use { name, discard } => {
@@ -251,31 +256,19 @@ fn main() -> Result<()> {
             name,
             force,
             within,
-            scheduled,
+            ..
         } => {
-            let drift = match scheduled.then(|| dirs::recorded(&paths::dirs_record())) {
-                Some(recorded) => recorded?.map(|r| dirs::drift(&r, &seen)),
-                None => None,
-            };
-            if let Some(there) = drift.as_ref().and_then(|d| d.store.as_ref()) {
-                bail!(
-                    "not refreshing: remuda was last used with the store in {}, this run sees {}; set REMUDA_STORE in ~/.config/environment.d/60-remuda.conf",
-                    there.display(),
-                    store.root().display()
-                );
-            }
-            let moved = drift.map(|d| d.homes).unwrap_or_default();
-            for (id, there, here) in &moved {
-                eprintln!(
-                    "{id}: not refreshing, its login was last found in {} and this run looks in {}; set its directory in ~/.config/environment.d/60-remuda.conf",
-                    there.display(),
-                    here.display()
-                );
+            let plan = scheduled.then(|| dirs::plan(dirs::recorded(&store).as_ref(), &seen));
+            for line in plan.iter().flat_map(|p| &p.skipped) {
+                eprintln!("{line}");
             }
             let usable: Vec<&dyn Provider> = providers
                 .iter()
                 .copied()
-                .filter(|p| !moved.iter().any(|(id, ..)| id == p.id()))
+                .filter(|p| {
+                    plan.as_ref()
+                        .is_none_or(|plan| plan.usable.iter().any(|id| id == p.id()))
+                })
                 .collect();
             let only = name
                 .as_deref()
@@ -288,8 +281,9 @@ fn main() -> Result<()> {
                 within_min: within,
             };
             commands::refresh(&store, &lives, scope, out, &mut io::stderr())?;
-            if !moved.is_empty() {
-                bail!("{} CLI(s) skipped", moved.len());
+            let skipped = plan.map_or(0, |p| p.skipped.len());
+            if skipped > 0 {
+                bail!("{skipped} CLI(s) skipped");
             }
             Ok(())
         }

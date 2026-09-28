@@ -1,25 +1,27 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::fsx::{read_json, write_json};
 use crate::provider::Provider;
 use crate::store::Store;
 
-/// Where the store and each CLI's login were found. Interactive commands
-/// record it; the scheduled refresh, run by a systemd user manager that does
-/// not see what a shell exports, checks it still looks in the same places.
+/// Where each CLI's login was found, kept in the store it was found with.
+/// Interactive commands record it; the scheduled refresh, run by a systemd
+/// user manager that does not see what a shell exports, checks it still looks
+/// in the same places before refreshing anything.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Seen {
-    pub store: PathBuf,
     pub homes: BTreeMap<String, PathBuf>,
 }
 
-pub fn now(store: &Store, providers: &[&dyn Provider]) -> Seen {
+fn record_path(store: &Store) -> PathBuf {
+    store.root().join(".dirs.json")
+}
+
+pub fn now(providers: &[&dyn Provider]) -> Seen {
     Seen {
-        store: store.root().to_owned(),
         homes: providers
             .iter()
             .map(|p| (p.id().to_owned(), p.home()))
@@ -27,45 +29,68 @@ pub fn now(store: &Store, providers: &[&dyn Provider]) -> Seen {
     }
 }
 
-pub fn recorded(path: &std::path::Path) -> Result<Option<Seen>> {
-    Ok(read_json(path)?.and_then(|v| serde_json::from_value(v).ok()))
+pub fn recorded(store: &Store) -> Option<Seen> {
+    read_json(&record_path(store))
+        .ok()
+        .flatten()
+        .and_then(|v| serde_json::from_value(v).ok())
 }
 
-pub fn record(path: &std::path::Path, seen: &Seen) -> Result<()> {
-    if recorded(path)?.as_ref() != Some(seen) {
-        write_json(path, &serde_json::to_value(seen)?)?;
+/// Best effort: a record that cannot be written costs the timer its check,
+/// never a command its work.
+pub fn record(store: &Store, seen: &Seen) {
+    if recorded(store).as_ref() == Some(seen) {
+        return;
     }
-    Ok(())
-}
-
-pub struct Drift {
-    /// The store the shell uses, when the scheduled run sees another.
-    pub store: Option<PathBuf>,
-    /// Per CLI: where the shell finds its login, and where this run does.
-    pub homes: Vec<(String, PathBuf, PathBuf)>,
-}
-
-pub fn drift(recorded: &Seen, now: &Seen) -> Drift {
-    Drift {
-        store: (recorded.store != now.store).then(|| recorded.store.clone()),
-        homes: now
-            .homes
-            .iter()
-            .filter_map(|(id, here)| {
-                let there = recorded.homes.get(id)?;
-                (there != here).then(|| (id.clone(), there.clone(), here.clone()))
-            })
-            .collect(),
+    let written = serde_json::to_value(seen)
+        .map_err(anyhow::Error::from)
+        .and_then(|v| write_json(&record_path(store), &v));
+    if let Err(e) = written {
+        eprintln!("warning: could not note where the CLIs keep their logins: {e:#}");
     }
+}
+
+/// What a scheduled refresh may touch: the CLIs whose login it finds where
+/// the last interactive command did, and a line for each one it may not.
+pub struct Plan {
+    pub usable: Vec<String>,
+    pub skipped: Vec<String>,
+}
+
+pub fn plan(recorded: Option<&Seen>, now: &Seen) -> Plan {
+    let mut plan = Plan {
+        usable: Vec::new(),
+        skipped: Vec::new(),
+    };
+    for (id, here) in &now.homes {
+        match recorded.map(|r| r.homes.get(id)) {
+            Some(Some(there)) if there == here => plan.usable.push(id.clone()),
+            Some(Some(there)) => plan.skipped.push(format!(
+                "{id}: not refreshing, its login was last found in {} and this run looks in {}; set its directory in ~/.config/environment.d/60-remuda.conf",
+                there.display(),
+                here.display()
+            )),
+            _ => plan.skipped.push(format!(
+                "{id}: not refreshing, no interactive remuda command has recorded where its login lives in this store yet; run `remuda ls` once"
+            )),
+        }
+    }
+    plan
+}
+
+/// Under systemd (which sets INVOCATION_ID for every unit it runs) nothing
+/// knows what the user's shell sees: such a run is checked, never recorded.
+/// That covers a unit installed by 0.1.0, which runs plain `refresh`.
+pub fn is_scheduled(flag: bool) -> bool {
+    flag || std::env::var_os("INVOCATION_ID").is_some()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn seen(store: &str, claude: &str) -> Seen {
+    fn seen(claude: &str) -> Seen {
         Seen {
-            store: store.into(),
             homes: [
                 ("claude".to_owned(), PathBuf::from(claude)),
                 ("codex".to_owned(), PathBuf::from("/h/.codex")),
@@ -75,35 +100,38 @@ mod tests {
     }
 
     #[test]
-    fn drift_names_what_moved_and_nothing_else() {
-        let d = drift(&seen("/s", "/h/.claude"), &seen("/s", "/h/.claude"));
-        assert!(d.store.is_none() && d.homes.is_empty());
+    fn a_plan_skips_what_moved_and_everything_without_a_record() {
+        let p = plan(Some(&seen("/h/.claude")), &seen("/h/.claude"));
+        assert_eq!(p.usable, ["claude", "codex"]);
+        assert!(p.skipped.is_empty());
 
-        let d = drift(&seen("/s", "/work/.claude"), &seen("/t", "/h/.claude"));
-        assert_eq!(d.store, Some(PathBuf::from("/s")));
-        assert_eq!(
-            d.homes,
-            [(
-                "claude".to_owned(),
-                PathBuf::from("/work/.claude"),
-                PathBuf::from("/h/.claude")
-            )]
-        );
+        let p = plan(Some(&seen("/work/.claude")), &seen("/h/.claude"));
+        assert_eq!(p.usable, ["codex"]);
+        assert!(p.skipped[0].contains("/work/.claude"), "{:?}", p.skipped);
+
+        let p = plan(None, &seen("/h/.claude"));
+        assert!(p.usable.is_empty());
+        assert!(p.skipped.iter().all(|s| s.contains("run `remuda ls` once")));
     }
 
     #[test]
-    fn a_record_is_rewritten_only_when_it_changes() {
+    fn a_record_is_rewritten_only_when_it_changes_and_never_fails_a_command() {
+        use std::os::unix::fs::MetadataExt;
         let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("dirs.json");
-        record(&path, &seen("/s", "/h/.claude")).unwrap();
-        let first = std::fs::metadata(&path).unwrap().modified().unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(20));
-        record(&path, &seen("/s", "/h/.claude")).unwrap();
-        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), first);
-        record(&path, &seen("/s", "/w/.claude")).unwrap();
-        assert_eq!(
-            recorded(&path).unwrap().unwrap().homes["claude"],
-            PathBuf::from("/w/.claude")
-        );
+        let store = Store::open(tmp.path());
+        record(&store, &seen("/h/.claude"));
+        let inode = |store: &Store| std::fs::metadata(record_path(store)).unwrap().ino();
+        let first = inode(&store);
+        record(&store, &seen("/h/.claude"));
+        assert_eq!(inode(&store), first);
+        record(&store, &seen("/w/.claude"));
+        assert_ne!(inode(&store), first);
+        assert_eq!(recorded(&store).unwrap(), seen("/w/.claude"));
+
+        std::fs::write(record_path(&store), "{ torn").unwrap();
+        assert!(recorded(&store).is_none());
+        let blocked = Store::open(&tmp.path().join("file"));
+        std::fs::write(tmp.path().join("file"), "").unwrap();
+        record(&blocked, &seen("/h/.claude"));
     }
 }

@@ -5,10 +5,15 @@ fn home() -> PathBuf {
     env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
 }
 
+/// A directory named relative to where remuda was started means something
+/// else from anywhere else, the refresh timer included.
+fn var_dir(name: &str) -> Option<PathBuf> {
+    let dir = PathBuf::from(env::var_os(name).filter(|v| !v.is_empty())?);
+    Some(std::path::absolute(&dir).unwrap_or(dir))
+}
+
 fn claude_config_dir() -> Option<PathBuf> {
-    env::var_os("CLAUDE_CONFIG_DIR")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
+    var_dir("CLAUDE_CONFIG_DIR")
 }
 
 pub fn claude_credentials() -> PathBuf {
@@ -25,9 +30,7 @@ pub fn claude_config() -> PathBuf {
 }
 
 pub fn codex_auth() -> PathBuf {
-    env::var_os("CODEX_HOME")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
+    var_dir("CODEX_HOME")
         .unwrap_or_else(|| home().join(".codex"))
         .join("auth.json")
 }
@@ -40,17 +43,9 @@ pub fn runtime_dir() -> PathBuf {
         .unwrap_or_else(store_root)
 }
 
-pub fn dirs_record() -> PathBuf {
-    env::var_os("XDG_STATE_HOME")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home().join(".local/state"))
-        .join("remuda/dirs.json")
-}
-
 pub fn store_root() -> PathBuf {
-    if let Some(dir) = env::var_os("REMUDA_STORE").filter(|v| !v.is_empty()) {
-        return PathBuf::from(dir);
+    if let Some(dir) = var_dir("REMUDA_STORE") {
+        return dir;
     }
     env::var_os("XDG_DATA_HOME")
         .filter(|v| !v.is_empty())

@@ -101,6 +101,9 @@ if $want_timer; then
     printf '%s\n' "${envs[@]}" >"$envdir/60-remuda.conf"
     echo "Wrote $envdir/60-remuda.conf: ${envs[*]}"
   fi
+  # The timer refreshes only where the last interactive command looked; this
+  # is that command, run from the installing shell.
+  "$bindir/remuda" ls >/dev/null 2>&1 || true
   if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
     if ((${#envs[@]} > 0)); then
       systemctl --user set-environment "${envs[@]}"
