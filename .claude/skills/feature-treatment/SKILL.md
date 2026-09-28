@@ -1,6 +1,6 @@
 ---
 name: feature-treatment
-description: Ship a finished remuda feature branch the full way - rebase onto main, run a max-effort multi-agent code review, fix everything confirmed, update the brain/ knowledge base, pass the gate and CI, merge keeping the layered commits, and cut a release. Use when the user says "feature treatment", "treat this branch", "review and merge this feature", or names a worktree/branch to ship.
+description: Ship a finished remuda feature branch the full way - rebase onto master, run a max-effort multi-agent code review, fix everything confirmed, update the brain/ knowledge base, pass the gate and CI, merge keeping the layered commits, and cut a release. Use when the user says "feature treatment", "treat this branch", "review and merge this feature", or names a worktree/branch to ship.
 ---
 
 # Feature treatment
@@ -11,25 +11,25 @@ Nothing merges without an adversarial review and a green gate.
 
 The branch comes from the argument (a branch or worktree name). If none is
 given, find it: `wt list` (or `git worktree list`) and `git branch` - it is the
-non-`main` one; worktrees live in `~/repos/remuda.worktrees/<branch>`. Confirm
+non-`master` one; worktrees live in `~/repos/remuda.worktrees/<branch>`. Confirm
 which one if ambiguous. Branch names follow `feature/...`, `fix/...`; every
 commit subject starts with `[<branch>]`.
 
-## 1. Rebase onto main
+## 1. Rebase onto master
 
 ```bash
-cd ~/repos/remuda.worktrees/<branch>     # or the main checkout if the branch is there
-git fetch origin && git rebase origin/main
+cd ~/repos/remuda.worktrees/<branch>     # or the primary checkout if the branch is there
+git fetch origin && git rebase origin/master
 ```
 
 Resolve conflicts if any (the **resolving-merge-conflicts** skill). The branch
-must sit directly on `main` so the review and the merge see only this feature.
-Check the size: `git diff --name-only origin/main..HEAD | wc -l` must stay under
+must sit directly on `master` so the review and the merge see only this feature.
+Check the size: `git diff --name-only origin/master..HEAD | wc -l` must stay under
 149; split along a seam if it does not.
 
 ## 2. Max-effort review (parallel finders)
 
-The diff: `git diff origin/main...HEAD` (exclude `Cargo.lock` from reading; a
+The diff: `git diff origin/master...HEAD` (exclude `Cargo.lock` from reading; a
 dependency change is reviewed from `Cargo.toml`).
 
 Spawn **independent finder subagents in parallel** (one Agent tool call with
@@ -110,7 +110,7 @@ Every commit must pass on its own, not just the tip; check from clean exports
 
 ```bash
 w=$(mktemp -d); export CARGO_TARGET_DIR="$w-target"
-for c in $(git rev-list --reverse origin/main..HEAD); do
+for c in $(git rev-list --reverse origin/master..HEAD); do
   rm -rf "$w"/* && git archive "$c" | tar -x -m -C "$w"
   (cd "$w" && cargo clippy -q --all-targets --locked -- -D warnings && cargo test -q --locked) \
     >/dev/null 2>&1 && echo "ok   $(git log -1 --format=%s "$c")" || echo "FAIL $(git log -1 --format=%s "$c")"
@@ -136,13 +136,13 @@ green.
 
 ## 7. Merge (keep the layers)
 
-Fast-forward `main` onto the branch rather than squashing, so the layers survive:
+Fast-forward `master` onto the branch rather than squashing, so the layers survive:
 
 ```bash
 cd ~/repos/remuda
-git switch main && git pull --ff-only
+git switch master && git pull --ff-only
 git merge --ff-only <branch>
-git push origin main                          # GitHub marks the PR merged
+git push origin master                         # GitHub marks the PR merged
 ```
 
 ## 8. Release
@@ -158,6 +158,6 @@ git push origin --delete <branch>
 
 ## Done when
 
-The feature is on `main`, the brain reflects it, every layer and CI were green,
+The feature is on `master`, the brain reflects it, every layer and CI were green,
 a tag is released, and the branch and worktree are gone. Report the version and
 a one-line summary of what the review fixed.

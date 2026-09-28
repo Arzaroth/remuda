@@ -4,10 +4,10 @@ Users are not expected to have cargo.
 
 ## Release
 
-`scripts/release.sh <x.y.z>` (on a clean `main` level with origin) moves
+`scripts/release.sh <x.y.z>` (on a clean `master` level with origin) moves
 `[Unreleased]` into `## [x.y.z] - <date>`, bumps `Cargo.toml` and `Cargo.lock`,
 runs fmt, clippy and the tests, checks `--version`, commits
-`[main] chore(release): x.y.z`, tags `vx.y.z` and pushes. A failing gate undoes
+`[master] chore(release): x.y.z`, tags `vx.y.z` and pushes. A failing gate undoes
 the bump.
 
 The tag starts `.github/workflows/release.yml`: native x86_64 and aarch64 builds
@@ -36,7 +36,7 @@ for a fork.
 
 ## CI
 
-`.github/workflows/ci.yml` on pull requests and pushes to `main`: fmt, clippy
+`.github/workflows/ci.yml` on pull requests and pushes to `master`: fmt, clippy
 `-D warnings`, tests on both architectures, and shellcheck on the two scripts.
 
 ## Sources

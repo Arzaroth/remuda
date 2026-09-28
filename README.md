@@ -26,7 +26,7 @@ switched Claude Code to perso (me@example.com)
 Linux, x86_64 or aarch64:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Arzaroth/remuda/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Arzaroth/remuda/master/scripts/install.sh | bash
 ```
 
 This installs `remuda` into `~/.local/bin`, enables `remuda-refresh.timer`,

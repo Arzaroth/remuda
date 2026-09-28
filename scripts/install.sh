@@ -1,5 +1,5 @@
 #!/bin/bash
-# Usage: curl -fsSL https://raw.githubusercontent.com/Arzaroth/remuda/main/scripts/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/Arzaroth/remuda/master/scripts/install.sh | bash
 #        ... | bash -s -- [--version vX.Y.Z] [--no-timer] [--no-completions]
 #
 # Installs the latest release into ~/.local/bin, enables the refresh timer and

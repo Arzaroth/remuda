@@ -19,17 +19,17 @@ fi
 cd "$(dirname "$(readlink -f "$0")")/.."
 
 branch=$(git branch --show-current)
-if [[ $branch != main ]]; then
-  echo "release: on $branch, not main" >&2
+if [[ $branch != master ]]; then
+  echo "release: on $branch, not master" >&2
   exit 1
 fi
 if [[ -n $(git status --porcelain) ]]; then
   echo "release: the working tree is not clean" >&2
   exit 1
 fi
-git fetch -q origin main
-if [[ $(git rev-parse HEAD) != $(git rev-parse origin/main) ]]; then
-  echo "release: main is not level with origin/main" >&2
+git fetch -q origin master
+if [[ $(git rev-parse HEAD) != $(git rev-parse origin/master) ]]; then
+  echo "release: master is not level with origin/master" >&2
   exit 1
 fi
 if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
@@ -79,7 +79,7 @@ fi
 trap - ERR
 
 git add CHANGELOG.md Cargo.toml Cargo.lock
-git commit -q -m "[main] chore(release): $version"
+git commit -q -m "[master] chore(release): $version"
 git tag -a "v$version" -m "remuda $version"
-git push -q origin main "v$version"
+git push -q origin master "v$version"
 echo "released v$version: the Release workflow is building it now"

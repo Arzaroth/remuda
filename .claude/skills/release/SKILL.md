@@ -5,7 +5,7 @@ description: Cut a remuda release, the whole shebang - docs sweep (CHANGELOG, RE
 
 # Release shebang
 
-Everything between "the code is on main" and "users can install it". The
+Everything between "the code is on master" and "users can install it". The
 mechanics live in `scripts/release.sh`; the value of this skill is the docs
 sweep before it and the verification after it. Pushing the tag is what builds
 and publishes the release, so there is no undo once step 3 runs: a bad tag means
@@ -13,7 +13,7 @@ a new patch release.
 
 ## 1. Pre-flight
 
-- On `main`, working tree clean, level with `origin/main` (the script refuses
+- On `master`, working tree clean, level with `origin/master` (the script refuses
   otherwise). Stash unrelated dirty files and restore them afterwards.
 - Anything still on a feature branch is not in this release: finish it first
   (the **feature-treatment** skill) or leave it out on purpose.
@@ -40,7 +40,7 @@ a new patch release.
 - **Dependencies**: `git diff v<last>..HEAD -- Cargo.toml`. A new dependency
   needs no docs entry, but check it builds on both release runners (anything
   linking C is the risk; rustls is fine, native-tls is not).
-- Commit the sweep as `[main] docs(release): ...` (the script needs a clean
+- Commit the sweep as `[master] docs(release): ...` (the script needs a clean
   tree).
 
 ## 3. Cut it
@@ -52,7 +52,7 @@ scripts/release.sh <x.y.z>
 
 The script moves `[Unreleased]` into `## [x.y.z] - <UTC date>`, sets the
 version in `Cargo.toml` and `Cargo.lock`, runs fmt, clippy `-D warnings`, the
-tests and a `--version` check, then commits `[main] chore(release): x.y.z`,
+tests and a `--version` check, then commits `[master] chore(release): x.y.z`,
 creates annotated tag `vx.y.z` and pushes both. If the gate fails it restores
 the three files and exits; fix the cause on a branch and start again.
 
@@ -66,7 +66,7 @@ gh release view v<x.y.z> -R Arzaroth/remuda --json assets --jq '.assets[].name'
 
 Expect `remuda-v<x.y.z>-linux-x86_64.tar.gz` and `...-linux-aarch64.tar.gz`. A
 failed run leaves a pushed tag without a release: read the failing job
-(`gh run view "$run" --log-failed`), fix on `main`, and re-run the workflow
+(`gh run view "$run" --log-failed`), fix on `master`, and re-run the workflow
 for the same tag with
 `gh workflow run Release -R Arzaroth/remuda -f tag=v<x.y.z>` rather than
 moving the tag.
@@ -78,7 +78,7 @@ timers:
 
 ```bash
 tmp=$(mktemp -d)
-curl -fsSL https://raw.githubusercontent.com/Arzaroth/remuda/main/scripts/install.sh \
+curl -fsSL https://raw.githubusercontent.com/Arzaroth/remuda/master/scripts/install.sh \
   | HOME="$tmp" bash -s -- --no-timer --no-completions
 "$tmp/.local/bin/remuda" --version       # remuda <x.y.z>
 rm -rf "$tmp"
