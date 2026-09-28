@@ -69,14 +69,27 @@ fn token<'a>(creds: &'a Value, key: &str) -> Option<&'a str> {
     tokens(creds)?.get(key)?.as_str().filter(|t| !t.is_empty())
 }
 
-fn identity_of(creds: &Value) -> Option<Identity> {
-    let id_claims = token(creds, "id_token").and_then(claims);
-    let account_id = token(creds, "account_id").map(str::to_owned).or_else(|| {
-        auth_claim(id_claims.as_ref()?, "chatgpt_account_id")?
+/// One person in one ChatGPT workspace. `tokens.account_id` names only the
+/// workspace, which every seat of a Team plan shares.
+fn seat_of(access_token: &str, id_token: Option<&str>) -> Option<String> {
+    let from_access = claims(access_token).and_then(|c| {
+        auth_claim(&c, "chatgpt_account_user_id")?
             .as_str()
             .map(str::to_owned)
-    })?;
-    let email = id_claims
+    });
+    from_access.or_else(|| {
+        let c = claims(id_token?)?;
+        let user = auth_claim(&c, "chatgpt_user_id").or_else(|| auth_claim(&c, "user_id"))?;
+        let workspace = auth_claim(&c, "chatgpt_account_id")?;
+        Some(format!("{}__{}", user.as_str()?, workspace.as_str()?))
+    })
+}
+
+fn identity_of(creds: &Value) -> Option<Identity> {
+    let id_token = token(creds, "id_token");
+    let account_id = seat_of(token(creds, "access_token")?, id_token)?;
+    let email = id_token
+        .and_then(claims)
         .as_ref()
         .and_then(|c| c.get("email"))
         .and_then(Value::as_str)
@@ -164,12 +177,12 @@ impl Provider for Codex {
         Ok(identity_of(creds))
     }
 
-    /// The account id sits in the same file as the tokens it names, so the
-    /// file is its own confirmation.
+    /// The seat is read out of the tokens themselves, not a field beside them,
+    /// so no file can disagree with it.
     fn confirm(&self, creds: &Value) -> Result<String> {
         identity_of(creds)
             .map(|id| id.account_id)
-            .context("auth.json does not name its account")
+            .context("the tokens do not name their ChatGPT seat")
     }
 
     fn install(&self, entry: &Entry) -> Result<()> {
@@ -200,11 +213,7 @@ impl Provider for Codex {
             }
         }
         creds["last_refresh"] = json!(rfc3339(now_ms()));
-        Ok(fresh("id_token").as_deref().and_then(claims).and_then(|c| {
-            auth_claim(&c, "chatgpt_account_id")?
-                .as_str()
-                .map(str::to_owned)
-        }))
+        Ok(seat_of(&access, fresh("id_token").as_deref()))
     }
 
     fn begin_login(&self) -> Result<Box<dyn PendingLogin>> {
@@ -406,22 +415,32 @@ mod tests {
         format!("{}.{}.sig", enc(&json!({"alg": "none"})), enc(&claims))
     }
 
-    fn id_token(account: &str, plan: &str) -> String {
+    const WORKSPACE: &str = "ws-1";
+
+    fn id_token(seat: &str, plan: &str) -> String {
         jwt(json!({
-            "email": format!("{account}@example.com"),
-            AUTH_CLAIMS: {"chatgpt_account_id": account, "chatgpt_plan_type": plan},
+            "email": format!("{seat}@example.com"),
+            AUTH_CLAIMS: {"chatgpt_account_id": WORKSPACE, "chatgpt_user_id": format!("user-{seat}"), "chatgpt_plan_type": plan},
         }))
     }
 
-    fn auth(account: &str, access: &str, refresh: &str, exp_secs: i64) -> Value {
+    fn access_token(seat: &str, tag: &str, exp_secs: i64) -> String {
+        jwt(json!({
+            "exp": exp_secs,
+            "tag": tag,
+            AUTH_CLAIMS: {"chatgpt_account_user_id": seat, "chatgpt_account_id": WORKSPACE},
+        }))
+    }
+
+    fn auth(seat: &str, access: &str, refresh: &str, exp_secs: i64) -> Value {
         json!({
             "OPENAI_API_KEY": null,
             "auth_mode": "chatgpt",
             "tokens": {
-                "id_token": id_token(account, "plus"),
-                "access_token": jwt(json!({"exp": exp_secs, "tag": access})),
+                "id_token": id_token(seat, "plus"),
+                "access_token": access_token(seat, access, exp_secs),
                 "refresh_token": refresh,
-                "account_id": account,
+                "account_id": WORKSPACE,
             },
             "last_refresh": "2026-09-01T00:00:00Z",
         })
@@ -447,13 +466,35 @@ mod tests {
         assert_eq!(c.refresh_token(&creds), Some("r"));
         assert_eq!(c.confirm(&creds).unwrap(), "acct-1");
 
-        let mut without = creds.clone();
-        without["tokens"]
-            .as_object_mut()
-            .unwrap()
-            .remove("account_id");
-        assert_eq!(c.confirm(&without).unwrap(), "acct-1");
+        let mut older = creds.clone();
+        older["tokens"]["access_token"] = json!(jwt(json!({"exp": 1_900_000_000})));
+        assert_eq!(c.confirm(&older).unwrap(), "user-acct-1__ws-1");
+        older["tokens"]["id_token"] = json!(jwt(json!({})));
+        assert!(c.confirm(&older).is_err());
         assert_eq!(c.plan(&json!({})), "-");
+    }
+
+    #[test]
+    fn two_seats_of_one_workspace_are_two_accounts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let c = codex(tmp.path(), OFFLINE);
+        let alice = auth("alice", "a", "r-alice", 1_900_000_000);
+        let identity = c.live_identity(&alice).unwrap().unwrap();
+        store
+            .save(&Entry::new("codex", "alice", alice, identity, 1))
+            .unwrap();
+        write_json(
+            &tmp.path().join("auth.json"),
+            &auth("bob", "b", "r-bob", 1_900_000_000),
+        )
+        .unwrap();
+
+        let state = ops::sync_live(&store, &c).unwrap();
+
+        assert!(matches!(state, LiveState::Unstored { .. }), "{state:?}");
+        let alice = store.get("codex", "alice").unwrap().unwrap();
+        assert_eq!(c.refresh_token(&alice.creds), Some("r-alice"));
     }
 
     #[test]
@@ -531,7 +572,7 @@ mod tests {
                 "client_id": CLIENT_ID,
             })))
             .with_body(
-                json!({"access_token": "new-access", "id_token": id_token("acct-1", "pro")})
+                json!({"access_token": access_token("acct-1", "new", 1_900_000_000), "id_token": id_token("acct-1", "pro")})
                     .to_string(),
             )
             .create();
@@ -543,7 +584,10 @@ mod tests {
 
         mock.assert();
         assert_eq!(account.as_deref(), Some("acct-1"));
-        assert_eq!(creds["tokens"]["access_token"], "new-access");
+        assert_eq!(
+            creds["tokens"]["access_token"],
+            access_token("acct-1", "new", 1_900_000_000)
+        );
         assert_eq!(creds["tokens"]["refresh_token"], "r1");
         assert_eq!(c.plan(&creds), "pro");
         assert_ne!(creds["last_refresh"], "2026-09-01T00:00:00Z");
@@ -605,7 +649,7 @@ mod tests {
             .with_body(
                 json!({
                     "id_token": id_token("acct-9", "pro"),
-                    "access_token": jwt(json!({"exp": 1_900_000_000})),
+                    "access_token": access_token("acct-9", "login", 1_900_000_000),
                     "refresh_token": "r-new",
                 })
                 .to_string(),
@@ -637,7 +681,7 @@ mod tests {
         assert!(done.contains("Signed in"), "{done}");
         assert_eq!(login.identity.account_id, "acct-9");
         assert_eq!(login.creds["tokens"]["refresh_token"], "r-new");
-        assert_eq!(login.creds["tokens"]["account_id"], "acct-9");
+        assert_eq!(login.creds["tokens"]["account_id"], WORKSPACE);
         assert_eq!(login.creds["auth_mode"], "chatgpt");
         assert_eq!(c.plan(&login.creds), "pro");
     }

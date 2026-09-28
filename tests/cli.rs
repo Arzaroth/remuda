@@ -276,7 +276,10 @@ fn codex_auth(account: &str, refresh: &str) -> Value {
                 "email": format!("{account}@example.com"),
                 "https://api.openai.com/auth": {"chatgpt_account_id": account, "chatgpt_plan_type": "plus"},
             })),
-            "access_token": jwt(json!({"exp": now_ms() / 1000 + 86_400, "sub": account})),
+            "access_token": jwt(json!({
+                "exp": now_ms() / 1000 + 86_400,
+                "https://api.openai.com/auth": {"chatgpt_account_user_id": account},
+            })),
             "refresh_token": refresh,
             "account_id": account,
         },
