@@ -1,6 +1,6 @@
-//! The shipped binary against a throwaway home. Every case here stays off the
-//! network: live logins match a stored one by token, and nothing is due for a
-//! refresh.
+//! The shipped binary against a throwaway home, its providers pointed at a
+//! local mock. The mock knows the profile behind each signed-in token and
+//! answers anything else with an error.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -10,6 +10,7 @@ use serde_json::{Value, json};
 
 struct Home {
     dir: tempfile::TempDir,
+    api: std::cell::RefCell<mockito::ServerGuard>,
 }
 
 fn now_ms() -> i64 {
@@ -47,6 +48,7 @@ impl Home {
     fn new() -> Self {
         Home {
             dir: tempfile::tempdir().unwrap(),
+            api: std::cell::RefCell::new(mockito::Server::new()),
         }
     }
 
@@ -63,6 +65,18 @@ impl Home {
     }
 
     fn sign_in(&self, access: &str, refresh: &str, uuid: &str) {
+        self.api
+            .borrow_mut()
+            .mock("GET", "/api/oauth/profile")
+            .match_header("authorization", format!("Bearer {access}").as_str())
+            .with_body(
+                json!({
+                    "account": {"uuid": uuid, "email": format!("{uuid}@example.com")},
+                    "organization": {"uuid": "o-1", "organization_type": "claude_max"},
+                })
+                .to_string(),
+            )
+            .create();
         write(
             &self.creds(),
             &json!({"claudeAiOauth": login(access, refresh), "mcpOAuth": {"srv": {"accessToken": "mcp"}}}),
@@ -78,7 +92,9 @@ impl Home {
         cmd.args(args)
             .env_clear()
             .env("HOME", self.dir.path())
-            .env("PATH", "/usr/bin:/bin");
+            .env("PATH", "/usr/bin:/bin")
+            .env("REMUDA_TEST_CLAUDE_API", self.api.borrow().url())
+            .env("REMUDA_TEST_OPENAI_API", self.api.borrow().url());
         // Coverage runs record the binary's own profile through this.
         if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
             cmd.env("LLVM_PROFILE_FILE", profile);

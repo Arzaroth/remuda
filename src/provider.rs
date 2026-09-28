@@ -47,9 +47,9 @@ pub trait Provider: Send + Sync {
     /// Who the CLI's own files say that login belongs to, without asking the
     /// provider.
     fn live_identity(&self, creds: &Value) -> Result<Option<Identity>>;
-    /// Which account these tokens belong to, for when the files could be out
-    /// of step with them.
-    fn confirm(&self, creds: &Value) -> Result<String>;
+    /// Whose tokens these are, according to the tokens or the provider rather
+    /// than to a file that can be out of step with them.
+    fn identify(&self, creds: &Value) -> Result<Identity>;
     fn install(&self, entry: &Entry) -> Result<()>;
     /// Returns the account id the token endpoint answered for, when it says.
     fn refresh(&self, creds: &mut Value) -> Result<Option<String>>;

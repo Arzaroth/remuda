@@ -45,34 +45,60 @@ pub fn sync_live(store: &Store, p: &dyn Provider) -> Result<LiveState> {
     });
     let found = match by_token {
         Some(e) => e,
-        None => {
-            let by_account = identity
-                .as_ref()
-                .and_then(|id| entries.iter().find(|e| e.meta.account_id == id.account_id));
-            let Some(e) = by_account else {
-                return Ok(LiveState::Unstored {
-                    email: identity.map(|id| id.email),
-                });
-            };
-            match p.confirm(&creds) {
-                Ok(account) if account == e.meta.account_id => e,
-                Ok(_) => return Ok(LiveState::Unstored { email: None }),
-                Err(err) => {
-                    eprintln!(
-                        "warning: could not confirm the live login is {}: {err:#}",
-                        e.qualified()
-                    );
-                    return Ok(LiveState::Stored {
-                        name: e.name.clone(),
-                        synced: false,
-                    });
+        None if entries.is_empty() => {
+            return Ok(LiveState::Unstored {
+                email: identity.map(|id| id.email),
+            });
+        }
+        None => match p.identify(&creds) {
+            Ok(confirmed) => {
+                match entries
+                    .iter()
+                    .find(|e| e.meta.account_id == confirmed.account_id)
+                {
+                    Some(e) => e,
+                    None => {
+                        return Ok(LiveState::Unstored {
+                            email: Some(confirmed.email),
+                        });
+                    }
                 }
             }
-        }
+            Err(err) => {
+                let by_account = identity
+                    .as_ref()
+                    .and_then(|id| entries.iter().find(|e| e.meta.account_id == id.account_id));
+                return Ok(match by_account {
+                    Some(e) => {
+                        eprintln!(
+                            "warning: could not confirm the live login is {}: {err:#}",
+                            e.qualified()
+                        );
+                        LiveState::Stored {
+                            name: e.name.clone(),
+                            synced: false,
+                        }
+                    }
+                    None => LiveState::Unstored {
+                        email: identity.map(|id| id.email),
+                    },
+                });
+            }
+        },
     };
     let mut entry = found.clone();
     let mut changed = false;
-    if entry.creds != creds {
+    let older = matches!(
+        (p.expires_at(&creds), p.expires_at(&entry.creds)),
+        (Some(live), Some(stored)) if live < stored
+    );
+    if older {
+        eprintln!(
+            "warning: {} is newer in the store than in {}; keeping the store's copy",
+            entry.qualified(),
+            p.name()
+        );
+    } else if entry.creds != creds {
         entry.creds = creds;
         changed = true;
     }
@@ -304,6 +330,40 @@ mod tests {
         let state = sync_live(&e.store, &e.claude).unwrap();
 
         assert!(matches!(state, LiveState::Unstored { .. }));
+        assert_eq!(e.stored_refresh_token("work").as_deref(), Some("r-work"));
+    }
+
+    #[test]
+    fn tokens_confirmed_as_another_stored_account_are_filed_there() {
+        let server = confirming("u-a");
+        let e = env(&server.url());
+        e.stored("a", "u-a", HOUR);
+        e.stored("b", "u-b", HOUR);
+        e.sign_in(oauth("a2", "r2", 2 * HOUR), account("u-b"));
+
+        let state = sync_live(&e.store, &e.claude).unwrap();
+
+        assert_eq!(
+            state,
+            LiveState::Stored {
+                name: "a".into(),
+                synced: true
+            }
+        );
+        assert_eq!(e.stored_refresh_token("a").as_deref(), Some("r2"));
+        assert_eq!(e.stored_refresh_token("b").as_deref(), Some("r-b"));
+    }
+
+    #[test]
+    fn an_older_live_copy_never_overwrites_a_newer_stored_one() {
+        let server = confirming("u-work");
+        let e = env(&server.url());
+        e.stored("work", "u-work", 8 * HOUR);
+        e.sign_in(oauth("a-old", "r-old", HOUR), account("u-work"));
+
+        let state = sync_live(&e.store, &e.claude).unwrap();
+
+        assert!(matches!(state, LiveState::Stored { synced: true, .. }));
         assert_eq!(e.stored_refresh_token("work").as_deref(), Some("r-work"));
     }
 

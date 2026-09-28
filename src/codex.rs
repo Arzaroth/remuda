@@ -35,6 +35,10 @@ pub struct Api {
 
 impl Api {
     pub fn openai() -> Result<Self> {
+        #[cfg(debug_assertions)]
+        if let Some(base) = std::env::var_os("REMUDA_TEST_OPENAI_API") {
+            return Self::at(&base.to_string_lossy());
+        }
         Self::at(ISSUER)
     }
 
@@ -179,10 +183,8 @@ impl Provider for Codex {
 
     /// The seat is read out of the tokens themselves, not a field beside them,
     /// so no file can disagree with it.
-    fn confirm(&self, creds: &Value) -> Result<String> {
-        identity_of(creds)
-            .map(|id| id.account_id)
-            .context("the tokens do not name their ChatGPT seat")
+    fn identify(&self, creds: &Value) -> Result<Identity> {
+        identity_of(creds).context("the tokens do not name their ChatGPT seat")
     }
 
     fn install(&self, entry: &Entry) -> Result<()> {
@@ -464,13 +466,13 @@ mod tests {
         assert_eq!(c.plan(&creds), "plus");
         assert_eq!(c.expires_at(&creds), Some(1_900_000_000_000));
         assert_eq!(c.refresh_token(&creds), Some("r"));
-        assert_eq!(c.confirm(&creds).unwrap(), "acct-1");
+        assert_eq!(c.identify(&creds).unwrap().account_id, "acct-1");
 
         let mut older = creds.clone();
         older["tokens"]["access_token"] = json!(jwt(json!({"exp": 1_900_000_000})));
-        assert_eq!(c.confirm(&older).unwrap(), "user-acct-1__ws-1");
+        assert_eq!(c.identify(&older).unwrap().account_id, "user-acct-1__ws-1");
         older["tokens"]["id_token"] = json!(jwt(json!({})));
-        assert!(c.confirm(&older).is_err());
+        assert!(c.identify(&older).is_err());
         assert_eq!(c.plan(&json!({})), "-");
     }
 

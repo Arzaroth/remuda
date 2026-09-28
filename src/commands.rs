@@ -221,15 +221,24 @@ pub fn import(
     let creds = p
         .live()?
         .with_context(|| format!("{} is not signed in", p.name()))?;
-    let identity = p
-        .live_identity(&creds)?
-        .with_context(|| format!("{} does not say whose login this is", p.name()))?;
     if !force && store.get(p.id(), name)?.is_some() {
         bail!(
             "{}/{name} already exists, pass --force to replace it",
             p.id()
         );
     }
+    let own = p.live_identity(&creds)?;
+    let identity = match (p.identify(&creds), own) {
+        (Ok(confirmed), Some(own)) if own.account_id == confirmed.account_id => own,
+        (Ok(confirmed), _) => confirmed,
+        (Err(_), Some(own)) if store.list(p.id())?.is_empty() => own,
+        (Err(err), _) => {
+            return Err(err.context(format!(
+                "could not confirm whose {} login this is; retry online",
+                p.name()
+            )));
+        }
+    };
     if let Some(other) = store
         .list(p.id())?
         .into_iter()
@@ -566,9 +575,19 @@ mod tests {
         assert!(err.to_string().contains("already stored as work"), "{err}");
     }
 
+    fn profile_server(uuid: &str) -> mockito::ServerGuard {
+        let mut server = mockito::Server::new();
+        server
+            .mock("GET", "/api/oauth/profile")
+            .with_body(profile_body(uuid))
+            .create();
+        server
+    }
+
     #[test]
     fn import_refuses_a_taken_name_or_a_second_copy_of_an_account() {
-        let e = env(OFFLINE);
+        let server = profile_server("u-perso");
+        let e = env(&server.url());
         e.stored("work", "u-work", HOUR);
         e.stored("perso", "u-perso", HOUR);
         e.sign_in(oauth("new", "new", HOUR), account("u-perso"));
@@ -599,7 +618,45 @@ mod tests {
             &oauth("a", "r", HOUR),
         )
         .unwrap();
-        assert!(run(LiveState::Unstored { email: None }).contains("whose login"));
+        assert!(run(LiveState::Unstored { email: None }).contains("could not confirm whose"));
+    }
+
+    #[test]
+    fn import_files_the_tokens_under_the_account_they_belong_to() {
+        let server = profile_server("u-real");
+        let e = env(&server.url());
+        e.sign_in(oauth("a1", "r1", HOUR), account("u-stale"));
+        let mut out = Vec::new();
+        import(
+            &e.store,
+            &e.claude,
+            &LiveState::Unstored { email: None },
+            "work",
+            false,
+            &mut out,
+        )
+        .unwrap();
+        let stored = e.store.get("claude", "work").unwrap().unwrap();
+        assert_eq!(stored.meta.account_id, "u-real");
+        assert_eq!(stored.meta.oauth_account.unwrap()["accountUuid"], "u-real");
+    }
+
+    #[test]
+    fn import_beside_stored_credentials_needs_a_confirmation() {
+        let e = env(OFFLINE);
+        e.stored("perso", "u-perso", HOUR);
+        e.sign_in(oauth("a1", "r1", HOUR), account("u-work"));
+        let err = import(
+            &e.store,
+            &e.claude,
+            &LiveState::Unstored { email: None },
+            "work",
+            false,
+            &mut Vec::new(),
+        )
+        .unwrap_err();
+        assert!(format!("{err:#}").contains("retry online"), "{err:#}");
+        assert!(e.store.get("claude", "work").unwrap().is_none());
     }
 
     #[test]

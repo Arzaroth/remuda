@@ -38,6 +38,14 @@ pub struct Api {
 
 impl Api {
     pub fn claude() -> Result<Self> {
+        #[cfg(debug_assertions)]
+        if let Some(base) = std::env::var_os("REMUDA_TEST_CLAUDE_API") {
+            let base = base.to_string_lossy();
+            return Self::at(
+                &format!("{base}/v1/oauth/token"),
+                &format!("{base}/api/oauth/profile"),
+            );
+        }
         Self::at(TOKEN_URL, PROFILE_URL)
     }
 
@@ -137,10 +145,6 @@ pub fn profile(api: &Api, access_token: &str) -> Result<Value> {
         bail!("profile endpoint answered {status}");
     }
     resp.json().context("malformed profile response")
-}
-
-pub fn profile_account_uuid(profile: &Value) -> Option<&str> {
-    profile.pointer("/account/uuid").and_then(Value::as_str)
 }
 
 /// The `oauthAccount` block Claude Code writes into `.claude.json` from a profile.
@@ -386,14 +390,11 @@ impl Provider for Claude {
             .transpose()
     }
 
-    fn confirm(&self, creds: &Value) -> Result<String> {
+    fn identify(&self, creds: &Value) -> Result<Identity> {
         let access = self
             .access_token(creds)
             .context("credential has no access token")?;
-        let profile = profile(&self.api, access)?;
-        profile_account_uuid(&profile)
-            .map(str::to_owned)
-            .context("profile has no account uuid")
+        identity_of(oauth_account_from_profile(&profile(&self.api, access)?)?)
     }
 
     /// Writes the account first and the login second: Claude Code adopts a
