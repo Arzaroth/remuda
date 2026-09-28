@@ -53,8 +53,18 @@ pub fn read_json(path: &Path) -> Result<Option<Value>> {
 }
 
 /// Writes through a sibling temp file and a rename, keeping the target's mode
-/// when it exists and 0600 otherwise.
+/// when it exists and 0600 otherwise. A symlinked target is written where the
+/// link points, so the link survives.
 pub fn write_json(path: &Path, value: &Value) -> Result<()> {
+    let resolved;
+    let path = match fs::symlink_metadata(path) {
+        Ok(m) if m.file_type().is_symlink() => {
+            resolved = fs::canonicalize(path)
+                .with_context(|| format!("{} is a dangling link", path.display()))?;
+            resolved.as_path()
+        }
+        _ => path,
+    };
     let dir = path.parent().context("path has no parent")?;
     create_private_dir(dir).with_context(|| format!("failed to create {}", dir.display()))?;
     let mode = fs::metadata(path)
@@ -100,6 +110,25 @@ pub fn lock(dir: &Path) -> Result<File> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_symlinked_file_is_written_through_its_link() {
+        let tmp = tempfile::tempdir().unwrap();
+        let real = tmp.path().join("real.json");
+        let link = tmp.path().join("link.json");
+        write_json(&real, &serde_json::json!({"v": 1})).unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        write_json(&link, &serde_json::json!({"v": 2})).unwrap();
+
+        assert!(
+            fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(read_json(&real).unwrap().unwrap()["v"], 2);
+    }
 
     #[test]
     fn timestamps_are_utc_to_the_second() {

@@ -130,10 +130,16 @@ impl Store {
             .filter_map(|f| f.strip_suffix(".json").map(str::to_owned))
             .collect();
         names.sort();
-        names
+        Ok(names
             .iter()
-            .filter_map(|n| self.get(provider, n).transpose())
-            .collect()
+            .filter_map(|n| match self.get(provider, n) {
+                Ok(entry) => entry,
+                Err(e) => {
+                    eprintln!("warning: skipping {provider}/{n}: {e:#}");
+                    None
+                }
+            })
+            .collect())
     }
 
     pub fn save(&self, entry: &Entry) -> Result<()> {
@@ -171,13 +177,18 @@ impl Store {
         if self.get(provider, to)?.is_some() {
             bail!("{provider}/{to} already exists");
         }
-        fs::rename(
+        self.get(provider, from)?
+            .with_context(|| format!("no credential named {provider}/{from}"))?;
+        fs::rename(self.meta_path(provider, from), self.meta_path(provider, to))
+            .with_context(|| format!("failed to move {provider}/{from}"))?;
+        if let Err(e) = fs::rename(
             self.creds_path(provider, from),
             self.creds_path(provider, to),
-        )
-        .with_context(|| format!("no credential named {provider}/{from}"))?;
-        fs::rename(self.meta_path(provider, from), self.meta_path(provider, to))
-            .with_context(|| format!("{provider}/{from} has no sidecar to move"))
+        ) {
+            let _ = fs::rename(self.meta_path(provider, to), self.meta_path(provider, from));
+            return Err(e).with_context(|| format!("failed to move {provider}/{from}"));
+        }
+        Ok(())
     }
 
     pub fn remove(&self, provider: &str, name: &str) -> Result<()> {
@@ -266,6 +277,21 @@ mod tests {
             store.get("claude", "job").unwrap().unwrap().meta.account_id,
             "u-1"
         );
+    }
+
+    #[test]
+    fn one_broken_entry_does_not_hide_the_others() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(tmp.path());
+        store.save(&entry("work", "u-1")).unwrap();
+        std::fs::write(tmp.path().join("claude/broken.json"), "{}").unwrap();
+        let names: Vec<String> = store
+            .list("claude")
+            .unwrap()
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        assert_eq!(names, ["work"]);
     }
 
     #[test]

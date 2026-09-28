@@ -54,16 +54,18 @@ pub struct Live<'a> {
     pub state: LiveState,
 }
 
+/// One CLI's unreadable files do not stop the others from being listed or
+/// refreshed.
 pub fn sync_all<'a>(store: &Store, providers: &[&'a dyn Provider]) -> Result<Vec<Live<'a>>> {
-    providers
+    Ok(providers
         .iter()
-        .map(|p| {
-            Ok(Live {
-                provider: *p,
-                state: ops::sync_live(store, *p)?,
-            })
+        .map(|p| Live {
+            provider: *p,
+            state: ops::sync_live(store, *p).unwrap_or_else(|e| LiveState::Unreadable {
+                error: format!("{e:#}"),
+            }),
         })
-        .collect()
+        .collect())
 }
 
 fn human(ms: i64) -> String {
@@ -101,6 +103,9 @@ fn state_json(live: &Live) -> Value {
     match &live.state {
         LiveState::SignedOut => json!({"provider": id, "state": "signed_out"}),
         LiveState::Foreign { what } => json!({"provider": id, "state": "foreign", "what": what}),
+        LiveState::Unreadable { error } => {
+            json!({"provider": id, "state": "unreadable", "error": error})
+        }
         LiveState::Stored { name, synced } => {
             json!({"provider": id, "state": "stored", "name": name, "confirmed": synced})
         }
@@ -188,6 +193,7 @@ pub fn list(store: &Store, lives: &[Live], as_json: bool, out: &mut dyn Write) -
             LiveState::Foreign { what } => {
                 writeln!(out, "  signed in with {what}, which remuda cannot store")?
             }
+            LiveState::Unreadable { error } => writeln!(out, "  cannot read its login: {error}")?,
             LiveState::Unstored { email } => writeln!(
                 out,
                 "  signed into {}, which is not stored: {}",
@@ -353,6 +359,15 @@ pub fn refresh(
     for live in lives {
         let p = live.provider;
         if scope.only.is_some_and(|(only, _)| only.id() != p.id()) {
+            continue;
+        }
+        if let LiveState::Unreadable { error } = &live.state {
+            failed += 1;
+            writeln!(
+                err,
+                "{}: not refreshing, its login cannot be read: {error}",
+                p.id()
+            )?;
             continue;
         }
         for mut entry in store.list(p.id())? {
@@ -715,6 +730,36 @@ mod tests {
             e.stored_refresh_token("active").as_deref(),
             Some("r-active")
         );
+    }
+
+    #[test]
+    fn an_unreadable_cli_is_listed_as_such_and_never_refreshed() {
+        let e = env(OFFLINE);
+        e.stored("work", "u-work", -HOUR);
+        std::fs::write(e.tmp.path().join(".credentials.json"), "{ torn").unwrap();
+        let providers: [&dyn Provider; 1] = [&e.claude];
+        let lives = sync_all(&e.store, &providers).unwrap();
+        assert!(matches!(lives[0].state, LiveState::Unreadable { .. }));
+
+        let mut out = Vec::new();
+        list(&e.store, &lives, false, &mut out).unwrap();
+        assert!(text(out).contains("cannot read its login"));
+
+        let mut err = Vec::new();
+        let result = refresh(
+            &e.store,
+            &lives,
+            RefreshScope {
+                only: None,
+                force: true,
+                within_min: 60,
+            },
+            &mut Vec::new(),
+            &mut err,
+        );
+        assert!(result.is_err());
+        assert!(text(err).contains("not refreshing"));
+        assert_eq!(e.stored_refresh_token("work").as_deref(), Some("r-work"));
     }
 
     #[test]

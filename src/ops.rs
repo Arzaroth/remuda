@@ -20,6 +20,11 @@ pub enum LiveState {
     Foreign {
         what: String,
     },
+    /// The CLI's files could not be read, so which credential is active is
+    /// unknown.
+    Unreadable {
+        error: String,
+    },
 }
 
 impl LiveState {
