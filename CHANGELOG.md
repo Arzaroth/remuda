@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-28
+
 - `import`, `login`, `use`, `ls`, `refresh`, `label`, `rename` and `rm` for
   Claude Code and Codex logins. A name is bare when only one CLI has it, and
   `claude/<name>` or `codex/<name>` otherwise.
