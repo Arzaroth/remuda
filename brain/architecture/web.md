@@ -1,6 +1,6 @@
 # The local page
 
-`remuda serve [--port 7429] [--no-browser]` binds `127.0.0.1` only (tiny_http),
+`remuda serve [--port 7429] [--no-browser]` binds `127.0.0.1` only,
 prints `http://127.0.0.1:<port>/#<token>`, and opens it. The token is 32 random
 bytes, base64url. The browser is not given the URL as an argument (every local
 user can read a command line): remuda writes a redirect page to
@@ -20,9 +20,20 @@ and sends it as `X-Remuda-Token`.
 3. Every `/api/` call needs the token. `GET /` is served without it; the page
    holds no data.
 
-Responses carry `Cache-Control: no-store`, `nosniff` and `no-referrer`. Bodies
-are capped at 64 KiB. Each request runs on its own thread, because a Codex
-`login/finish` holds its request open until the browser calls back.
+## The listener (`http.rs`)
+
+remuda reads requests itself rather than through an HTTP library, because the
+order matters: the request line and headers are read within a 5 s deadline and
+a 16 KiB cap, `App::check` decides from them alone whether the request may be
+served, and only then is a body read, at most 64 KiB, within the same
+deadline. A client without the token never gets to make remuda wait on a
+body. At most 32 connections are handled at once; the next gets a 503 and is
+closed. Each runs on its own thread, because a Codex `login/finish` holds its
+request open until the browser calls back, and a thread that cannot start is
+a refused connection rather than a stopped server. Every answer closes the
+connection, after briefly draining what the client sent so it is not reset
+before it reads the answer. Responses carry `Cache-Control: no-store`,
+`nosniff` and `no-referrer`.
 
 ## API
 
@@ -53,5 +64,6 @@ light and dark. It reloads the state every minute unless an editor is open.
 ## Sources
 
 - [src/serve.rs](../../src/serve.rs)
+- [src/http.rs](../../src/http.rs)
 - [src/serve.html](../../src/serve.html)
 - [src/main.rs](../../src/main.rs)

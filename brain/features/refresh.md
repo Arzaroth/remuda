@@ -15,8 +15,13 @@ are kept in a `.set-aside-...` file named in the error. A refused refresh token
 says to sign that credential in again. Failures are listed per credential and
 the command exits non-zero.
 
-`remuda-refresh.timer`, installed by `install.sh`, runs it every 30 minutes,
-with the directories the installing shell had set (see
+A credential whose sidecar does not match it (`[unverified]` in `ls`) is not
+refreshed until it has been identified again.
+
+`remuda-refresh.timer`, installed by `install.sh`, runs `remuda refresh
+--scheduled` every 30 minutes. `--scheduled` first checks the store and each
+CLI's directory against the ones the last interactive command used, and stops
+or skips a CLI where they differ (see
 [distribution.md](../architecture/distribution.md)).
 
 ## Sources

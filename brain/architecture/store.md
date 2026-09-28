@@ -22,7 +22,7 @@ the CLI's file parses the stored one unchanged. Claude's holds only
 `claudeAiOauth`: `mcpOAuth` stays in the live file, shared.
 
 The sidecar (`store::Meta`, camelCase): `accountId`, `email`, `capturedAt`
-(ms), optional `label`, and for Claude `oauthAccount`, the block restored into
+(ms), optional `label`, `credsDigest`, and for Claude `oauthAccount`, the block restored into
 `.claude.json` on a switch. `accountId` is Claude's `accountUuid`, and for
 Codex the seat (`chatgpt_account_user_id`), not the workspace id in
 `auth.json`.
@@ -44,8 +44,14 @@ a sidecar.
 Every write goes through `fsx::write_private`: a sibling temp file, fsync,
 rename, mode 0600 (or the target's existing mode). A symlinked target is
 written where the link points, so the link survives. Directories are created
-0700. A credential and its sidecar are two renames, sidecar first; `rename`
-undoes the first if the second fails.
+0700. A credential and its sidecar are two renames: the credential first, then
+the sidecar, which records the credential file's SHA-256 as `credsDigest`. A
+crash in between leaves a sidecar whose digest does not match; `Store::get`
+marks that entry unverified, and `ops::heal`, run before every sync, asks the
+provider whose tokens it holds and rewrites the sidecar. Until then it is not
+matched, refreshed or switched to, and `ls` marks it `[unverified]`. Sidecars
+without a digest (written by 0.1.0) are trusted. `rename` moves the sidecar
+first and undoes that if the credential cannot follow.
 
 `Store::lock` takes an exclusive `flock` on `<store>/.lock`, released when the
 process exits, so a crashed command never leaves the store locked.

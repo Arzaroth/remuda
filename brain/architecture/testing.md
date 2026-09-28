@@ -28,8 +28,9 @@ network or touches the developer's own logins.
   in the authorize URL, and match the redirect URI.
 - The whole suite passes under `unshare -rn` with an empty `HOME`, which is the
   check that nothing reaches the network or a real login.
-- **`serve`** is tested through `App::handle` with synthetic requests, plus one
-  real socket round trip.
+- **`serve`** is tested through `App::handle` with synthetic requests; `http.rs`
+  over real sockets, with short limits: refusal before a body, oversized,
+  stalled and malformed requests, and the connection limit.
 
 `scripts/coverage.sh` (cargo-llvm-cov) prints the summary and the files with the
 most uncovered lines. Uncovered on purpose: `main.rs`'s process surface

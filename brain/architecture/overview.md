@@ -15,7 +15,10 @@ only long-running mode.
 | `claude.rs`, `codex.rs` | The two providers, including their OAuth clients |
 | `store.rs` | The credential store: entries, sidecars, rename, remove, the lock |
 | `serve.rs`, `serve.html` | The local page and its JSON API |
-| `fsx.rs` | Atomic 0600 JSON writes, the file lock, timestamps |
+| `http.rs` | The page's HTTP listener: bounded reads, checks before bodies, a connection limit |
+| `oauth.rs` | The HTTP client and token requests both providers share |
+| `dirs.rs` | The directories interactive commands used, for the scheduled refresh to check |
+| `fsx.rs` | Atomic 0600 writes, compare-and-swap JSON edits, the file lock, timestamps |
 | `paths.rs` | Where each CLI's files and the store live, honouring their env vars |
 | `pkce.rs` | PKCE verifier/state generation and the S256 challenge |
 | `project.rs` | The selvedge project declaration and the release-contract tests |

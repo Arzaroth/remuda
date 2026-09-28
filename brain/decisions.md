@@ -83,6 +83,35 @@ Usage meters per credential belong to TokenGauge, whose ADR 0003 defines the
 store as a contract. remuda owns every write, TokenGauge only reads, so there
 is exactly one process that refreshes a stored token.
 
+## The page reads its own requests
+
+An HTTP library that reads a body before handing over the request lets anyone
+who can connect make remuda wait, and one that gives each connection a thread
+with no limit lets them exhaust it. The page's needs are a dozen routes on
+loopback, so `http.rs` reads requests itself, in the order that matters:
+head, checks, and only then a capped body, with a connection limit.
+
+## A sidecar says which tokens it describes
+
+A credential and its sidecar cannot be written in one rename without breaking
+the layout TokenGauge reads, so the sidecar records the credential file's
+digest instead. A torn write is then detected, not trusted, and repaired by
+asking the provider.
+
+## Edits to a file Claude Code also writes are compare-and-swap
+
+Claude Code rewrites `.claude.json` and `.credentials.json` without a lock
+remuda could take. Reading, editing and renaming would revert whatever it
+saved in between, so the rename happens only if the file is still the one that
+was read.
+
+## The timer checks it sees what the shell sees
+
+A systemd user service does not inherit a shell's environment, and a timer
+that looks in the default place for a login kept elsewhere refreshes the
+active credential. The installer copies the variables once; the directories
+record catches a change made later.
+
 ## No secret on a command line
 
 Every local user can read another's command lines in `/proc`, and a browser

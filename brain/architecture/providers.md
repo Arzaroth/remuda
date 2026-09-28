@@ -6,6 +6,7 @@ from a CLI. `creds` is always the store's shape for that CLI.
 | Method | Meaning |
 | --- | --- |
 | `id`, `name` | `claude` / "Claude Code", `codex` / "Codex" |
+| `home` | The directory the CLI keeps its login in, as this process resolves it |
 | `access_token`, `refresh_token`, `expires_at`, `refresh_expires_at`, `plan` | Read from `creds` |
 | `live` | The login the CLI is signed into, in store shape, or none |
 | `foreign_login` | A live login `live` skips because it cannot be stored (an API key), described |
@@ -39,7 +40,11 @@ refresh token into "sign this credential in again".
   (`oauth_account_from_profile`) and maps `organization_type` onto
   `subscriptionType`.
 - `install` checks both files are JSON objects before writing either, then
-  writes `.claude.json` first.
+  edits `.claude.json` first. Claude Code rewrites both files on its own and
+  takes no lock, so each edit is a compare-and-swap (`fsx::update_json`): the
+  file's inode, size and mtime are checked again just before the rename, and
+  a file that moved meanwhile is read and edited again, so nothing Claude Code
+  saved is reverted.
 
 ## Codex
 
