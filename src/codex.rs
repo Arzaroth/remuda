@@ -260,13 +260,8 @@ impl Provider for Codex {
     }
 
     fn begin_login(&self) -> Result<Box<dyn PendingLogin>> {
-        let listener = TcpListener::bind(("127.0.0.1", self.callback_port)).with_context(|| {
-            format!(
-                "port {} is taken; is `codex login` running?",
-                self.callback_port
-            )
-        })?;
-        let port = listener.local_addr()?.port();
+        let listeners = bind_callback(self.callback_port)?;
+        let port = listeners[0].local_addr()?.port();
         let redirect_uri = format!("http://localhost:{port}/auth/callback");
         let verifier = pkce::random()?;
         let state = pkce::random()?;
@@ -289,7 +284,7 @@ impl Provider for Codex {
         Ok(Box::new(CodexPending {
             api: self.api.clone(),
             cancelled: Arc::new(AtomicBool::new(false)),
-            listener,
+            listeners,
             redirect_uri,
             verifier,
             state,
@@ -301,11 +296,51 @@ impl Provider for Codex {
 struct CodexPending {
     api: Api,
     cancelled: Arc<AtomicBool>,
-    listener: TcpListener,
+    listeners: Vec<TcpListener>,
     redirect_uri: String,
     verifier: String,
     state: String,
     url: String,
+}
+
+/// 127.0.0.1 and, when the machine has it, [::1]: the redirect names
+/// `localhost`, which a browser may resolve to either, and a port left free on
+/// one of them is a port another local user could answer on. A port still held
+/// by an attempt that is shutting down gets a moment to be released.
+fn bind_callback(port: u16) -> Result<Vec<TcpListener>> {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let v4 = loop {
+        match TcpListener::bind(("127.0.0.1", port)) {
+            Ok(listener) => break listener,
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse && Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => {
+                return Err(e)
+                    .with_context(|| format!("port {port} is taken; is `codex login` running?"));
+            }
+        }
+    };
+    let port = v4.local_addr()?.port();
+    let mut listeners = vec![v4];
+    if let Ok(v6) = TcpListener::bind(("::1", port)) {
+        listeners.push(v6);
+    }
+    for listener in &listeners {
+        listener.set_nonblocking(true)?;
+    }
+    Ok(listeners)
+}
+
+fn read_request(stream: &TcpStream) -> Option<reqwest::Url> {
+    stream.set_nonblocking(false).ok()?;
+    stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
+    let mut line = String::new();
+    BufReader::new(std::io::Read::take(stream, 8192))
+        .read_line(&mut line)
+        .ok()?;
+    let target = line.split_whitespace().nth(1)?;
+    reqwest::Url::parse(&format!("http://localhost{target}")).ok()
 }
 
 fn respond(mut stream: &TcpStream, status: &str, body: &str) {
@@ -327,41 +362,52 @@ fn page(message: &str) -> String {
 }
 
 impl CodexPending {
-    /// The query of the first request to `/auth/callback`. Anything else the
-    /// browser asks for (a favicon) gets a 404 and the wait goes on.
+    /// The query of the first request to `/auth/callback` carrying this
+    /// attempt's state. Anything else on the port, whether another path, a
+    /// stale or forged state, or a connection that never sends a request, is
+    /// answered or dropped and the wait goes on.
     fn wait_for_callback(&self) -> Result<(TcpStream, Map<String, Value>)> {
-        self.listener.set_nonblocking(true)?;
         let deadline = Instant::now() + LOGIN_TIMEOUT;
         loop {
-            let stream = match self.listener.accept() {
-                Ok((stream, _)) => stream,
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    if self.cancelled.load(Ordering::Relaxed) {
-                        bail!("the sign-in was cancelled");
-                    }
-                    if Instant::now() > deadline {
-                        bail!("gave up waiting for the browser to finish signing in");
-                    }
-                    std::thread::sleep(Duration::from_millis(100));
+            let mut accepted = false;
+            for listener in &self.listeners {
+                let stream = match listener.accept() {
+                    Ok((stream, _)) => stream,
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
+                    Err(e) => return Err(e).context("callback listener failed"),
+                };
+                accepted = true;
+                let Some(url) = read_request(&stream) else {
+                    continue;
+                };
+                if url.path() != "/auth/callback" {
+                    respond(&stream, "404 Not Found", &page("Not found."));
                     continue;
                 }
-                Err(e) => return Err(e).context("callback listener failed"),
-            };
-            stream.set_nonblocking(false)?;
-            stream.set_read_timeout(Some(Duration::from_secs(10)))?;
-            let mut line = String::new();
-            BufReader::new(&stream).read_line(&mut line)?;
-            let target = line.split_whitespace().nth(1).unwrap_or_default();
-            let url = reqwest::Url::parse(&format!("http://localhost{target}"))?;
-            if url.path() != "/auth/callback" {
-                respond(&stream, "404 Not Found", &page("Not found."));
+                let query: Map<String, Value> = url
+                    .query_pairs()
+                    .map(|(k, v)| (k.into_owned(), json!(v.into_owned())))
+                    .collect();
+                if query.get("state").and_then(Value::as_str) != Some(self.state.as_str()) {
+                    respond(
+                        &stream,
+                        "400 Bad Request",
+                        &page("This is not the sign-in remuda is waiting for."),
+                    );
+                    continue;
+                }
+                return Ok((stream, query));
+            }
+            if accepted {
                 continue;
             }
-            let query = url
-                .query_pairs()
-                .map(|(k, v)| (k.into_owned(), json!(v.into_owned())))
-                .collect();
-            return Ok((stream, query));
+            if self.cancelled.load(Ordering::Relaxed) {
+                bail!("the sign-in was cancelled");
+            }
+            if Instant::now() > deadline {
+                bail!("gave up waiting for the browser to finish signing in");
+            }
+            std::thread::sleep(Duration::from_millis(50));
         }
     }
 
@@ -421,9 +467,6 @@ impl PendingLogin for CodexPending {
                     "the sign-in was refused: {}",
                     param("error_description").unwrap_or(error)
                 );
-            }
-            if param("state") != Some(self.state.as_str()) {
-                bail!("the callback belongs to another login attempt");
             }
             let code = param("code").context("the callback carried no code")?;
             let creds = self.exchange(code)?;
@@ -763,27 +806,46 @@ mod tests {
     }
 
     #[test]
-    fn a_callback_from_another_attempt_or_a_refusal_stores_nothing() {
-        for (query, says) in [
-            ("code=c&state=forged", "another login attempt"),
-            (
-                "error=access_denied&error_description=no%20thanks",
-                "refused: no thanks",
-            ),
-        ] {
-            let tmp = tempfile::tempdir().unwrap();
-            let c = codex(tmp.path(), OFFLINE);
-            let pending = c.begin_login().unwrap();
-            let redirect = param(pending.url(), "redirect_uri");
-            let query = query.to_owned();
-            let browser = std::thread::spawn(move || {
-                browse(&format!("{redirect}?{query}").replace("localhost", "127.0.0.1"))
-            });
-            let err = pending.finish(None).err().unwrap();
-            let page = browser.join().unwrap();
-            assert!(err.to_string().contains(says), "{err}");
-            assert!(page.starts_with("HTTP/1.1 400"), "{page}");
+    fn stray_connections_do_not_end_the_wait_and_a_refusal_does() {
+        let tmp = tempfile::tempdir().unwrap();
+        let c = codex(tmp.path(), OFFLINE);
+        let pending = c.begin_login().unwrap();
+        let redirect = param(pending.url(), "redirect_uri").replace("localhost", "127.0.0.1");
+        let state = param(pending.url(), "state");
+        let browser = std::thread::spawn(move || {
+            let port = reqwest::Url::parse(&redirect).unwrap().port().unwrap();
+            drop(TcpStream::connect(("127.0.0.1", port)).unwrap());
+            let mut garbage = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            garbage.write_all(b"\x00\x01 nonsense\r\n").unwrap();
+            drop(garbage);
+            let forged = browse(&format!("{redirect}?code=c&state=forged"));
+            let refused = browse(&format!(
+                "{redirect}?error=access_denied&error_description=no%20thanks&state={state}"
+            ));
+            (forged, refused)
+        });
+        let err = pending.finish(None).err().unwrap();
+        let (forged, refused) = browser.join().unwrap();
+        assert!(forged.starts_with("HTTP/1.1 400"), "{forged}");
+        assert!(forged.contains("not the sign-in"), "{forged}");
+        assert!(err.to_string().contains("refused: no thanks"), "{err}");
+        assert!(refused.starts_with("HTTP/1.1 400"), "{refused}");
+    }
+
+    #[test]
+    fn the_callback_answers_on_both_loopbacks() {
+        if TcpListener::bind(("::1", 0)).is_err() {
+            return;
         }
+        let tmp = tempfile::tempdir().unwrap();
+        let c = codex(tmp.path(), OFFLINE);
+        let pending = c.begin_login().unwrap();
+        let port = reqwest::Url::parse(&param(pending.url(), "redirect_uri"))
+            .unwrap()
+            .port()
+            .unwrap();
+        assert!(TcpStream::connect(("127.0.0.1", port)).is_ok());
+        assert!(TcpStream::connect(("::1", port)).is_ok());
     }
 
     #[test]
