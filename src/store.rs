@@ -170,20 +170,25 @@ impl Store {
             .collect())
     }
 
-    /// The credential first, then the sidecar naming its digest: a crash in
-    /// between leaves a sidecar `get` reports as unverified, never one that
-    /// passes for the new tokens.
+    /// A crash between the two renames must leave a sidecar whose digest
+    /// does not match, never one that passes for the other half. So the
+    /// credential goes first, except over a sidecar with no digest (written by
+    /// 0.1.0), which would pass for anything: that one is replaced first.
     pub fn save(&self, entry: &Entry) -> Result<()> {
         validate_name(&entry.name)?;
         let mut creds = serde_json::to_string_pretty(&entry.creds)?;
         creds.push('\n');
-        write_private(&self.creds_path(&entry.provider, &entry.name), &creds)?;
         let mut meta = entry.meta.clone();
         meta.creds_digest = Some(digest(&creds));
-        write_json(
-            &self.meta_path(&entry.provider, &entry.name),
-            &serde_json::to_value(&meta)?,
-        )
+        let meta_path = self.meta_path(&entry.provider, &entry.name);
+        let creds_path = self.creds_path(&entry.provider, &entry.name);
+        let legacy = read_json(&meta_path)?.is_some_and(|m| m.get("credsDigest").is_none());
+        if legacy {
+            write_json(&meta_path, &serde_json::to_value(&meta)?)?;
+            return write_private(&creds_path, &creds);
+        }
+        write_private(&creds_path, &creds)?;
+        write_json(&meta_path, &serde_json::to_value(&meta)?)
     }
 
     /// Keeps tokens nothing else would hold, in a file `list` does not show.
@@ -351,6 +356,31 @@ mod tests {
         legacy.as_object_mut().unwrap().remove("credsDigest");
         write_json(&tmp.path().join("claude/work.meta.json"), &legacy).unwrap();
         assert!(store.get("claude", "work").unwrap().unwrap().verified);
+    }
+
+    #[test]
+    fn a_sidecar_without_a_digest_is_replaced_before_the_credential() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(tmp.path());
+        store.save(&entry("work", "u-1")).unwrap();
+        let meta_path = tmp.path().join("claude/work.meta.json");
+        let mut legacy = read_json(&meta_path).unwrap().unwrap();
+        legacy.as_object_mut().unwrap().remove("credsDigest");
+        write_json(&meta_path, &legacy).unwrap();
+        // The sidecar's write fails: its temp file is already there.
+        let blocker = tmp.path().join(format!(
+            "claude/.work.meta.json.remuda-{}",
+            std::process::id()
+        ));
+        std::fs::write(&blocker, "").unwrap();
+
+        let mut changed = entry("work", "u-2");
+        changed.creds = serde_json::json!({"claudeAiOauth": {"accessToken": "b"}});
+        assert!(store.save(&changed).is_err());
+
+        let after = store.get("claude", "work").unwrap().unwrap();
+        assert_eq!(after.creds["claudeAiOauth"]["accessToken"], "a");
+        assert_eq!(after.meta.account_id, "u-1");
     }
 
     #[test]

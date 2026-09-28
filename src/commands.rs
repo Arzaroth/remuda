@@ -443,6 +443,12 @@ pub fn label(
     let mut entry = store
         .get(p.id(), name)?
         .with_context(|| format!("no credential named {}/{name}", p.id()))?;
+    if !entry.verified {
+        bail!(
+            "{} does not match its sidecar; `remuda ls` online identifies it first",
+            entry.qualified()
+        );
+    }
     entry.meta.label = text
         .map(str::trim)
         .filter(|t| !t.is_empty())
@@ -1150,6 +1156,44 @@ mod tests {
                 .is_none()
         );
         assert!(label(&e.store, &e.claude, "nope", None, &mut Vec::new()).is_err());
+    }
+
+    #[test]
+    fn an_unverified_credential_is_marked_and_neither_refreshed_nor_labelled() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", -HOUR);
+        crate::fsx::write_json(
+            &e.store.root().join("claude/work.json"),
+            &oauth("a-torn", "r-torn", -HOUR),
+        )
+        .unwrap();
+        let lives = live(&e, LiveState::SignedOut);
+
+        let mut out = Vec::new();
+        list(&e.store, &lives, false, &mut out).unwrap();
+        assert!(text(out).contains("work [unverified]"));
+
+        let mut err = Vec::new();
+        let result = refresh(
+            &e.store,
+            &lives,
+            RefreshScope {
+                only: None,
+                force: true,
+                within_min: 60,
+            },
+            &mut Vec::new(),
+            &mut err,
+        );
+        assert!(result.is_err());
+        assert!(text(err).contains("does not match its sidecar"));
+
+        let err = label(&e.store, &e.claude, "work", Some("x"), &mut Vec::new()).unwrap_err();
+        assert!(
+            err.to_string().contains("does not match its sidecar"),
+            "{err}"
+        );
+        assert!(!e.store.get("claude", "work").unwrap().unwrap().verified);
     }
 
     #[test]

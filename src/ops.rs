@@ -1,8 +1,9 @@
 use anyhow::{Context, Result, bail};
 
 use crate::fsx::now_ms;
-use crate::provider::Provider;
+use crate::provider::{Identity, Provider};
 use crate::store::{Entry, Store};
+use serde_json::Value;
 
 #[derive(Debug, PartialEq)]
 pub enum LiveState {
@@ -40,17 +41,42 @@ impl LiveState {
 /// save interrupted between its two renames) and rewrites the sidecar for the
 /// tokens actually there. One that cannot be identified yet stays unverified,
 /// and nothing refreshes, switches to or matches it.
-pub fn heal(store: &Store, p: &dyn Provider) -> Result<()> {
+pub fn heal(store: &Store, p: &dyn Provider, live: Option<&Value>) -> Result<()> {
+    let live_refresh = live.and_then(|l| p.refresh_token(l));
     for mut entry in store.list(p.id())?.into_iter().filter(|e| !e.verified) {
-        match p.identify(&entry.creds) {
+        let identified = match p.identify(&entry.creds) {
+            Ok(id) => Ok(id),
+            // Its tokens are the CLI's own: rotating them would sign the CLI
+            // out, so it waits until they can be identified as they are.
+            Err(err) if live_refresh.is_some() && p.refresh_token(&entry.creds) == live_refresh => {
+                Err(err)
+            }
+            // An expired access token cannot be identified, so it is refreshed
+            // and the new one asked instead. The old refresh token is spent
+            // either way, so the result is saved whoever it belongs to.
+            Err(_) => match p.refresh(&mut entry.creds) {
+                Ok(answered) => Ok(p.identify(&entry.creds).unwrap_or_else(|_| Identity {
+                    account_id: answered.unwrap_or_else(|| entry.meta.account_id.clone()),
+                    email: String::new(),
+                    oauth_account: None,
+                })),
+                Err(err) => Err(err),
+            },
+        };
+        match identified {
             Ok(id) => {
                 if id.account_id != entry.meta.account_id {
                     eprintln!(
-                        "note: {} held {}'s tokens, not {}'s; its sidecar now says so",
+                        "note: {} held another account's tokens than its sidecar said; it now says {}",
                         entry.qualified(),
-                        id.email,
-                        entry.meta.email
+                        if id.email.is_empty() {
+                            &id.account_id
+                        } else {
+                            &id.email
+                        }
                     );
+                    entry.meta.email = String::new();
+                    entry.meta.oauth_account = None;
                 }
                 entry.meta.account_id = id.account_id;
                 if !id.email.is_empty() {
@@ -75,26 +101,32 @@ pub fn heal(store: &Store, p: &dyn Provider) -> Result<()> {
 /// refresh token of the account it is signed into, which leaves the stored
 /// copy dead unless it is brought forward before anything else reads it.
 pub fn sync_live(store: &Store, p: &dyn Provider) -> Result<LiveState> {
-    let Some(creds) = p.live()? else {
+    let live = p.live()?;
+    heal(store, p, live.as_ref())?;
+    let Some(creds) = live else {
         return Ok(match p.foreign_login()? {
             Some(what) => LiveState::Foreign { what },
             None => LiveState::SignedOut,
         });
     };
     let identity = p.live_identity(&creds)?;
-    heal(store, p)?;
-    let entries: Vec<Entry> = store
-        .list(p.id())?
-        .into_iter()
-        .filter(|e| e.verified)
-        .collect();
+    let all = store.list(p.id())?;
 
     let refresh = p.refresh_token(&creds);
     let access = p.access_token(&creds);
-    let by_token = entries.iter().find(|e| {
+    let by_token = all.iter().find(|e| {
         (refresh.is_some() && p.refresh_token(&e.creds) == refresh)
             || (access.is_some() && p.access_token(&e.creds) == access)
     });
+    // The live login is this one's tokens, but whose they are is not settled:
+    // it is neither refreshed nor overwritten, and a switch asks for --discard.
+    if let Some(e) = by_token.filter(|e| !e.verified) {
+        return Ok(LiveState::Stored {
+            name: e.name.clone(),
+            synced: false,
+        });
+    }
+    let entries: Vec<&Entry> = all.iter().filter(|e| e.verified).collect();
     let found = match by_token {
         Some(e) => e,
         None if entries.is_empty() => {
@@ -462,7 +494,7 @@ mod tests {
         e.stored("work", "u-work", HOUR);
         tear(&e, "work", "a-real");
 
-        heal(&e.store, &e.claude).unwrap();
+        heal(&e.store, &e.claude, None).unwrap();
 
         let work = e.store.get("claude", "work").unwrap().unwrap();
         assert!(work.verified);
@@ -471,7 +503,7 @@ mod tests {
     }
 
     #[test]
-    fn an_unidentified_torn_credential_is_neither_switched_to_nor_refreshed() {
+    fn an_unidentified_torn_credential_is_not_switched_to() {
         let e = env(&OFFLINE);
         e.stored("work", "u-work", -HOUR);
         tear(&e, "work", "a-torn");
@@ -482,34 +514,79 @@ mod tests {
             "{err}"
         );
         assert!(e.claude.live().unwrap().is_none());
+    }
 
-        let providers: [&dyn Provider; 1] = [&e.claude];
-        let lives = crate::commands::sync_all(&e.store, &providers).unwrap();
-        let mut err = Vec::new();
-        let result = crate::commands::refresh(
-            &e.store,
-            &lives,
-            crate::commands::RefreshScope {
-                only: None,
-                force: true,
-                within_min: 60,
-            },
-            &mut Vec::new(),
-            &mut err,
+    #[test]
+    fn a_torn_credential_is_healed_even_while_the_cli_is_signed_out() {
+        let server = confirming("u-work");
+        let e = env(&server.url());
+        e.stored("work", "u-work", HOUR);
+        tear(&e, "work", "a-torn");
+
+        assert_eq!(
+            sync_live(&e.store, &e.claude).unwrap(),
+            LiveState::SignedOut
         );
-        assert!(result.is_err());
-        assert!(
-            String::from_utf8(err)
-                .unwrap()
-                .contains("does not match its sidecar")
+
+        assert!(e.store.get("claude", "work").unwrap().unwrap().verified);
+    }
+
+    #[test]
+    fn an_expired_torn_credential_is_refreshed_to_be_identified() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("GET", "/api/oauth/profile")
+            .match_header("authorization", "Bearer a-torn")
+            .with_status(401)
+            .create();
+        server
+            .mock("POST", "/v1/oauth/token")
+            .with_body(
+                json!({"access_token": "a-new", "refresh_token": "r-new", "expires_in": 28800,
+                       "account": {"uuid": "u-other"}})
+                .to_string(),
+            )
+            .expect(1)
+            .create();
+        server
+            .mock("GET", "/api/oauth/profile")
+            .match_header("authorization", "Bearer a-new")
+            .with_body(profile_body("u-other"))
+            .create();
+        let e = env(&server.url());
+        e.stored("work", "u-work", HOUR);
+        tear(&e, "work", "a-torn");
+
+        heal(&e.store, &e.claude, None).unwrap();
+
+        let work = e.store.get("claude", "work").unwrap().unwrap();
+        assert!(work.verified);
+        assert_eq!(work.meta.account_id, "u-other");
+        assert_eq!(work.meta.email, "u-other@example.com");
+        assert_eq!(e.stored_refresh_token("work").as_deref(), Some("r-new"));
+    }
+
+    #[test]
+    fn a_torn_credential_holding_the_live_login_is_kept_and_never_rotated() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        e.stored("perso", "u-perso", HOUR);
+        tear(&e, "work", "a-live");
+        let torn = e.store.get("claude", "work").unwrap().unwrap();
+        e.sign_in(torn.creds, account("u-work"));
+
+        let state = sync_live(&e.store, &e.claude).unwrap();
+
+        assert_eq!(
+            state,
+            LiveState::Stored {
+                name: "work".into(),
+                synced: false
+            }
         );
-        let mut out = Vec::new();
-        crate::commands::list(&e.store, &lives, false, &mut out).unwrap();
-        assert!(
-            String::from_utf8(out)
-                .unwrap()
-                .contains("work [unverified]")
-        );
+        let err = switch(&e.store, &e.claude, "perso", false).unwrap_err();
+        assert!(err.to_string().contains("could not be confirmed"), "{err}");
+        assert_eq!(e.live_refresh_token().as_deref(), Some("r-a-live"));
     }
 
     #[test]
