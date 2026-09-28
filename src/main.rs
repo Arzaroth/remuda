@@ -10,10 +10,11 @@ mod paths;
 mod pkce;
 mod project;
 mod provider;
+mod runs;
 mod serve;
 mod store;
 
-use std::io::{self, BufRead};
+use std::io::{self, BufRead, Write};
 use std::process::{Command, Stdio};
 
 use anyhow::{Result, bail};
@@ -287,7 +288,15 @@ fn main() -> Result<()> {
                 force,
                 within_min: within,
             };
-            commands::refresh(&store, &lives, scope, out, &mut io::stderr())?;
+            let (mut done, mut failed) = (Vec::new(), Vec::new());
+            let result = commands::refresh(&store, &lives, scope, &mut done, &mut failed);
+            out.write_all(&done)?;
+            io::stderr().write_all(&failed)?;
+            if let Some(plan) = &plan {
+                let run = runs::Run::from_output(fsx::now_ms(), &plan.skipped, &done, &failed);
+                runs::record(&store, &run);
+            }
+            result?;
             let skipped = plan.map_or(0, |p| p.skipped.len());
             if skipped > 0 {
                 bail!("{skipped} CLI(s) skipped");
