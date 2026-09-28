@@ -272,8 +272,15 @@ fn main() -> Result<()> {
                 .collect();
             let only = name
                 .as_deref()
-                .map(|spec| commands::resolve(&store, &usable, spec))
-                .transpose()?;
+                .map(|spec| commands::resolve(&store, &providers, spec))
+                .transpose()?
+                .filter(|(p, _)| usable.iter().any(|u| u.id() == p.id()));
+            if name.is_some() && only.is_none() {
+                bail!(
+                    "not refreshing {}: its CLI was skipped",
+                    name.unwrap_or_default()
+                );
+            }
             let lives = commands::sync_all(&store, &usable)?;
             let scope = commands::RefreshScope {
                 only: only.as_ref().map(|(p, name)| (*p, name.as_str())),

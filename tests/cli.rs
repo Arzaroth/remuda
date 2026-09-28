@@ -409,6 +409,12 @@ fn the_scheduled_refresh_stops_where_the_shell_looked_elsewhere() {
         &[("CLAUDE_CONFIG_DIR", &elsewhere)],
     );
     assert!(out.status.success(), "{}", stderr(&out));
+    let out = run(&["refresh", "--scheduled", "work"], &[]);
+    assert!(
+        stderr(&out).contains("not refreshing work: its CLI was skipped"),
+        "{}",
+        stderr(&out)
+    );
 
     // A unit from 0.1.0 runs plain `refresh`: under systemd it is checked the
     // same way and records nothing.

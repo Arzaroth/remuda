@@ -252,6 +252,31 @@ mod tests {
     }
 
     #[test]
+    fn an_update_gives_up_on_a_file_that_never_settles_and_leaves_it_be() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.json");
+        fs::write(&path, r#"{"n": 0}"#).unwrap();
+        let n = std::cell::Cell::new(0);
+        let err = update_json(&path, |v| {
+            n.set(n.get() + 1);
+            fs::write(&path, format!(r#"{{"n": {}}}"#, n.get())).unwrap();
+            v["mine"] = serde_json::json!(true);
+            Ok(())
+        })
+        .unwrap_err();
+        assert!(err.to_string().contains("kept changing"), "{err}");
+        assert_eq!(
+            read_json(&path).unwrap().unwrap(),
+            serde_json::json!({"n": 10})
+        );
+        assert_eq!(fs::read_dir(tmp.path()).unwrap().count(), 1);
+
+        fs::write(&path, "[1]").unwrap();
+        let err = update_json(&path, |_| Ok(())).unwrap_err();
+        assert!(err.to_string().contains("not a JSON object"), "{err}");
+    }
+
+    #[test]
     fn an_edit_that_refuses_writes_nothing() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("auth.json");
