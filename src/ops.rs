@@ -169,9 +169,16 @@ pub fn switch(store: &Store, p: &dyn Provider, name: &str, discard: bool) -> Res
         }
         _ => {}
     }
-    if expires_in_ms(p, &target).is_some_and(|ms| ms < 5 * 60 * 1000) {
+    let refreshed = expires_in_ms(p, &target).is_some_and(|ms| ms < 5 * 60 * 1000);
+    if refreshed {
         refresh_entry(store, p, &mut target)?;
         store.save(&target)?;
+    }
+    let _live = p.lock_live()?;
+    if refreshed {
+        // The refresh took a round trip, and the CLI may have rotated its own
+        // login meanwhile.
+        sync_live(store, p)?;
     }
     p.install(&target)?;
     Ok(format!(
@@ -410,6 +417,28 @@ mod tests {
             .unwrap();
         assert_eq!(config["oauthAccount"]["accountUuid"], "u-perso");
         assert_eq!(config["numStartups"], 7);
+    }
+
+    #[test]
+    fn a_corrupt_credentials_file_stops_a_switch_before_anything_is_written() {
+        let e = env(OFFLINE);
+        e.stored("perso", "u-perso", HOUR);
+        e.sign_in(oauth("a", "r", HOUR), account("u-work"));
+        std::fs::write(e.tmp.path().join(".credentials.json"), "[1, 2]").unwrap();
+        let config = std::fs::read_to_string(e.tmp.path().join(".claude.json")).unwrap();
+
+        let perso = e.store.get("claude", "perso").unwrap().unwrap();
+        let err = e.claude.install(&perso).unwrap_err();
+
+        assert!(err.to_string().contains("not a JSON object"), "{err}");
+        assert_eq!(
+            std::fs::read_to_string(e.tmp.path().join(".claude.json")).unwrap(),
+            config
+        );
+        assert_eq!(
+            std::fs::read_to_string(e.tmp.path().join(".credentials.json")).unwrap(),
+            "[1, 2]"
+        );
     }
 
     #[test]

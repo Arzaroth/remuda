@@ -410,16 +410,15 @@ impl Provider for Claude {
             .clone()
             .context("stored credential has no oauthAccount")?;
         let mut config = read_json(&self.config_path)?.unwrap_or_else(|| json!({}));
-        config
-            .as_object_mut()
-            .with_context(|| format!("{} is not a JSON object", self.config_path.display()))?
-            .insert("oauthAccount".into(), account);
-        write_json(&self.config_path, &config)?;
-
         let mut file = read_json(&self.creds_path)?.unwrap_or_else(|| json!({}));
-        file.as_object_mut()
-            .with_context(|| format!("{} is not a JSON object", self.creds_path.display()))?
-            .insert(OAUTH_KEY.into(), Value::Object(oauth));
+        for (value, path) in [(&config, &self.config_path), (&file, &self.creds_path)] {
+            if !value.is_object() {
+                bail!("{} is not a JSON object", path.display());
+            }
+        }
+        config["oauthAccount"] = account;
+        file[OAUTH_KEY] = Value::Object(oauth);
+        write_json(&self.config_path, &config)?;
         write_json(&self.creds_path, &file)
     }
 

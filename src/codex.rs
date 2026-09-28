@@ -191,6 +191,24 @@ impl Provider for Codex {
         write_json(&self.auth_path, &entry.creds)
     }
 
+    /// TokenGauge refreshes the live auth.json in place under this lock.
+    fn lock_live(&self) -> Result<Option<std::fs::File>> {
+        let path = self.auth_path.with_file_name("auth.json.lock");
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)
+                .with_context(|| format!("failed to create {}", dir.display()))?;
+        }
+        let file = std::fs::File::options()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            .with_context(|| format!("failed to open {}", path.display()))?;
+        file.lock()
+            .with_context(|| format!("failed to lock {}", path.display()))?;
+        Ok(Some(file))
+    }
+
     fn refresh(&self, creds: &mut Value) -> Result<Option<String>> {
         let refresh_token = token(creds, "refresh_token")
             .context("credential has no refresh token")?
@@ -559,6 +577,15 @@ mod tests {
         let said = ops::switch(&store, &c, "perso", false).unwrap();
 
         assert_eq!(said, "switched Codex to perso (acct-2@example.com)");
+        assert!(tmp.path().join("auth.json.lock").exists());
+        let held = c.lock_live().unwrap().unwrap();
+        assert!(matches!(
+            std::fs::File::open(tmp.path().join("auth.json.lock"))
+                .unwrap()
+                .try_lock(),
+            Err(std::fs::TryLockError::WouldBlock)
+        ));
+        drop(held);
         let live = read_json(&tmp.path().join("auth.json")).unwrap().unwrap();
         assert_eq!(live, store.get("codex", "perso").unwrap().unwrap().creds);
     }

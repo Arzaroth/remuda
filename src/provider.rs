@@ -51,6 +51,11 @@ pub trait Provider: Send + Sync {
     /// than to a file that can be out of step with them.
     fn identify(&self, creds: &Value) -> Result<Identity>;
     fn install(&self, entry: &Entry) -> Result<()>;
+    /// A lock other tools that rewrite the live login take too, held across a
+    /// switch's last read and its write.
+    fn lock_live(&self) -> Result<Option<std::fs::File>> {
+        Ok(None)
+    }
     /// Returns the account id the token endpoint answered for, when it says.
     fn refresh(&self, creds: &mut Value) -> Result<Option<String>>;
     fn begin_login(&self) -> Result<Box<dyn PendingLogin>>;
