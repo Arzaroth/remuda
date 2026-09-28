@@ -263,6 +263,10 @@ mod tests {
             vec![Box::new(Claude::at(e.tmp.path(), Api::local(&OFFLINE)))];
         let app = Arc::new(App::new(
             Store::open(e.store.root()),
+            crate::serve::Places {
+                units: e.tmp.path().join("units"),
+                snapshot: e.tmp.path().join("tokengauge-usage.json"),
+            },
             providers,
             TOKEN.into(),
             port,

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::fsx::write_json;
+use crate::fsx::{read_json, write_json};
 use crate::store::Store;
 
 /// What the last scheduled refresh did, kept in the store it ran against so
@@ -38,6 +38,13 @@ impl Run {
     }
 }
 
+pub fn last(store: &Store) -> Option<Run> {
+    read_json(&record_path(store))
+        .ok()
+        .flatten()
+        .and_then(|v| serde_json::from_value(v).ok())
+}
+
 /// Best effort, like the directory record: a run that cannot be noted still
 /// refreshed what it refreshed.
 pub fn record(store: &Store, run: &Run) {
@@ -69,10 +76,11 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let store = Store::open(tmp.path());
+        assert!(last(&store).is_none());
         record(&store, &run);
-        let saved = crate::fsx::read_json(&record_path(&store))
-            .unwrap()
-            .unwrap();
-        assert_eq!(serde_json::from_value::<Run>(saved).unwrap(), run);
+        assert_eq!(last(&store), Some(run));
+
+        std::fs::write(record_path(&store), "{ torn").unwrap();
+        assert!(last(&store).is_none());
     }
 }

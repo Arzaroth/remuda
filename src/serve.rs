@@ -1,14 +1,18 @@
 use std::collections::HashMap;
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use anyhow::{Context, Result, anyhow, bail};
 use serde_json::{Value, json};
 
 use crate::commands::{self, RefreshScope};
+use crate::gauge;
 use crate::ops;
+use crate::paths;
 use crate::pkce;
 use crate::provider::{PendingLogin, Provider};
+use crate::runs;
 use crate::store::Store;
 
 const PAGE: &str = include_str!("serve.html");
@@ -23,8 +27,24 @@ struct Pending {
     cancel: Box<dyn Fn() + Send + Sync>,
 }
 
+/// Files outside the store the page reports on, never writes.
+pub struct Places {
+    pub units: PathBuf,
+    pub snapshot: PathBuf,
+}
+
+impl Places {
+    pub fn from_env() -> Self {
+        Places {
+            units: paths::systemd_user_units(),
+            snapshot: paths::tokengauge_snapshot(),
+        }
+    }
+}
+
 pub struct App {
     store: Store,
+    places: Places,
     providers: Vec<Box<dyn Provider>>,
     token: String,
     port: u16,
@@ -64,9 +84,16 @@ fn capture(run: impl FnOnce(&mut dyn Write) -> Result<()>) -> Result<Value> {
 }
 
 impl App {
-    pub fn new(store: Store, providers: Vec<Box<dyn Provider>>, token: String, port: u16) -> Self {
+    pub fn new(
+        store: Store,
+        places: Places,
+        providers: Vec<Box<dyn Provider>>,
+        token: String,
+        port: u16,
+    ) -> Self {
         App {
             store,
+            places,
             providers,
             token,
             port,
@@ -76,6 +103,23 @@ impl App {
 
     fn providers(&self) -> Vec<&dyn Provider> {
         self.providers.iter().map(|p| p.as_ref()).collect()
+    }
+
+    fn health(&self) -> Value {
+        let unit = "remuda-refresh.timer";
+        let exists = |p: PathBuf| p.symlink_metadata().is_ok();
+        let timer = if exists(self.places.units.join("timers.target.wants").join(unit)) {
+            "enabled"
+        } else if exists(self.places.units.join(unit)) {
+            "disabled"
+        } else {
+            "absent"
+        };
+        json!({
+            "timer": timer,
+            "lastRefresh": runs::last(&self.store),
+            "tokengauge": self.places.snapshot.exists(),
+        })
     }
 
     /// A page on another site can reach 127.0.0.1 through the user's browser,
@@ -155,6 +199,8 @@ impl App {
                     .iter()
                     .map(|p| json!({"id": p.id(), "name": p.name()}))
                     .collect();
+                state["health"] = self.health();
+                state["usage"] = gauge::read(&self.places.snapshot).unwrap_or(Value::Null);
                 Ok(state)
             }
             ("POST", "/api/use") => {
@@ -282,10 +328,23 @@ mod tests {
     const PORT: u16 = 7429;
     const TOKEN: &str = "t0ken";
 
+    fn places(e: &Env) -> Places {
+        Places {
+            units: e.tmp.path().join("units"),
+            snapshot: e.tmp.path().join("tokengauge-usage.json"),
+        }
+    }
+
     fn app(e: &Env, api_base: &str) -> App {
         let providers: Vec<Box<dyn Provider>> =
             vec![Box::new(Claude::at(e.tmp.path(), Api::local(api_base)))];
-        App::new(Store::open(e.store.root()), providers, TOKEN.into(), PORT)
+        App::new(
+            Store::open(e.store.root()),
+            places(e),
+            providers,
+            TOKEN.into(),
+            PORT,
+        )
     }
 
     fn call(app: &App, method: &str, path: &str, body: Value) -> (u16, Value) {
@@ -365,6 +424,48 @@ mod tests {
         assert!(resp.body.contains("X-Remuda-Token"));
         assert!(!resp.body.contains("<script src"));
         assert!(!resp.body.contains("<link"));
+    }
+
+    #[test]
+    fn the_state_reports_the_timer_its_last_run_and_tokengauge_usage() {
+        let e = env(&OFFLINE);
+        let app = app(&e, &OFFLINE);
+        let (_, state) = call(&app, "GET", "/api/state", Value::Null);
+        assert_eq!(state["health"]["timer"], "absent");
+        assert_eq!(state["health"]["lastRefresh"], Value::Null);
+        assert_eq!(state["health"]["tokengauge"], false);
+        assert_eq!(state["usage"], Value::Null);
+
+        let units = e.tmp.path().join("units");
+        std::fs::create_dir_all(units.join("timers.target.wants")).unwrap();
+        std::fs::write(units.join("remuda-refresh.timer"), "").unwrap();
+        let (_, state) = call(&app, "GET", "/api/state", Value::Null);
+        assert_eq!(state["health"]["timer"], "disabled");
+        std::os::unix::fs::symlink(
+            units.join("remuda-refresh.timer"),
+            units.join("timers.target.wants/remuda-refresh.timer"),
+        )
+        .unwrap();
+        runs::record(
+            &e.store,
+            &runs::Run::from_output(7, &[], b"claude/work: refreshed\n", b""),
+        );
+        std::fs::write(
+            e.tmp.path().join("tokengauge-usage.json"),
+            json!({"payloads": [{"provider": "claude", "usage": {
+                "primary": {"usedPercent": 40, "windowMinutes": 300}
+            }}]})
+            .to_string(),
+        )
+        .unwrap();
+        let (_, state) = call(&app, "GET", "/api/state", Value::Null);
+        assert_eq!(state["health"]["timer"], "enabled");
+        assert_eq!(state["health"]["lastRefresh"]["at"], 7);
+        assert_eq!(state["health"]["tokengauge"], true);
+        assert_eq!(
+            state["usage"]["providers"]["claude"]["windows"][0]["usedPercent"],
+            40
+        );
     }
 
     #[test]
@@ -510,6 +611,7 @@ mod tests {
         ))];
         let app = Arc::new(App::new(
             Store::open(e.store.root()),
+            places(&e),
             providers,
             TOKEN.into(),
             PORT,
