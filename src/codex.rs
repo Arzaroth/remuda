@@ -492,6 +492,7 @@ impl PendingLogin for CodexPending {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ops::testing::OFFLINE;
     use crate::ops::{self, LiveState};
     use crate::store::Store;
     use mockito::Matcher;
@@ -536,12 +537,10 @@ mod tests {
         Codex::at(dir, Api::local(base), 0)
     }
 
-    const OFFLINE: &str = "http://127.0.0.1:9";
-
     #[test]
     fn identity_plan_and_expiry_come_from_the_tokens() {
         let tmp = tempfile::tempdir().unwrap();
-        let c = codex(tmp.path(), OFFLINE);
+        let c = codex(tmp.path(), &OFFLINE);
         let creds = auth("acct-1", "a", "r", 1_900_000_000);
         let id = c.live_identity(&creds).unwrap().unwrap();
         assert_eq!(id.account_id, "acct-1");
@@ -564,7 +563,7 @@ mod tests {
     fn two_seats_of_one_workspace_are_two_accounts() {
         let tmp = tempfile::tempdir().unwrap();
         let store = Store::open(&tmp.path().join("store"));
-        let c = codex(tmp.path(), OFFLINE);
+        let c = codex(tmp.path(), &OFFLINE);
         let alice = auth("alice", "a", "r-alice", 1_900_000_000);
         let identity = c.live_identity(&alice).unwrap().unwrap();
         store
@@ -586,7 +585,7 @@ mod tests {
     #[test]
     fn an_api_key_login_is_not_a_login_to_switch() {
         let tmp = tempfile::tempdir().unwrap();
-        let c = codex(tmp.path(), OFFLINE);
+        let c = codex(tmp.path(), &OFFLINE);
         assert!(c.live().unwrap().is_none());
         assert!(c.foreign_login().unwrap().is_none());
         let key = json!({"OPENAI_API_KEY": "sk-x", "tokens": null});
@@ -624,7 +623,7 @@ mod tests {
     fn a_rotated_live_login_is_carried_back_by_its_account_id_alone() {
         let tmp = tempfile::tempdir().unwrap();
         let store = Store::open(&tmp.path().join("store"));
-        let c = codex(tmp.path(), OFFLINE);
+        let c = codex(tmp.path(), &OFFLINE);
         let stored = auth("acct-1", "a1", "r1", 1_900_000_000);
         let identity = c.live_identity(&stored).unwrap().unwrap();
         store
@@ -653,7 +652,7 @@ mod tests {
     fn switching_replaces_auth_json_whole() {
         let tmp = tempfile::tempdir().unwrap();
         let store = Store::open(&tmp.path().join("store"));
-        let c = codex(tmp.path(), OFFLINE);
+        let c = codex(tmp.path(), &OFFLINE);
         for (name, account) in [("work", "acct-1"), ("perso", "acct-2")] {
             let creds = auth(account, name, &format!("r-{name}"), 1_900_000_000);
             let identity = c.live_identity(&creds).unwrap().unwrap();
@@ -758,22 +757,6 @@ mod tests {
     #[test]
     fn a_login_completes_when_the_browser_calls_back() {
         let mut server = mockito::Server::new();
-        let exchange = server
-            .mock("POST", "/oauth/token")
-            .match_body(Matcher::AllOf(vec![
-                Matcher::UrlEncoded("grant_type".into(), "authorization_code".into()),
-                Matcher::UrlEncoded("code".into(), "the-code".into()),
-                Matcher::UrlEncoded("client_id".into(), CLIENT_ID.into()),
-            ]))
-            .with_body(
-                json!({
-                    "id_token": id_token("acct-9", "pro"),
-                    "access_token": access_token("acct-9", "login", 1_900_000_000),
-                    "refresh_token": "r-new",
-                })
-                .to_string(),
-            )
-            .create();
         let tmp = tempfile::tempdir().unwrap();
         let c = codex(tmp.path(), &server.url());
         let pending = c.begin_login().unwrap();
@@ -783,6 +766,35 @@ mod tests {
         assert_eq!(param(&url, "code_challenge_method"), "S256");
         let redirect = param(&url, "redirect_uri");
         let state = param(&url, "state");
+        let challenge = param(&url, "code_challenge");
+        let exchange = server
+            .mock("POST", "/oauth/token")
+            .match_body(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("grant_type".into(), "authorization_code".into()),
+                Matcher::UrlEncoded("code".into(), "the-code".into()),
+                Matcher::UrlEncoded("client_id".into(), CLIENT_ID.into()),
+                Matcher::UrlEncoded("redirect_uri".into(), redirect.clone()),
+            ]))
+            .with_body_from_request(move |req| {
+                let body = req.utf8_lossy_body().unwrap().into_owned();
+                let verifier = reqwest::Url::parse(&format!("http://x/?{body}"))
+                    .unwrap()
+                    .query_pairs()
+                    .find(|(k, _)| k == "code_verifier")
+                    .map(|(_, v)| v.into_owned())
+                    .unwrap_or_default();
+                if pkce::challenge(&verifier) != challenge {
+                    return b"{}".to_vec();
+                }
+                json!({
+                    "id_token": id_token("acct-9", "pro"),
+                    "access_token": access_token("acct-9", "login", 1_900_000_000),
+                    "refresh_token": "r-new",
+                })
+                .to_string()
+                .into_bytes()
+            })
+            .create();
 
         let browser = std::thread::spawn(move || {
             let port = reqwest::Url::parse(&redirect).unwrap().port().unwrap();
@@ -808,7 +820,7 @@ mod tests {
     #[test]
     fn stray_connections_do_not_end_the_wait_and_a_refusal_does() {
         let tmp = tempfile::tempdir().unwrap();
-        let c = codex(tmp.path(), OFFLINE);
+        let c = codex(tmp.path(), &OFFLINE);
         let pending = c.begin_login().unwrap();
         let redirect = param(pending.url(), "redirect_uri").replace("localhost", "127.0.0.1");
         let state = param(pending.url(), "state");
@@ -833,12 +845,73 @@ mod tests {
     }
 
     #[test]
+    fn the_cli_login_waits_for_the_callback_without_asking_for_a_code() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/oauth/token")
+            .with_body(
+                json!({
+                    "id_token": id_token("seat-9", "pro"),
+                    "access_token": access_token("seat-9", "login", 1_900_000_000),
+                    "refresh_token": "r-new",
+                })
+                .to_string(),
+            )
+            .create();
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let c = codex(tmp.path(), &server.url());
+        let open = |url: &str| {
+            let redirect = param(url, "redirect_uri").replace("localhost", "127.0.0.1");
+            let state = param(url, "state");
+            std::thread::spawn(move || browse(&format!("{redirect}?code=c&state={state}")));
+        };
+        let mut out = Vec::new();
+        crate::commands::login(
+            &store,
+            &c,
+            "nine",
+            false,
+            crate::commands::Prompt {
+                open: &open,
+                read_code: &mut || unreachable!(),
+            },
+            &mut out,
+        )
+        .unwrap();
+        let out = String::from_utf8(out).unwrap();
+        assert!(out.contains("Waiting for the browser"), "{out}");
+        assert!(
+            out.ends_with("stored codex/nine (seat-9@example.com, pro)\n"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn an_unstored_codex_login_is_listed_with_its_own_import_hint() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let c = codex(tmp.path(), &OFFLINE);
+        write_json(
+            &tmp.path().join("auth.json"),
+            &auth("seat-1", "a", "r", 1_900_000_000),
+        )
+        .unwrap();
+        let providers: [&dyn Provider; 1] = [&c];
+        let lives = crate::commands::sync_all(&store, &providers).unwrap();
+        let mut out = Vec::new();
+        crate::commands::list(&store, &lives, false, &mut out).unwrap();
+        let out = String::from_utf8(out).unwrap();
+        assert!(out.contains("`remuda import -p codex <name>`"), "{out}");
+    }
+
+    #[test]
     fn the_callback_answers_on_both_loopbacks() {
         if TcpListener::bind(("::1", 0)).is_err() {
             return;
         }
         let tmp = tempfile::tempdir().unwrap();
-        let c = codex(tmp.path(), OFFLINE);
+        let c = codex(tmp.path(), &OFFLINE);
         let pending = c.begin_login().unwrap();
         let port = reqwest::Url::parse(&param(pending.url(), "redirect_uri"))
             .unwrap()
@@ -853,7 +926,7 @@ mod tests {
         let held = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let port = held.local_addr().unwrap().port();
         let tmp = tempfile::tempdir().unwrap();
-        let c = Codex::at(tmp.path(), Api::local(OFFLINE), port);
+        let c = Codex::at(tmp.path(), Api::local(&OFFLINE), port);
         let err = c.begin_login().err().unwrap();
         assert!(err.to_string().contains("codex login"), "{err}");
     }

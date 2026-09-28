@@ -350,8 +350,8 @@ mod tests {
 
     #[test]
     fn only_a_local_request_carrying_the_token_is_served() {
-        let e = env(OFFLINE);
-        let app = app(&e, OFFLINE);
+        let e = env(&OFFLINE);
+        let app = app(&e, &OFFLINE);
         let status = |host: Option<&str>, origin: Option<&str>, token: Option<&str>, path: &str| {
             app.handle(&Request {
                 method: "GET",
@@ -396,8 +396,8 @@ mod tests {
 
     #[test]
     fn the_page_is_self_contained() {
-        let e = env(OFFLINE);
-        let resp = app(&e, OFFLINE).handle(&Request {
+        let e = env(&OFFLINE);
+        let resp = app(&e, &OFFLINE).handle(&Request {
             method: "GET",
             path: "/",
             host: Some("127.0.0.1:7429"),
@@ -413,12 +413,12 @@ mod tests {
 
     #[test]
     fn credentials_are_listed_switched_labelled_renamed_and_removed() {
-        let e = env(OFFLINE);
+        let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);
         e.stored("perso", "u-perso", HOUR);
         let work = e.store.get("claude", "work").unwrap().unwrap();
         e.sign_in(work.creds, account("u-work"));
-        let app = app(&e, OFFLINE);
+        let app = app(&e, &OFFLINE);
 
         let (status, state) = call(&app, "GET", "/api/state", Value::Null);
         assert_eq!(status, 200);
@@ -467,9 +467,9 @@ mod tests {
 
     #[test]
     fn a_live_login_nobody_stored_can_be_imported() {
-        let e = env(OFFLINE);
+        let e = env(&OFFLINE);
         e.sign_in(oauth("a1", "r1", HOUR), account("u-new"));
-        let app = app(&e, OFFLINE);
+        let app = app(&e, &OFFLINE);
         let (_, state) = call(&app, "GET", "/api/state", Value::Null);
         assert_eq!(state["live"][0]["state"], "unstored");
         assert_eq!(state["live"][0]["email"], "u-new@example.com");
@@ -521,12 +521,35 @@ mod tests {
     }
 
     #[test]
+    fn a_second_sign_in_for_the_same_cli_replaces_the_first() {
+        let e = env(&OFFLINE);
+        let app = app(&e, &OFFLINE);
+        let (_, first) = call(&app, "POST", "/api/login", json!({"name": "one"}));
+        let (_, second) = call(&app, "POST", "/api/login", json!({"name": "two"}));
+        assert_eq!(app.pending.lock().unwrap().len(), 1);
+        let (status, r) = call(
+            &app,
+            "POST",
+            "/api/login/finish",
+            json!({"id": first["id"], "code": "c#s"}),
+        );
+        assert_eq!(status, 400);
+        assert!(r["error"].as_str().unwrap().contains("no longer open"));
+        assert!(
+            app.pending
+                .lock()
+                .unwrap()
+                .contains_key(second["id"].as_str().unwrap())
+        );
+    }
+
+    #[test]
     fn a_cancelled_sign_in_stops_waiting() {
         use crate::codex::{Api as CodexApi, Codex};
-        let e = env(OFFLINE);
+        let e = env(&OFFLINE);
         let providers: Vec<Box<dyn Provider>> = vec![Box::new(Codex::at(
             e.tmp.path(),
-            CodexApi::local(OFFLINE),
+            CodexApi::local(&OFFLINE),
             0,
         ))];
         let app = Arc::new(App::new(
@@ -547,7 +570,9 @@ mod tests {
             let id = id.clone();
             std::thread::spawn(move || call(&app, "POST", "/api/login/finish", json!({"id": id})))
         };
-        std::thread::sleep(std::time::Duration::from_millis(300));
+        while app.pending.lock().unwrap()[&id].login.is_some() {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
         call(&app, "POST", "/api/login/cancel", json!({"id": id}));
         let (status, r) = waiting.join().unwrap();
         assert_eq!(status, 400);
@@ -556,10 +581,10 @@ mod tests {
 
     #[test]
     fn the_listener_answers_over_a_real_socket() {
-        let e = env(OFFLINE);
+        let e = env(&OFFLINE);
         let (server, port) = bind(0).unwrap();
         let providers: Vec<Box<dyn Provider>> =
-            vec![Box::new(Claude::at(e.tmp.path(), Api::local(OFFLINE)))];
+            vec![Box::new(Claude::at(e.tmp.path(), Api::local(&OFFLINE)))];
         let app = Arc::new(App::new(
             Store::open(e.store.root()),
             providers,

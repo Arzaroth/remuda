@@ -507,7 +507,7 @@ mod tests {
 
     #[test]
     fn the_list_marks_the_active_credential_and_its_expiries() {
-        let e = env(OFFLINE);
+        let e = env(&OFFLINE);
         e.stored("perso", "u-perso", 2 * HOUR + 60_000);
         e.stored("work", "u-work", -HOUR);
         let mut out = Vec::new();
@@ -525,7 +525,7 @@ mod tests {
 
     #[test]
     fn the_list_says_when_the_live_login_is_not_accounted_for() {
-        let e = env(OFFLINE);
+        let e = env(&OFFLINE);
         let mut out = Vec::new();
         list(&e.store, &live(&e, LiveState::SignedOut), false, &mut out).unwrap();
         assert!(text(out).starts_with("no stored credentials in "));
@@ -567,7 +567,7 @@ mod tests {
 
     #[test]
     fn the_json_list_is_what_other_tools_read() {
-        let e = env(OFFLINE);
+        let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);
         let mut out = Vec::new();
         list(&e.store, &live(&e, active("work")), true, &mut out).unwrap();
@@ -585,7 +585,7 @@ mod tests {
 
     #[test]
     fn import_stores_the_live_login_once() {
-        let e = env(OFFLINE);
+        let e = env(&OFFLINE);
         e.sign_in(oauth("a1", "r1", HOUR), account("u-work"));
         let mut out = Vec::new();
         import(
@@ -647,7 +647,7 @@ mod tests {
 
     #[test]
     fn import_needs_a_signed_in_cli_that_says_who_it_is() {
-        let e = env(OFFLINE);
+        let e = env(&OFFLINE);
         let run = |state: LiveState| {
             import(&e.store, &e.claude, &state, "work", false, &mut Vec::new())
                 .unwrap_err()
@@ -685,7 +685,7 @@ mod tests {
 
     #[test]
     fn import_beside_stored_credentials_needs_a_confirmation() {
-        let e = env(OFFLINE);
+        let e = env(&OFFLINE);
         e.stored("perso", "u-perso", HOUR);
         e.sign_in(oauth("a1", "r1", HOUR), account("u-work"));
         let err = import(
@@ -751,7 +751,7 @@ mod tests {
 
     #[test]
     fn an_unreadable_cli_is_listed_as_such_and_never_refreshed() {
-        let e = env(OFFLINE);
+        let e = env(&OFFLINE);
         e.stored("work", "u-work", -HOUR);
         std::fs::write(e.tmp.path().join(".credentials.json"), "{ torn").unwrap();
         let providers: [&dyn Provider; 1] = [&e.claude];
@@ -780,8 +780,95 @@ mod tests {
     }
 
     #[test]
+    fn refresh_by_name_leaves_the_same_name_under_another_cli_alone() {
+        use crate::codex::{Api as CodexApi, Codex};
+        let mut server = mockito::Server::new();
+        let token = server
+            .mock("POST", "/v1/oauth/token")
+            .with_body(json!({"access_token": "a-new", "expires_in": 28800}).to_string())
+            .expect(1)
+            .create();
+        let e = env(&server.url());
+        let codex = Codex::at(e.tmp.path(), CodexApi::local(&OFFLINE), 0);
+        e.stored("work", "u-work", HOUR);
+        let codex_work = json!({"tokens": {"access_token": "x", "refresh_token": "cr"}});
+        e.store
+            .save(&Entry::new(
+                "codex",
+                "work",
+                codex_work.clone(),
+                identity("seat"),
+                1,
+            ))
+            .unwrap();
+        let lives = vec![
+            Live {
+                provider: &e.claude,
+                state: LiveState::SignedOut,
+            },
+            Live {
+                provider: &codex,
+                state: LiveState::SignedOut,
+            },
+        ];
+        let mut out = Vec::new();
+        refresh(
+            &e.store,
+            &lives,
+            RefreshScope {
+                only: Some((&e.claude, "work")),
+                force: true,
+                within_min: 60,
+            },
+            &mut out,
+            &mut Vec::new(),
+        )
+        .unwrap();
+        token.assert();
+        assert_eq!(text(out), "claude/work: refreshed\n");
+        assert_eq!(
+            e.store.get("codex", "work").unwrap().unwrap().creds,
+            codex_work
+        );
+    }
+
+    #[test]
+    fn a_credential_with_no_known_expiry_is_always_due() {
+        let mut server = mockito::Server::new();
+        let token = server
+            .mock("POST", "/v1/oauth/token")
+            .with_body(json!({"access_token": "a-new", "expires_in": 28800}).to_string())
+            .expect(1)
+            .create();
+        let e = env(&server.url());
+        let mut creds = oauth("a", "r", HOUR);
+        creds[OAUTH_KEY]
+            .as_object_mut()
+            .unwrap()
+            .remove("expiresAt");
+        e.store
+            .save(&Entry::new("claude", "old", creds, identity("u-old"), 1))
+            .unwrap();
+        let mut out = Vec::new();
+        refresh(
+            &e.store,
+            &live(&e, LiveState::SignedOut),
+            RefreshScope {
+                only: None,
+                force: false,
+                within_min: 60,
+            },
+            &mut out,
+            &mut Vec::new(),
+        )
+        .unwrap();
+        token.assert();
+        assert_eq!(text(out), "claude/old: refreshed\n");
+    }
+
+    #[test]
     fn refresh_by_name_says_why_it_leaves_the_active_one_alone() {
-        let e = env(OFFLINE);
+        let e = env(&OFFLINE);
         e.stored("active", "u-active", -HOUR);
         e.stored("other", "u-other", -HOUR);
         let mut out = Vec::new();
@@ -830,27 +917,43 @@ mod tests {
         assert_eq!(e.stored_refresh_token("dead").as_deref(), Some("r-dead"));
     }
 
-    fn login_server(uuid: &str) -> mockito::ServerGuard {
+    /// The verifier each code exchange sent, for checking against the
+    /// challenge the authorize URL carried.
+    type Verifiers = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
+
+    fn login_server(uuid: &str) -> (mockito::ServerGuard, Verifiers) {
         let mut server = mockito::Server::new();
+        let verifiers = Verifiers::default();
+        let seen = verifiers.clone();
         server
             .mock("POST", "/v1/oauth/token")
             .match_body(Matcher::PartialJson(json!({
-                "grant_type": "authorization_code", "code": "the-code"
+                "grant_type": "authorization_code",
+                "code": "the-code",
+                "redirect_uri": "https://platform.claude.com/oauth/code/callback",
             })))
-            .with_body(
+            .with_body_from_request(move |req| {
+                let body: Value = serde_json::from_slice(req.body().unwrap()).unwrap();
+                seen.lock().unwrap().push(
+                    body["code_verifier"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_owned(),
+                );
                 json!({
                     "access_token": "a-login", "refresh_token": "r-login", "expires_in": 28800,
                     "refresh_token_expires_in": 2_592_000, "scope": "user:inference user:profile"
                 })
-                .to_string(),
-            )
+                .to_string()
+                .into_bytes()
+            })
             .create();
         server
             .mock("GET", "/api/oauth/profile")
             .match_header("authorization", "Bearer a-login")
             .with_body(profile_body(uuid))
             .create();
-        server
+        (server, verifiers)
     }
 
     fn state_of(url: &str) -> String {
@@ -864,7 +967,7 @@ mod tests {
 
     #[test]
     fn login_exchanges_the_pasted_code_and_stores_the_account() {
-        let server = login_server("u-new");
+        let (server, verifiers) = login_server("u-new");
         let e = env(&server.url());
         let opened = std::cell::RefCell::new(String::new());
         let open = |url: &str| *opened.borrow_mut() = url.to_owned();
@@ -893,6 +996,22 @@ mod tests {
             out.ends_with("stored claude/new (u-new@example.com, pro)\n"),
             "{out}"
         );
+        let challenge = reqwest::Url::parse(&opened.borrow())
+            .unwrap()
+            .query_pairs()
+            .find(|(k, _)| k == "code_challenge")
+            .unwrap()
+            .1
+            .into_owned();
+        assert_eq!(
+            verifiers
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|v| crate::pkce::challenge(v))
+                .collect::<Vec<_>>(),
+            [challenge]
+        );
         let entry = e.store.get("claude", "new").unwrap().unwrap();
         assert_eq!(e.stored_refresh_token("new").as_deref(), Some("r-login"));
         assert_eq!(
@@ -907,7 +1026,7 @@ mod tests {
 
     #[test]
     fn login_refuses_a_code_from_another_attempt() {
-        let server = login_server("u-new");
+        let (server, _) = login_server("u-new");
         let e = env(&server.url());
         let mut read_code = || Ok("the-code#forged".to_owned());
         let err = login(
@@ -928,7 +1047,7 @@ mod tests {
 
     #[test]
     fn login_will_not_store_an_account_twice() {
-        let server = login_server("u-work");
+        let (server, _) = login_server("u-work");
         let e = env(&server.url());
         e.stored("work", "u-work", HOUR);
         let opened = std::cell::RefCell::new(String::new());
@@ -969,7 +1088,7 @@ mod tests {
 
     #[test]
     fn remove_keeps_the_active_credential() {
-        let e = env(OFFLINE);
+        let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);
         let err = remove(
             &e.store,
@@ -989,7 +1108,7 @@ mod tests {
 
     #[test]
     fn a_label_shows_beside_the_name_until_it_is_cleared() {
-        let e = env(OFFLINE);
+        let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);
         let mut out = Vec::new();
         label(&e.store, &e.claude, "work", Some("  Job Max  "), &mut out).unwrap();
@@ -1020,7 +1139,7 @@ mod tests {
 
     #[test]
     fn rename_says_where_the_credential_went() {
-        let e = env(OFFLINE);
+        let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);
         let mut out = Vec::new();
         rename(&e.store, &e.claude, "work", "job", &mut out).unwrap();
@@ -1030,7 +1149,7 @@ mod tests {
 
     #[test]
     fn a_name_resolves_bare_or_qualified() {
-        let e = env(OFFLINE);
+        let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);
         let providers: [&dyn Provider; 1] = [&e.claude];
         let (p, name) = resolve(&e.store, &providers, "work").unwrap();

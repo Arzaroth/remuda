@@ -217,7 +217,12 @@ pub mod testing {
     use crate::store::{Entry, Store};
 
     pub const HOUR: i64 = 3_600_000;
-    pub const OFFLINE: &str = "http://127.0.0.1:9";
+    /// A loopback port nothing listens on: bound once to reserve a number,
+    /// then released, so connecting is refused at once.
+    pub static OFFLINE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        format!("http://{}", listener.local_addr().unwrap())
+    });
 
     pub struct Env {
         pub tmp: tempfile::TempDir,
@@ -333,7 +338,7 @@ mod tests {
 
     #[test]
     fn an_unconfirmed_account_match_copies_nothing() {
-        let e = env(OFFLINE);
+        let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);
         e.sign_in(oauth("a2", "r2", HOUR), account("u-work"));
 
@@ -398,7 +403,7 @@ mod tests {
 
     #[test]
     fn a_changed_profile_travels_back_with_the_tokens() {
-        let e = env(OFFLINE);
+        let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);
         let mut renamed = account("u-work");
         renamed["displayName"] = json!("New name");
@@ -416,7 +421,7 @@ mod tests {
 
     #[test]
     fn switching_swaps_the_login_and_the_account_and_keeps_everything_else() {
-        let e = env(OFFLINE);
+        let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);
         e.stored("perso", "u-perso", HOUR);
         let work = e.store.get("claude", "work").unwrap().unwrap();
@@ -439,7 +444,7 @@ mod tests {
 
     #[test]
     fn a_corrupt_credentials_file_stops_a_switch_before_anything_is_written() {
-        let e = env(OFFLINE);
+        let e = env(&OFFLINE);
         e.stored("perso", "u-perso", HOUR);
         e.sign_in(oauth("a", "r", HOUR), account("u-work"));
         std::fs::write(e.tmp.path().join(".credentials.json"), "[1, 2]").unwrap();
@@ -461,7 +466,7 @@ mod tests {
 
     #[test]
     fn switching_away_from_a_login_nobody_stored_is_refused() {
-        let e = env(OFFLINE);
+        let e = env(&OFFLINE);
         e.stored("perso", "u-perso", HOUR);
         e.sign_in(oauth("x", "y", HOUR), account("u-new"));
 
@@ -473,7 +478,7 @@ mod tests {
 
     #[test]
     fn a_live_login_that_could_not_be_confirmed_is_not_switched_away_from() {
-        let e = env(OFFLINE);
+        let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);
         e.stored("perso", "u-perso", HOUR);
         e.sign_in(oauth("a2", "r2", HOUR), account("u-work"));
@@ -509,7 +514,7 @@ mod tests {
 
     #[test]
     fn switching_to_the_active_credential_changes_nothing() {
-        let e = env(OFFLINE);
+        let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);
         let work = e.store.get("claude", "work").unwrap().unwrap();
         e.sign_in(work.creds, account("u-work"));
