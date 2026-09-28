@@ -32,6 +32,14 @@ pub fn codex_auth() -> PathBuf {
         .join("auth.json")
 }
 
+/// Private per-user scratch space: `$XDG_RUNTIME_DIR/remuda`, else the store.
+pub fn runtime_dir() -> PathBuf {
+    env::var_os("XDG_RUNTIME_DIR")
+        .filter(|v| !v.is_empty())
+        .map(|d| PathBuf::from(d).join("remuda"))
+        .unwrap_or_else(store_root)
+}
+
 pub fn store_root() -> PathBuf {
     if let Some(dir) = env::var_os("REMUDA_STORE").filter(|v| !v.is_empty()) {
         return PathBuf::from(dir);

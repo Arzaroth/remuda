@@ -52,10 +52,16 @@ pub fn read_json(path: &Path) -> Result<Option<Value>> {
     }
 }
 
+pub fn write_json(path: &Path, value: &Value) -> Result<()> {
+    let mut body = serde_json::to_string_pretty(value)?;
+    body.push('\n');
+    write_private(path, &body)
+}
+
 /// Writes through a sibling temp file and a rename, keeping the target's mode
 /// when it exists and 0600 otherwise. A symlinked target is written where the
 /// link points, so the link survives.
-pub fn write_json(path: &Path, value: &Value) -> Result<()> {
+pub fn write_private(path: &Path, body: &str) -> Result<()> {
     let resolved;
     let path = match fs::symlink_metadata(path) {
         Ok(m) if m.file_type().is_symlink() => {
@@ -75,8 +81,6 @@ pub fn write_json(path: &Path, value: &Value) -> Result<()> {
         .context("path has no file name")?
         .to_string_lossy();
     let tmp = dir.join(format!(".{name}.remuda-{}", std::process::id()));
-    let mut body = serde_json::to_string_pretty(value)?;
-    body.push('\n');
     let result = (|| {
         let mut file = OpenOptions::new()
             .write(true)
