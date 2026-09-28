@@ -1,5 +1,5 @@
 [Unit]
-Description=Refresh the inactive Claude logins remuda stores
+Description=Refresh the inactive logins remuda stores
 
 [Timer]
 OnCalendar=*:0/30

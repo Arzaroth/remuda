@@ -343,6 +343,13 @@ impl Provider for Claude {
         "Claude Code"
     }
 
+    fn home(&self) -> PathBuf {
+        self.creds_path
+            .parent()
+            .map(PathBuf::from)
+            .unwrap_or_default()
+    }
+
     fn access_token<'a>(&self, creds: &'a Value) -> Option<&'a str> {
         Self::oauth(creds)?.get("accessToken")?.as_str()
     }

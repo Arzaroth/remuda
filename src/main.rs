@@ -1,6 +1,7 @@
 mod claude;
 mod codex;
 mod commands;
+mod dirs;
 mod fsx;
 mod http;
 mod oauth;
@@ -15,7 +16,7 @@ mod store;
 use std::io::{self, BufRead};
 use std::process::{Command, Stdio};
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use clap::{CommandFactory, Parser, Subcommand};
 
 use crate::claude::Claude;
@@ -78,6 +79,10 @@ enum Cmd {
         /// Refresh anything expiring within this many minutes.
         #[arg(long, default_value_t = 60)]
         within: i64,
+        /// Run as the refresh timer: stop where the directories differ from
+        /// the ones the last interactive command used.
+        #[arg(long)]
+        scheduled: bool,
     },
     /// Set the label shown beside a credential, or clear it. NAME or PROVIDER/NAME.
     Label { name: String, text: Option<String> },
@@ -165,6 +170,20 @@ fn main() -> Result<()> {
         return Ok(());
     }
     let store = Store::open(&paths::store_root());
+    let claude = Claude::from_env()?;
+    let codex = Codex::from_env()?;
+    let providers: [&dyn Provider; 2] = [&claude, &codex];
+    let seen = dirs::now(&store, &providers);
+    let scheduled = matches!(
+        cli.command,
+        Cmd::Refresh {
+            scheduled: true,
+            ..
+        }
+    );
+    if !scheduled {
+        dirs::record(&paths::dirs_record(), &seen)?;
+    }
     if let Cmd::Serve { port, no_browser } = cli.command {
         let providers: Vec<Box<dyn Provider>> =
             vec![Box::new(Claude::from_env()?), Box::new(Codex::from_env()?)];
@@ -181,9 +200,6 @@ fn main() -> Result<()> {
         http::serve(std::sync::Arc::new(app), listener, http::Limits::default());
         return Ok(());
     }
-    let claude = Claude::from_env()?;
-    let codex = Codex::from_env()?;
-    let providers: [&dyn Provider; 2] = [&claude, &codex];
     let out = &mut io::stdout();
 
     if let Cmd::Login {
@@ -235,18 +251,47 @@ fn main() -> Result<()> {
             name,
             force,
             within,
+            scheduled,
         } => {
+            let drift = match scheduled.then(|| dirs::recorded(&paths::dirs_record())) {
+                Some(recorded) => recorded?.map(|r| dirs::drift(&r, &seen)),
+                None => None,
+            };
+            if let Some(there) = drift.as_ref().and_then(|d| d.store.as_ref()) {
+                bail!(
+                    "not refreshing: remuda was last used with the store in {}, this run sees {}; set REMUDA_STORE in ~/.config/environment.d/60-remuda.conf",
+                    there.display(),
+                    store.root().display()
+                );
+            }
+            let moved = drift.map(|d| d.homes).unwrap_or_default();
+            for (id, there, here) in &moved {
+                eprintln!(
+                    "{id}: not refreshing, its login was last found in {} and this run looks in {}; set its directory in ~/.config/environment.d/60-remuda.conf",
+                    there.display(),
+                    here.display()
+                );
+            }
+            let usable: Vec<&dyn Provider> = providers
+                .iter()
+                .copied()
+                .filter(|p| !moved.iter().any(|(id, ..)| id == p.id()))
+                .collect();
             let only = name
                 .as_deref()
-                .map(|spec| commands::resolve(&store, &providers, spec))
+                .map(|spec| commands::resolve(&store, &usable, spec))
                 .transpose()?;
-            let lives = commands::sync_all(&store, &providers)?;
+            let lives = commands::sync_all(&store, &usable)?;
             let scope = commands::RefreshScope {
                 only: only.as_ref().map(|(p, name)| (*p, name.as_str())),
                 force,
                 within_min: within,
             };
-            commands::refresh(&store, &lives, scope, out, &mut io::stderr())
+            commands::refresh(&store, &lives, scope, out, &mut io::stderr())?;
+            if !moved.is_empty() {
+                bail!("{} CLI(s) skipped", moved.len());
+            }
+            Ok(())
         }
         Cmd::Remove { name } => {
             let (p, name) = commands::resolve(&store, &providers, &name)?;

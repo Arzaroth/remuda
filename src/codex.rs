@@ -145,6 +145,13 @@ impl Provider for Codex {
         "Codex"
     }
 
+    fn home(&self) -> PathBuf {
+        self.auth_path
+            .parent()
+            .map(PathBuf::from)
+            .unwrap_or_default()
+    }
+
     fn access_token<'a>(&self, creds: &'a Value) -> Option<&'a str> {
         token(creds, "access_token")
     }

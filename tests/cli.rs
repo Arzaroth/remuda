@@ -351,3 +351,48 @@ fn completions_cover_every_command() {
     assert!(home.ok(&["completions", "bash"]).contains("_remuda"));
     assert!(home.fails(&["completions", "tcsh"]).contains("tcsh"));
 }
+
+#[test]
+fn the_scheduled_refresh_stops_where_the_shell_looked_elsewhere() {
+    let home = Home::new();
+    let elsewhere = home.path("work-claude");
+    let run = |args: &[&str], envs: &[(&str, &Path)]| {
+        let mut cmd = home.command(args);
+        for (k, v) in envs {
+            cmd.env(k, v);
+        }
+        cmd.output().unwrap()
+    };
+
+    let out = run(&["ls"], &[("CLAUDE_CONFIG_DIR", &elsewhere)]);
+    assert!(out.status.success());
+    let out = run(&["refresh", "--scheduled"], &[]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(err.contains("claude: not refreshing"), "{err}");
+    assert!(err.contains("work-claude"), "{err}");
+    assert!(!err.contains("codex: not refreshing"), "{err}");
+
+    let out = run(
+        &["refresh", "--scheduled"],
+        &[("CLAUDE_CONFIG_DIR", &elsewhere)],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let other_store = home.path("other-store");
+    assert!(
+        run(&["ls"], &[("REMUDA_STORE", &other_store)])
+            .status
+            .success()
+    );
+    let out = run(&["refresh", "--scheduled"], &[]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(err.contains("other-store"), "{err}");
+
+    assert!(run(&["refresh"], &[]).status.success());
+}

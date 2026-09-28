@@ -40,6 +40,14 @@ pub fn runtime_dir() -> PathBuf {
         .unwrap_or_else(store_root)
 }
 
+pub fn dirs_record() -> PathBuf {
+    env::var_os("XDG_STATE_HOME")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home().join(".local/state"))
+        .join("remuda/dirs.json")
+}
+
 pub fn store_root() -> PathBuf {
     if let Some(dir) = env::var_os("REMUDA_STORE").filter(|v| !v.is_empty()) {
         return PathBuf::from(dir);

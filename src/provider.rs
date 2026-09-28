@@ -35,6 +35,8 @@ pub trait PendingLogin: Send {
 pub trait Provider: Send + Sync {
     fn id(&self) -> &'static str;
     fn name(&self) -> &'static str;
+    /// The directory the CLI keeps its login in, as this process resolves it.
+    fn home(&self) -> std::path::PathBuf;
     fn access_token<'a>(&self, creds: &'a Value) -> Option<&'a str>;
     fn refresh_token<'a>(&self, creds: &'a Value) -> Option<&'a str>;
     fn expires_at(&self, creds: &Value) -> Option<i64>;
