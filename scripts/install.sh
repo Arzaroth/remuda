@@ -18,6 +18,7 @@ while (($# > 0)); do
   case "$1" in
   --version)
     tag="${2:?--version needs a tag}"
+    [[ $tag == v* ]] || tag="v$tag"
     shift
     ;;
   --no-timer) want_timer=false ;;
@@ -86,7 +87,24 @@ esac
 if $want_timer; then
   mkdir -p "$unitdir"
   install -m 644 "$tmp/systemd/remuda-refresh.service" "$tmp/systemd/remuda-refresh.timer" "$unitdir/"
+  # The timer must see the same directories as the shell, or it takes the
+  # active login for an inactive one and refreshes it.
+  envdir="${XDG_CONFIG_HOME:-$HOME/.config}/environment.d"
+  envs=()
+  for var in CLAUDE_CONFIG_DIR CODEX_HOME REMUDA_STORE; do
+    if [[ -n ${!var:-} ]]; then
+      envs+=("$var=${!var}")
+    fi
+  done
+  if ((${#envs[@]} > 0)); then
+    mkdir -p "$envdir"
+    printf '%s\n' "${envs[@]}" >"$envdir/60-remuda.conf"
+    echo "Wrote $envdir/60-remuda.conf: ${envs[*]}"
+  fi
   if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
+    if ((${#envs[@]} > 0)); then
+      systemctl --user set-environment "${envs[@]}"
+    fi
     systemctl --user daemon-reload
     systemctl --user enable --now remuda-refresh.timer
     echo "Enabled remuda-refresh.timer"
