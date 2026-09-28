@@ -42,4 +42,4 @@ jobs:
           persist-credentials: false
 
       - name: ShellCheck
-        run: shellcheck scripts/install.sh
+        run: shellcheck scripts/install.sh scripts/release.sh
