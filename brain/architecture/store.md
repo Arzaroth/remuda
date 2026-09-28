@@ -44,14 +44,27 @@ a sidecar.
 Every write goes through `fsx::write_private`: a sibling temp file, fsync,
 rename, mode 0600 (or the target's existing mode). A symlinked target is
 written where the link points, so the link survives. Directories are created
-0700. A credential and its sidecar are two renames: the credential first, then
-the sidecar, which records the credential file's SHA-256 as `credsDigest`. A
-crash in between leaves a sidecar whose digest does not match; `Store::get`
-marks that entry unverified, and `ops::heal`, run before every sync, asks the
-provider whose tokens it holds and rewrites the sidecar. Until then it is not
-matched, refreshed or switched to, and `ls` marks it `[unverified]`. Sidecars
-without a digest (written by 0.1.0) are trusted. `rename` moves the sidecar
-first and undoes that if the credential cannot follow.
+0700.
+
+A credential and its sidecar are two renames, so the sidecar records
+`credsDigest`: the SHA-256 of the credential file's exact bytes, as 64
+lowercase hex characters. The credential is written first, so a crash in
+between leaves a sidecar whose digest does not match. The one exception is a
+sidecar with no digest (written by 0.1.0), which would pass for anything: it
+is replaced first. `Store::get` marks a mismatched entry unverified, and
+`ops::heal` runs at the start of every sync, the CLI signed in or not: it asks
+the provider whose tokens the entry holds, refreshing them first if the access
+token has expired (the rotated tokens are saved either way), and rewrites the
+sidecar. It never refreshes an entry holding the CLI's live login, which would
+sign the CLI out. Until an entry is identified it is not refreshed, switched
+to, labelled or matched by account, `ls` marks it `[unverified]` and the page
+disables it; if it holds the live login, that login is reported as the
+unconfirmed active one, so nothing overwrites it without `--discard`. A digest
+missing from a sidecar is trusted. `rename` moves the sidecar first and undoes
+that if the credential cannot follow.
+
+`<store>/.dirs.json` records where the last interactive command found each
+CLI's login; see [distribution.md](distribution.md).
 
 `Store::lock` takes an exclusive `flock` on `<store>/.lock`, released when the
 process exits, so a crashed command never leaves the store locked.
@@ -60,7 +73,8 @@ process exits, so a crashed command never leaves the store locked.
 
 TokenGauge's ADR 0003 reads this store to draw one meter per credential and
 never writes it. What it relies on: the paths above, the file shapes, and the
-sidecar keys `accountId`, `email` and `label`. A change to any of those is a
+sidecar keys `accountId`, `email`, `label` and `credsDigest` (how it is
+computed included). A change to any of those is a
 change to that ADR as well.
 
 ## Sources

@@ -12,7 +12,10 @@
    save the result, then sync the live login again: the CLI may have rotated
    its own token during that round trip.
 5. Take `Provider::lock_live` (Codex: `auth.json.lock`, which TokenGauge
-   refreshes under) and `Provider::install`: for Claude, write `oauthAccount` into `.claude.json`,
+   refreshes under), read the live login once more and `Provider::install`
+   against it: if the CLI rotated its login since, nothing is written, the new
+   tokens are synced back into the store and the install is tried again (up to
+   three times; `--discard` skips the check).: for Claude, write `oauthAccount` into `.claude.json`,
    then `claudeAiOauth` into `.credentials.json`, keeping every other key; for
    Codex, replace `auth.json`.
 

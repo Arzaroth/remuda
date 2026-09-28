@@ -34,12 +34,26 @@ to `~/.config/environment.d/60-remuda.conf` and into the running user manager.
 Without that, the timer would look at the default locations, miss the live
 login, and refresh the active credential.
 
-A variable set or changed after installing is caught too: every interactive
-command records the store and each CLI's directory in
-`$XDG_STATE_HOME/remuda/dirs.json` (`dirs.rs`), and the timer runs
-`remuda refresh --scheduled`, which stops if its store differs from the
-recorded one and skips any CLI whose directory does, naming what to set, with a
-non-zero exit the journal shows.
+A CLI directory set or changed after installing is caught too
+([dirs.rs](../../src/dirs.rs)): every interactive command records where it
+found each CLI's login in `<store>/.dirs.json`, and the timer runs
+`remuda refresh --scheduled`, which refreshes only the CLIs whose directory
+matches the record. Any other CLI is skipped with a line naming what to set,
+and the run exits non-zero so the journal shows it. With no record at all, the
+timer refreshes nothing (the installer runs `remuda ls` once so there is one),
+and a store that does not exist stops it before anything is created.
+
+- The record lives in its store, so each store keeps its own and a smoke test
+  against a scratch `REMUDA_STORE` touches only that one. The price is that a
+  timer looking at another store than the shell cannot tell; the installer's
+  `environment.d` entry is what keeps them the same.
+- A run under systemd (`INVOCATION_ID` is set) is checked like
+  `--scheduled` and never records, which covers units installed by 0.1.0 that
+  run plain `remuda refresh` and are not replaced by `remuda update`.
+- A relative `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `REMUDA_STORE` is made
+  absolute before use, so the same string from another directory is not taken
+  for the same place.
+- A record that cannot be written is a warning, never a failed command.
 
 ## Update
 

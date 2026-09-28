@@ -27,13 +27,19 @@ order matters: the request line and headers are read within a 5 s deadline and
 a 16 KiB cap, `App::check` decides from them alone whether the request may be
 served, and only then is a body read, at most 64 KiB, within the same
 deadline. A client without the token never gets to make remuda wait on a
-body. At most 32 connections are handled at once; the next gets a 503 and is
-closed. Each runs on its own thread, because a Codex `login/finish` holds its
-request open until the browser calls back, and a thread that cannot start is
-a refused connection rather than a stopped server. Every answer closes the
-connection, after briefly draining what the client sent so it is not reset
-before it reads the answer. Responses carry `Cache-Control: no-store`,
-`nosniff` and `no-referrer`.
+body. A chunked body gets a 411. At most 32 connections are handled at once;
+the next gets a 503 and is closed. Each runs on its own thread, because a
+Codex `login/finish` holds its request open until the browser calls back, and
+a thread that cannot start is a refused connection rather than a stopped
+server. Every answer closes the connection after draining what the client
+sent, so it is not reset before it reads the answer: for at most 300 ms in
+all, and on the accepting thread (the 503) only what has already arrived, so
+no client can hold a slot past its deadline or stall the accept loop.
+Responses carry `Cache-Control: no-store`, `nosniff` and `no-referrer`.
+
+What the limits do not stop: another local user holding 32 idle connections,
+re-opened every 5 s, keeps the page answering 503. That is a nuisance with no
+access to anything, and it ends when they stop.
 
 ## API
 

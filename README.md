@@ -38,10 +38,10 @@ with the latest release.
 
 If your shell sets `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `REMUDA_STORE`, the
 installer copies them to `~/.config/environment.d/60-remuda.conf` so the timer
-looks where you do. If you change them later, the timer notices: it compares
-its view with the directories your last `remuda` command used, and refuses to
-refresh a CLI it would be looking for in the wrong place, saying what to set in
-that file (`journalctl --user -u remuda-refresh`).
+looks where you do. If you change `CLAUDE_CONFIG_DIR` or `CODEX_HOME` later,
+the timer notices: it compares its view with where your last `remuda` command
+found each CLI, and refuses to refresh one it would look for in the wrong
+place, saying what to set in that file (`journalctl --user -u remuda-refresh`).
 
 ## Commands
 
@@ -112,6 +112,8 @@ codex/<name>.json         same shape as auth.json
 <cli>/<name>.meta.json    accountId, email, capturedAt, label, the
                           credential's credsDigest, and Claude's
                           oauthAccount block
+.dirs.json                where the last interactive command found each
+                          CLI's login, for the refresh timer
 ```
 
 Files are 0600 and directories 0700. Other tools read the store: TokenGauge

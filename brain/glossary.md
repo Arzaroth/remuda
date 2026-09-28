@@ -34,12 +34,12 @@ switch asks for `--discard` before replacing it.
 left out of refresh, since which of its credentials is active is unknown.
 
 **Unverified**: a credential whose sidecar was written for other tokens than
-the ones beside it (its `credsDigest` does not match). Re-identified before any
-command uses it.
+the ones beside it (its `credsDigest` does not match). Re-identified at the
+start of the next sync; until then nothing uses it.
 
-**Directories record**: `$XDG_STATE_HOME/remuda/dirs.json`, where interactive
-commands note the store and each CLI's directory, so the scheduled refresh can
-tell it is looking elsewhere.
+**Directories record**: `<store>/.dirs.json`, where interactive commands note
+where they found each CLI's login, so the scheduled refresh can tell it is
+looking elsewhere.
 
 **Set aside**: tokens a refresh rotated for an account other than the
 credential's, kept in `.set-aside-<account>-<ms>.json` instead of dropped.

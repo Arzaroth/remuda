@@ -102,15 +102,27 @@ asking the provider.
 
 Claude Code rewrites `.claude.json` and `.credentials.json` without a lock
 remuda could take. Reading, editing and renaming would revert whatever it
-saved in between, so the rename happens only if the file is still the one that
-was read.
+saved in between, so the rename happens only if the file still holds what was
+read. The comparison is on content: inode, size and mtime miss a same-length
+rewrite within one timestamp tick.
+
+## A switch never lands on a login the CLI just rotated
+
+Retrying the edit is right for `.claude.json`, but for the credentials it
+would re-apply the switch on top of a refresh token the CLI had just rotated,
+dropping it while the store holds the spent one. So `install` writes only
+while the live login is still the one the switch synced, and `switch`, when it
+moved, syncs the new tokens back before trying again.
 
 ## The timer checks it sees what the shell sees
 
 A systemd user service does not inherit a shell's environment, and a timer
 that looks in the default place for a login kept elsewhere refreshes the
 active credential. The installer copies the variables once; the directories
-record catches a change made later.
+record catches a change made later. It fails closed: no record, no refresh.
+It lives in its store rather than under `$XDG_STATE_HOME`, a variable the
+timer does not see either, and so that a one-off run against a scratch store
+cannot stop the timer for the real one.
 
 ## No secret on a command line
 

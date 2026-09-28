@@ -40,7 +40,8 @@ directory.
 ## The store is a contract
 
 TokenGauge (ADR 0003) reads `<store>/<provider>/<name>.json` and the sidecar keys
-`accountId`, `email` and `label`. Changing any of them changes that ADR too.
+`accountId`, `email`, `label` and `credsDigest` (lowercase hex SHA-256 of the
+credential file's bytes). Changing any of them changes that ADR too.
 
 ## Conventions
 

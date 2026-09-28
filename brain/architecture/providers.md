@@ -39,12 +39,13 @@ refresh token into "sign this credential in again".
 - A login builds `oauthAccount` from the profile the way Claude Code does
   (`oauth_account_from_profile`) and maps `organization_type` onto
   `subscriptionType`.
-- `install` checks both files are JSON objects before writing either, then
-  edits `.claude.json` first. Claude Code rewrites both files on its own and
-  takes no lock, so each edit is a compare-and-swap (`fsx::update_json`): the
-  file's inode, size and mtime are checked again just before the rename, and
-  a file that moved meanwhile is read and edited again, so nothing Claude Code
-  saved is reverted.
+- `install(entry, outgoing)` checks both files are JSON objects before
+  writing either, then edits `.claude.json`, then `.credentials.json`. Each
+  edit is a compare-and-swap on the file's content (`fsx::update_json`), so
+  nothing Claude Code saved meanwhile is reverted, and the credentials are
+  written only while `claudeAiOauth` is still `outgoing`, the login the switch
+  synced; otherwise nothing is written (`fsx::Changed`) and `.claude.json` is
+  put back. Codex's `install` holds `auth.json` to the same check.
 
 ## Codex
 

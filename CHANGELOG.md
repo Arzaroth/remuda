@@ -8,12 +8,15 @@
   how long a client may take and how many connections it serves at once, and
   no longer stops when another local user holds connections open.
 - A credential whose sidecar was written for other tokens (a save interrupted
-  halfway) is detected, re-identified with the provider and relabelled,
-  instead of being refreshed or switched to under the wrong account.
-- Switching Claude Code no longer reverts changes Claude Code saved to
-  `.claude.json` or `.credentials.json` while the switch ran.
-- The refresh timer stops instead of refreshing an active login when it looks
-  for a CLI or the store in another place than your shell does.
+  halfway) is detected and re-identified with the provider, even while the CLI
+  is signed out or the access token has expired, instead of being refreshed,
+  switched to or labelled under the wrong account.
+- Switching no longer reverts changes Claude Code saved to `.claude.json` or
+  `.credentials.json` meanwhile, and never overwrites a login the CLI rotated
+  mid-switch.
+- The refresh timer refuses to refresh a CLI whose login it would look for in
+  another place than your shell does, including with a unit installed by
+  0.1.0.
 
 ## [0.1.0] - 2026-09-28
 
