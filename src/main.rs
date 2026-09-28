@@ -3,6 +3,7 @@ mod codex;
 mod commands;
 mod dirs;
 mod fsx;
+mod gauge;
 mod http;
 mod oauth;
 mod ops;
@@ -196,7 +197,7 @@ fn main() -> Result<()> {
         if !no_browser {
             open_in_browser(&url);
         }
-        let app = serve::App::new(store, providers, token, port);
+        let app = serve::App::new(store, serve::Places::from_env(), providers, token, port);
         http::serve(std::sync::Arc::new(app), listener, http::Limits::default());
         return Ok(());
     }

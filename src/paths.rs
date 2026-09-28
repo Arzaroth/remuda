@@ -53,3 +53,35 @@ pub fn store_root() -> PathBuf {
         .unwrap_or_else(|| home().join(".local/share"))
         .join("remuda/credentials")
 }
+
+fn config_home() -> PathBuf {
+    var_dir("XDG_CONFIG_HOME").unwrap_or_else(|| home().join(".config"))
+}
+
+pub fn systemd_user_units() -> PathBuf {
+    config_home().join("systemd/user")
+}
+
+/// TokenGauge's snapshot: the top-level `cache_file` of its config when set,
+/// else `$XDG_STATE_HOME/tokengauge/tokengauge-usage.json`.
+pub fn tokengauge_snapshot() -> PathBuf {
+    let config = std::fs::read_to_string(config_home().join("tokengauge/config.toml"));
+    let configured = config.ok().and_then(|text| {
+        text.lines()
+            .map(str::trim)
+            .take_while(|l| !l.starts_with('['))
+            .find_map(|l| {
+                let value = l
+                    .strip_prefix("cache_file")?
+                    .trim_start()
+                    .strip_prefix('=')?;
+                let value = value.trim().strip_prefix('"')?.split('"').next()?;
+                (!value.is_empty()).then(|| PathBuf::from(value))
+            })
+    });
+    configured.unwrap_or_else(|| {
+        var_dir("XDG_STATE_HOME")
+            .unwrap_or_else(|| home().join(".local/state"))
+            .join("tokengauge/tokengauge-usage.json")
+    })
+}
