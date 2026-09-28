@@ -36,6 +36,41 @@ impl LiveState {
     }
 }
 
+/// Re-identifies each credential whose sidecar was written for other tokens (a
+/// save interrupted between its two renames) and rewrites the sidecar for the
+/// tokens actually there. One that cannot be identified yet stays unverified,
+/// and nothing refreshes, switches to or matches it.
+pub fn heal(store: &Store, p: &dyn Provider) -> Result<()> {
+    for mut entry in store.list(p.id())?.into_iter().filter(|e| !e.verified) {
+        match p.identify(&entry.creds) {
+            Ok(id) => {
+                if id.account_id != entry.meta.account_id {
+                    eprintln!(
+                        "note: {} held {}'s tokens, not {}'s; its sidecar now says so",
+                        entry.qualified(),
+                        id.email,
+                        entry.meta.email
+                    );
+                }
+                entry.meta.account_id = id.account_id;
+                if !id.email.is_empty() {
+                    entry.meta.email = id.email;
+                }
+                if id.oauth_account.is_some() {
+                    entry.meta.oauth_account = id.oauth_account;
+                }
+                entry.verified = true;
+                store.save(&entry)?;
+            }
+            Err(err) => eprintln!(
+                "warning: {} does not match its sidecar and cannot be identified yet: {err:#}",
+                entry.qualified()
+            ),
+        }
+    }
+    Ok(())
+}
+
 /// Copies the live login back into the entry it belongs to. A CLI rotates the
 /// refresh token of the account it is signed into, which leaves the stored
 /// copy dead unless it is brought forward before anything else reads it.
@@ -47,7 +82,12 @@ pub fn sync_live(store: &Store, p: &dyn Provider) -> Result<LiveState> {
         });
     };
     let identity = p.live_identity(&creds)?;
-    let entries = store.list(p.id())?;
+    heal(store, p)?;
+    let entries: Vec<Entry> = store
+        .list(p.id())?
+        .into_iter()
+        .filter(|e| e.verified)
+        .collect();
 
     let refresh = p.refresh_token(&creds);
     let access = p.access_token(&creds);
@@ -186,6 +226,15 @@ pub fn switch(store: &Store, p: &dyn Provider, name: &str, discard: bool) -> Res
             );
         }
         _ => {}
+    }
+    target = store
+        .get(p.id(), name)?
+        .with_context(|| format!("no credential named {}/{name}", p.id()))?;
+    if !target.verified {
+        bail!(
+            "{} does not match its sidecar; run `remuda ls` online to identify it first",
+            target.qualified()
+        );
     }
     let refreshed = expires_in_ms(p, &target).is_some_and(|ms| ms < 5 * 60 * 1000);
     if refreshed {
@@ -399,6 +448,68 @@ mod tests {
 
         assert!(matches!(state, LiveState::Stored { synced: true, .. }));
         assert_eq!(e.stored_refresh_token("work").as_deref(), Some("r-work"));
+    }
+
+    fn tear(e: &Env, name: &str, access: &str) {
+        let path = e.store.root().join(format!("claude/{name}.json"));
+        crate::fsx::write_json(&path, &oauth(access, &format!("r-{access}"), HOUR)).unwrap();
+    }
+
+    #[test]
+    fn a_torn_credential_is_relabelled_for_the_account_it_holds() {
+        let server = confirming("u-real");
+        let e = env(&server.url());
+        e.stored("work", "u-work", HOUR);
+        tear(&e, "work", "a-real");
+
+        heal(&e.store, &e.claude).unwrap();
+
+        let work = e.store.get("claude", "work").unwrap().unwrap();
+        assert!(work.verified);
+        assert_eq!(work.meta.account_id, "u-real");
+        assert_eq!(work.meta.email, "u-real@example.com");
+    }
+
+    #[test]
+    fn an_unidentified_torn_credential_is_neither_switched_to_nor_refreshed() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", -HOUR);
+        tear(&e, "work", "a-torn");
+
+        let err = switch(&e.store, &e.claude, "work", true).unwrap_err();
+        assert!(
+            err.to_string().contains("does not match its sidecar"),
+            "{err}"
+        );
+        assert!(e.claude.live().unwrap().is_none());
+
+        let providers: [&dyn Provider; 1] = [&e.claude];
+        let lives = crate::commands::sync_all(&e.store, &providers).unwrap();
+        let mut err = Vec::new();
+        let result = crate::commands::refresh(
+            &e.store,
+            &lives,
+            crate::commands::RefreshScope {
+                only: None,
+                force: true,
+                within_min: 60,
+            },
+            &mut Vec::new(),
+            &mut err,
+        );
+        assert!(result.is_err());
+        assert!(
+            String::from_utf8(err)
+                .unwrap()
+                .contains("does not match its sidecar")
+        );
+        let mut out = Vec::new();
+        crate::commands::list(&e.store, &lives, false, &mut out).unwrap();
+        assert!(
+            String::from_utf8(out)
+                .unwrap()
+                .contains("work [unverified]")
+        );
     }
 
     #[test]

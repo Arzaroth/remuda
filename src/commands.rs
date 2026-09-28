@@ -84,9 +84,14 @@ fn human(ms: i64) -> String {
 }
 
 fn display_name(e: &Entry) -> String {
-    match &e.meta.label {
+    let name = match &e.meta.label {
         Some(label) => format!("{} ({label})", e.name),
         None => e.name.clone(),
+    };
+    if e.verified {
+        name
+    } else {
+        format!("{name} [unverified]")
     }
 }
 
@@ -132,6 +137,7 @@ pub fn list_json(store: &Store, lives: &[Live]) -> Result<Value> {
                 "active": live.state.active_name() == Some(e.name.as_str()),
                 "expiresAt": p.expires_at(&e.creds),
                 "refreshTokenExpiresAt": p.refresh_expires_at(&e.creds),
+                "verified": e.verified,
             }));
         }
     }
@@ -386,6 +392,15 @@ pub fn refresh(
         }
         for mut entry in store.list(p.id())? {
             if scope.only.is_some_and(|(_, name)| name != entry.name) {
+                continue;
+            }
+            if !entry.verified {
+                failed += 1;
+                writeln!(
+                    err,
+                    "{}: not refreshing, it does not match its sidecar",
+                    entry.qualified()
+                )?;
                 continue;
             }
             if live.state.active_name() == Some(entry.name.as_str()) {
