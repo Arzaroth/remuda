@@ -48,7 +48,7 @@ pub struct Response {
 }
 
 impl Response {
-    fn json(status: u16, body: Value) -> Self {
+    pub(crate) fn json(status: u16, body: Value) -> Self {
         Response {
             status,
             content_type: "application/json",

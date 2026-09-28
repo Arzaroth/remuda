@@ -49,7 +49,9 @@ pub fn serve(app: Arc<App>, listener: TcpListener, limits: Limits) {
         let Ok(stream) = stream else { continue };
         if busy.fetch_add(1, Ordering::SeqCst) >= limits.connections {
             busy.fetch_sub(1, Ordering::SeqCst);
-            refuse(stream, 503, "busy");
+            // On the accepting thread: only what has already arrived is
+            // drained, so no client can hold this loop.
+            close_with(stream, &error(503, "busy"), Duration::ZERO);
             continue;
         }
         let slot = Slot(Arc::clone(&busy));
@@ -63,26 +65,40 @@ pub fn serve(app: Arc<App>, listener: TcpListener, limits: Limits) {
     }
 }
 
-fn refuse(stream: TcpStream, status: u16, message: &str) {
-    close_with(
-        stream,
-        &Response {
-            status,
-            content_type: "application/json",
-            body: format!("{{\"error\":\"{message}\"}}"),
-        },
-    );
+fn error(status: u16, message: &str) -> Response {
+    Response::json(status, serde_json::json!({ "error": message }))
 }
+
+/// How long an answered connection is drained, all reads together.
+const LINGER: Duration = Duration::from_millis(300);
 
 /// Answers without reading the rest of the request. Closing with that still
 /// unread resets the connection and the client never sees the answer, so
 /// whatever arrives in the next moment is read and dropped.
-fn close_with(mut stream: TcpStream, response: &Response) {
+fn close_with(mut stream: TcpStream, response: &Response, linger: Duration) {
     let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
     let _ = write_response(&mut stream, response);
     let _ = stream.shutdown(std::net::Shutdown::Write);
-    let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
-    let _ = std::io::copy(&mut (&stream).take(MAX_BODY as u64), &mut std::io::sink());
+    let until = Instant::now() + linger;
+    let mut sink = [0u8; 4096];
+    let mut drained = 0;
+    if linger.is_zero() {
+        let _ = stream.set_nonblocking(true);
+    }
+    while drained < MAX_BODY {
+        if !linger.is_zero() {
+            let Some(left) = until.checked_duration_since(Instant::now()) else {
+                break;
+            };
+            if stream.set_read_timeout(Some(left)).is_err() {
+                break;
+            }
+        }
+        match stream.read(&mut sink) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => drained += n,
+        }
+    }
 }
 
 struct Head {
@@ -175,23 +191,31 @@ fn request<'a>(head: &'a Head, body: &'a str) -> Request<'a> {
 fn answer(app: &App, mut stream: TcpStream, limits: Limits) {
     let deadline = Instant::now() + limits.read_for;
     let Some(head) = read_head(&mut stream, deadline) else {
-        refuse(stream, 400, "bad request");
+        close_with(stream, &error(400, "bad request"), LINGER);
         return;
     };
     // Nobody may make remuda wait on a body before showing it may ask.
     if let Some(refused) = app.check(&request(&head, "")) {
-        close_with(stream, &refused);
+        close_with(stream, &refused, LINGER);
+        return;
+    }
+    if head.header("Transfer-Encoding").is_some() {
+        close_with(stream, &error(411, "send a Content-Length"), LINGER);
         return;
     }
     let body = match read_body(&mut stream, &head, deadline) {
         Ok(body) => body,
         Err(status) => {
-            refuse(stream, status, "the request body could not be read");
+            close_with(
+                stream,
+                &error(status, "the request body could not be read"),
+                LINGER,
+            );
             return;
         }
     };
     let response = app.handle(&request(&head, &body));
-    let _ = write_response(&mut stream, &response);
+    close_with(stream, &response, LINGER);
 }
 
 fn reason(status: u16) -> &'static str {
@@ -202,6 +226,7 @@ fn reason(status: u16) -> &'static str {
         403 => "Forbidden",
         404 => "Not Found",
         408 => "Request Timeout",
+        411 => "Length Required",
         413 => "Payload Too Large",
         503 => "Service Unavailable",
         _ => "",
@@ -332,6 +357,95 @@ mod tests {
 
         let garbage = exchange(port, "\u{1}\u{2}\r\n\r\n");
         assert!(garbage.starts_with("HTTP/1.1 400"), "{garbage}");
+    }
+
+    fn drip(port: u16, head: &str) -> std::thread::JoinHandle<()> {
+        let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        s.write_all(head.as_bytes()).unwrap();
+        std::thread::spawn(move || {
+            for _ in 0..100 {
+                if s.write_all(b"x").is_err() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        })
+    }
+
+    #[test]
+    fn a_refused_client_that_keeps_sending_is_cut_off() {
+        let e = env(&OFFLINE);
+        let port = start(&e, quick());
+        let started = Instant::now();
+        let dripper = drip(port, "POST /api/use HTTP/1.1\r\nHost: evil.example\r\n\r\n");
+        dripper.join().unwrap();
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn a_turned_away_client_that_keeps_sending_does_not_hold_the_door() {
+        let e = env(&OFFLINE);
+        let port = start(
+            &e,
+            Limits {
+                read_for: Duration::from_secs(5),
+                connections: 1,
+            },
+        );
+        let _holder = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+        let _dripper = drip(port, "GET / HTTP/1.1\r\n");
+        std::thread::sleep(Duration::from_millis(100));
+        let started = Instant::now();
+        let turned_away = exchange(port, "GET / HTTP/1.1\r\n\r\n");
+        assert!(turned_away.starts_with("HTTP/1.1 503"), "{turned_away}");
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn a_body_sent_after_its_head_is_read_and_odd_requests_are_refused() {
+        let e = env(&OFFLINE);
+        let port = start(&e, quick());
+        let body = r#"{"name":"nope"}"#;
+        let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        s.write_all(
+            format!(
+                "POST /api/use HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nX-Remuda-Token: {TOKEN}\r\nContent-Length: {}\r\n\r\n",
+                body.len()
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        s.write_all(&body.as_bytes()[..5]).unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        s.write_all(&body.as_bytes()[5..]).unwrap();
+        let mut answer = String::new();
+        s.read_to_string(&mut answer).unwrap();
+        assert!(answer.contains("no credential named nope"), "{answer}");
+
+        let chunked = exchange(
+            port,
+            &format!(
+                "POST /api/use HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nX-Remuda-Token: {TOKEN}\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n"
+            ),
+        );
+        assert!(chunked.starts_with("HTTP/1.1 411"), "{chunked}");
+
+        let huge = format!("GET / HTTP/1.1\r\nX: {}\r\n\r\n", "a".repeat(20_000));
+        let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let _ = s.write_all(huge.as_bytes());
+        let mut answer = String::new();
+        let _ = s.read_to_string(&mut answer);
+        assert!(answer.starts_with("HTTP/1.1 400"), "{answer}");
     }
 
     #[test]
