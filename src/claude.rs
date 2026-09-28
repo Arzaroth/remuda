@@ -104,7 +104,7 @@ fn apply_tokens(oauth: &mut Map<String, Value>, t: &TokenResponse) {
 }
 
 /// Refreshes in place and returns the account uuid the token endpoint reports.
-pub fn refresh(api: &Api, oauth: &mut Map<String, Value>) -> Result<Option<String>> {
+fn refresh(api: &Api, oauth: &mut Map<String, Value>) -> Result<Option<String>> {
     let refresh_token = oauth
         .get("refreshToken")
         .and_then(Value::as_str)
@@ -132,7 +132,7 @@ pub fn refresh(api: &Api, oauth: &mut Map<String, Value>) -> Result<Option<Strin
     Ok(t.account.map(|a| a.uuid))
 }
 
-pub fn profile(api: &Api, access_token: &str) -> Result<Value> {
+fn profile(api: &Api, access_token: &str) -> Result<Value> {
     let resp = api
         .client
         .get(&api.profile_url)
@@ -148,7 +148,7 @@ pub fn profile(api: &Api, access_token: &str) -> Result<Value> {
 }
 
 /// The `oauthAccount` block Claude Code writes into `.claude.json` from a profile.
-pub fn oauth_account_from_profile(p: &Value) -> Result<Value> {
+fn oauth_account_from_profile(p: &Value) -> Result<Value> {
     let account = p.get("account").context("profile has no account")?;
     let org = p
         .get("organization")
@@ -210,13 +210,13 @@ fn subscription_type(org_type: Option<&str>) -> Value {
     }
 }
 
-pub struct Pkce {
+struct Pkce {
     pub url: String,
     verifier: String,
     state: String,
 }
 
-pub fn start_login() -> Result<Pkce> {
+fn start_login() -> Result<Pkce> {
     let verifier = pkce::random()?;
     let state = pkce::random()?;
     let challenge = pkce::challenge(&verifier);
@@ -241,13 +241,13 @@ pub fn start_login() -> Result<Pkce> {
     })
 }
 
-pub struct ClaudeLogin {
+struct ClaudeLogin {
     pub oauth: Value,
     pub oauth_account: Value,
 }
 
 /// Exchanges the `code#state` string the callback page shows.
-pub fn finish_login(api: &Api, pkce: &Pkce, pasted: &str) -> Result<ClaudeLogin> {
+fn finish_login(api: &Api, pkce: &Pkce, pasted: &str) -> Result<ClaudeLogin> {
     let pasted = pasted.trim();
     let (code, state) = pasted
         .split_once('#')

@@ -44,7 +44,7 @@ enum Cmd {
     /// Store the login a CLI is signed into right now.
     Import {
         name: String,
-        #[arg(short, long, default_value = "claude", value_parser = PROVIDERS)]
+        #[arg(short, long, default_value = commands::DEFAULT_PROVIDER, value_parser = PROVIDERS)]
         provider: String,
         /// Replace a stored credential of the same name.
         #[arg(long)]
@@ -53,7 +53,7 @@ enum Cmd {
     /// Sign a new account in through the browser and store it, without touching the CLI.
     Login {
         name: String,
-        #[arg(short, long, default_value = "claude", value_parser = PROVIDERS)]
+        #[arg(short, long, default_value = commands::DEFAULT_PROVIDER, value_parser = PROVIDERS)]
         provider: String,
         #[arg(long)]
         force: bool,
@@ -168,8 +168,8 @@ fn main() -> Result<()> {
         let providers: Vec<Box<dyn Provider>> =
             vec![Box::new(Claude::from_env()?), Box::new(Codex::from_env()?)];
         let (server, port) = serve::bind(port)?;
-        let url = format!("http://127.0.0.1:{port}/#{}", pkce::random()?);
-        let token = url.rsplit('#').next().unwrap_or_default().to_owned();
+        let token = pkce::random()?;
+        let url = format!("http://127.0.0.1:{port}/#{token}");
         println!(
             "remuda is serving {url}\nThe link carries its access token; keep it to yourself. Ctrl-C stops it."
         );

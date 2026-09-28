@@ -137,7 +137,7 @@ fn two_accounts_imported_switched_and_removed() {
     );
     assert_eq!(
         home.ok(&["import", "work"]),
-        "stored claude/work (u-work@example.com)\n"
+        "stored claude/work (u-work@example.com, max 20x)\n"
     );
     assert!(store.join("work.json").exists());
     assert!(
@@ -312,7 +312,7 @@ fn codex_logins_live_beside_claude_ones() {
     write(&auth, &codex_auth("acct-work", "cr-work"));
     assert_eq!(
         home.ok(&["import", "-p", "codex", "work"]),
-        "stored codex/work (acct-work@example.com)\n"
+        "stored codex/work (acct-work@example.com, plus)\n"
     );
     write(&auth, &codex_auth("acct-perso", "cr-perso"));
     home.ok(&["import", "--provider", "codex", "perso"]);

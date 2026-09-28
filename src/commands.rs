@@ -90,8 +90,10 @@ fn display_name(e: &Entry) -> String {
     }
 }
 
+pub const DEFAULT_PROVIDER: &str = "claude";
+
 fn import_hint(p: &dyn Provider) -> String {
-    if p.id() == "claude" {
+    if p.id() == DEFAULT_PROVIDER {
         "`remuda import <name>`".to_owned()
     } else {
         format!("`remuda import -p {} <name>`", p.id())
@@ -249,16 +251,10 @@ pub fn import(
             )));
         }
     };
-    if let Some(other) = store
-        .list(p.id())?
-        .into_iter()
-        .find(|e| e.meta.account_id == identity.account_id && e.name != name)
-    {
-        bail!("this account is already stored as {}", other.qualified());
-    }
     let entry = Entry::new(p.id(), name, creds, identity, now_ms());
+    ensure_new_account(store, &entry)?;
     store.save(&entry)?;
-    writeln!(out, "stored {} ({})", entry.qualified(), entry.meta.email)?;
+    writeln!(out, "{}", stored_message(p, &entry))?;
     Ok(())
 }
 
@@ -275,14 +271,7 @@ pub fn login(
     prompt: Prompt,
     out: &mut dyn Write,
 ) -> Result<()> {
-    validate_name(name)?;
-    if !force && store.get(p.id(), name)?.is_some() {
-        bail!(
-            "{}/{name} already exists, pass --force to replace it",
-            p.id()
-        );
-    }
-    let pending = p.begin_login()?;
+    let pending = begin_login(store, p, name, force)?;
     writeln!(
         out,
         "Sign in to {} with the account to store as {name}. A private window avoids the account you are signed into.\n\n{}\n",
@@ -300,13 +289,48 @@ pub fn login(
     };
     let done = pending.finish(code.as_deref())?;
     let entry = save_login(store, p, name, force, done)?;
-    writeln!(
-        out,
+    writeln!(out, "{}", stored_message(p, &entry))?;
+    Ok(())
+}
+
+/// Checks the name before anyone spends minutes in a browser for it.
+pub fn begin_login(
+    store: &Store,
+    p: &dyn Provider,
+    name: &str,
+    force: bool,
+) -> Result<Box<dyn crate::provider::PendingLogin>> {
+    validate_name(name)?;
+    if !force && store.get(p.id(), name)?.is_some() {
+        bail!(
+            "{}/{name} already exists, pass --force to replace it",
+            p.id()
+        );
+    }
+    p.begin_login()
+}
+
+pub fn stored_message(p: &dyn Provider, entry: &Entry) -> String {
+    format!(
         "stored {} ({}, {})",
         entry.qualified(),
         entry.meta.email,
         p.plan(&entry.creds)
-    )?;
+    )
+}
+
+fn ensure_new_account(store: &Store, entry: &Entry) -> Result<()> {
+    if let Some(other) = store
+        .list(&entry.provider)?
+        .into_iter()
+        .find(|e| e.meta.account_id == entry.meta.account_id && e.name != entry.name)
+    {
+        bail!(
+            "{} is already stored as {}; remove it first to store it again",
+            entry.meta.email,
+            other.qualified()
+        );
+    }
     Ok(())
 }
 
@@ -327,17 +351,7 @@ pub fn save_login(
             entry.qualified()
         );
     }
-    if let Some(other) = store
-        .list(p.id())?
-        .into_iter()
-        .find(|e| e.meta.account_id == entry.meta.account_id && e.name != name)
-    {
-        bail!(
-            "{} is already stored as {}; remove it first to store it again",
-            entry.meta.email,
-            other.qualified()
-        );
-    }
+    ensure_new_account(store, &entry)?;
     store.save(&entry)?;
     Ok(entry)
 }
@@ -583,7 +597,10 @@ mod tests {
             &mut out,
         )
         .unwrap();
-        assert_eq!(text(out), "stored claude/work (u-work@example.com)\n");
+        assert_eq!(
+            text(out),
+            "stored claude/work (u-work@example.com, max 5x)\n"
+        );
         assert_eq!(e.stored_refresh_token("work").as_deref(), Some("r1"));
         let stored = e.store.get("claude", "work").unwrap().unwrap();
         assert!(stored.creds.get("mcpOAuth").is_none());

@@ -9,7 +9,7 @@ use crate::commands::{self, RefreshScope};
 use crate::ops;
 use crate::pkce;
 use crate::provider::{PendingLogin, Provider};
-use crate::store::{Store, validate_name};
+use crate::store::Store;
 
 const PAGE: &str = include_str!("serve.html");
 const MAX_BODY: u64 = 64 * 1024;
@@ -128,10 +128,15 @@ impl App {
         let spec = || text("name").context("name is required");
         let providers = self.providers();
         let store = &self.store;
+        // A sign-in waits on the browser, so only it runs without the lock.
+        let _lock = if path.starts_with("/api/login") {
+            None
+        } else {
+            Some(store.lock()?)
+        };
 
         match (method, path) {
             ("GET", "/api/state") => {
-                let _lock = store.lock()?;
                 let lives = commands::sync_all(store, &providers)?;
                 let mut state = commands::list_json(store, &lives)?;
                 state["providers"] = providers
@@ -141,35 +146,32 @@ impl App {
                 Ok(state)
             }
             ("POST", "/api/use") => {
-                let _lock = store.lock()?;
                 let (p, name) = commands::resolve(store, &providers, spec()?)?;
                 Ok(json!({"message": ops::switch(store, p, &name, flag("discard"))?}))
             }
             ("POST", "/api/import") => {
-                let _lock = store.lock()?;
-                let p = commands::find(&providers, text("provider").unwrap_or("claude"))?;
+                let p = commands::find(
+                    &providers,
+                    text("provider").unwrap_or(commands::DEFAULT_PROVIDER),
+                )?;
                 let state = ops::sync_live(store, p)?;
                 capture(|out| commands::import(store, p, &state, spec()?, flag("force"), out))
             }
             ("POST", "/api/label") => {
-                let _lock = store.lock()?;
                 let (p, name) = commands::resolve(store, &providers, spec()?)?;
                 capture(|out| commands::label(store, p, &name, text("text"), out))
             }
             ("POST", "/api/rename") => {
-                let _lock = store.lock()?;
                 let (p, name) = commands::resolve(store, &providers, spec()?)?;
                 let to = text("to").context("to is required")?;
                 capture(|out| commands::rename(store, p, &name, to, out))
             }
             ("POST", "/api/remove") => {
-                let _lock = store.lock()?;
                 let (p, name) = commands::resolve(store, &providers, spec()?)?;
                 let state = ops::sync_live(store, p)?;
                 capture(|out| commands::remove(store, p, &state, &name, out))
             }
             ("POST", "/api/refresh") => {
-                let _lock = store.lock()?;
                 let only = text("name")
                     .map(|s| commands::resolve(store, &providers, s))
                     .transpose()?;
@@ -191,13 +193,12 @@ impl App {
                 )
             }
             ("POST", "/api/login") => {
-                let p = commands::find(&providers, text("provider").unwrap_or("claude"))?;
+                let p = commands::find(
+                    &providers,
+                    text("provider").unwrap_or(commands::DEFAULT_PROVIDER),
+                )?;
                 let name = spec()?;
-                validate_name(name)?;
                 let force = flag("force");
-                if !force && store.get(p.id(), name)?.is_some() {
-                    bail!("{}/{name} already exists", p.id());
-                }
                 let mut pending = self.pending.lock().map_err(|_| anyhow!("poisoned"))?;
                 pending.retain(|_, l| {
                     let keep = l.provider != p.id();
@@ -206,7 +207,7 @@ impl App {
                     }
                     keep
                 });
-                let login = p.begin_login()?;
+                let login = commands::begin_login(store, p, name, force)?;
                 let id = pkce::random()?;
                 let answer = json!({"id": id, "url": login.url(), "needsCode": login.needs_code()});
                 pending.insert(
@@ -240,9 +241,7 @@ impl App {
                 }
                 let p = commands::find(&providers, provider)?;
                 let entry = commands::save_login(store, p, &name, force, done?)?;
-                Ok(
-                    json!({"message": format!("stored {} ({})", entry.qualified(), entry.meta.email)}),
-                )
+                Ok(json!({"message": commands::stored_message(p, &entry)}))
             }
             ("POST", "/api/login/cancel") => {
                 if let Some(id) = text("id")
@@ -475,7 +474,10 @@ mod tests {
         assert_eq!(state["live"][0]["state"], "unstored");
         assert_eq!(state["live"][0]["email"], "u-new@example.com");
         let (_, r) = call(&app, "POST", "/api/import", json!({"name": "new"}));
-        assert_eq!(r["message"], "stored claude/new (u-new@example.com)");
+        assert_eq!(
+            r["message"],
+            "stored claude/new (u-new@example.com, max 5x)"
+        );
     }
 
     #[test]
@@ -508,7 +510,7 @@ mod tests {
             "/api/login/finish",
             json!({"id": id, "code": format!("c#{state}")}),
         );
-        assert_eq!(r["message"], "stored claude/new (u-new@example.com)");
+        assert_eq!(r["message"], "stored claude/new (u-new@example.com, pro)");
         let (status, r) = call(&app, "POST", "/api/login/finish", json!({"id": id}));
         assert_eq!(status, 400);
         assert!(r["error"].as_str().unwrap().contains("no longer open"));
