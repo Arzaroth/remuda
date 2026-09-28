@@ -57,7 +57,10 @@ pub trait Provider: Send + Sync {
     /// Whose tokens these are, according to the tokens or the provider rather
     /// than to a file that can be out of step with them.
     fn identify(&self, creds: &Value) -> Result<Identity>;
-    fn install(&self, entry: &Entry) -> Result<()>;
+    /// Makes `entry` the live login, but only while the live login is still
+    /// `outgoing` (store shape); otherwise fails with [`crate::fsx::Changed`]
+    /// and writes nothing. `None` replaces whatever is there.
+    fn install(&self, entry: &Entry, outgoing: Option<&Value>) -> Result<()>;
     /// A lock other tools that rewrite the live login take too, held across a
     /// switch's last read and its write.
     fn lock_live(&self) -> Result<Option<std::fs::File>> {

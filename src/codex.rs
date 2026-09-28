@@ -10,7 +10,7 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde_json::{Map, Value, json};
 
-use crate::fsx::{now_ms, read_json, rfc3339, write_json};
+use crate::fsx::{Changed, now_ms, read_json, rfc3339, update_json};
 use crate::oauth;
 use crate::paths;
 use crate::pkce;
@@ -217,8 +217,15 @@ impl Provider for Codex {
         identity_of(creds).context("the tokens do not name their ChatGPT seat")
     }
 
-    fn install(&self, entry: &Entry) -> Result<()> {
-        write_json(&self.auth_path, &entry.creds)
+    fn install(&self, entry: &Entry, outgoing: Option<&Value>) -> Result<()> {
+        let replacement = entry.creds.clone();
+        update_json(&self.auth_path, |file| {
+            if outgoing.is_some_and(|o| file != o) {
+                return Err(Changed.into());
+            }
+            *file = replacement.clone();
+            Ok(())
+        })
     }
 
     /// TokenGauge refreshes the live auth.json in place under this lock.
@@ -499,6 +506,7 @@ impl PendingLogin for CodexPending {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fsx::write_json;
     use crate::ops::testing::OFFLINE;
     use crate::ops::{self, LiveState};
     use crate::store::Store;
@@ -668,7 +676,7 @@ mod tests {
                 .unwrap();
         }
         let work = store.get("codex", "work").unwrap().unwrap();
-        c.install(&work).unwrap();
+        c.install(&work, None).unwrap();
 
         let said = ops::switch(&store, &c, "perso", false).unwrap();
 
@@ -684,6 +692,28 @@ mod tests {
         drop(held);
         let live = read_json(&tmp.path().join("auth.json")).unwrap().unwrap();
         assert_eq!(live, store.get("codex", "perso").unwrap().unwrap().creds);
+    }
+
+    #[test]
+    fn a_codex_install_refuses_an_auth_json_that_moved() {
+        let tmp = tempfile::tempdir().unwrap();
+        let c = codex(tmp.path(), &OFFLINE);
+        let seen = auth("acct-1", "a", "r1", 1_900_000_000);
+        let rotated = auth("acct-1", "a", "r2", 1_900_000_000);
+        write_json(&tmp.path().join("auth.json"), &rotated).unwrap();
+        let other = auth("acct-2", "b", "s", 1_900_000_000);
+        let identity = c.live_identity(&other).unwrap().unwrap();
+        let entry = Entry::new("codex", "other", other, identity, 1);
+
+        let err = c.install(&entry, Some(&seen)).unwrap_err();
+
+        assert!(err.is::<Changed>(), "{err}");
+        assert_eq!(
+            read_json(&tmp.path().join("auth.json")).unwrap().unwrap(),
+            rotated
+        );
+        c.install(&entry, Some(&rotated)).unwrap();
+        assert_eq!(c.refresh_token(&c.live().unwrap().unwrap()), Some("s"));
     }
 
     #[test]

@@ -274,12 +274,20 @@ pub fn switch(store: &Store, p: &dyn Provider, name: &str, discard: bool) -> Res
         store.save(&target)?;
     }
     let _live = p.lock_live()?;
-    if refreshed {
-        // The refresh took a round trip, and the CLI may have rotated its own
-        // login meanwhile.
-        sync_live(store, p)?;
+    let mut attempts = 0;
+    loop {
+        // The CLI may rotate its own login at any moment, so the login being
+        // replaced is read again right before, and the write is refused if it
+        // moved in between; its new tokens are then synced back first.
+        if refreshed || attempts > 0 {
+            sync_live(store, p)?;
+        }
+        let outgoing = if discard { None } else { p.live()? };
+        match p.install(&target, outgoing.as_ref()) {
+            Err(e) if e.is::<crate::fsx::Changed>() && attempts < 3 => attempts += 1,
+            result => break result?,
+        }
     }
-    p.install(&target)?;
     Ok(format!(
         "switched {} to {} ({})",
         p.name(),
@@ -639,7 +647,7 @@ mod tests {
         let config = std::fs::read_to_string(e.tmp.path().join(".claude.json")).unwrap();
 
         let perso = e.store.get("claude", "perso").unwrap().unwrap();
-        let err = e.claude.install(&perso).unwrap_err();
+        let err = e.claude.install(&perso, None).unwrap_err();
 
         assert!(err.to_string().contains("not a JSON object"), "{err}");
         assert_eq!(
@@ -650,6 +658,27 @@ mod tests {
             std::fs::read_to_string(e.tmp.path().join(".credentials.json")).unwrap(),
             "[1, 2]"
         );
+    }
+
+    #[test]
+    fn an_install_refuses_a_live_login_that_moved_and_undoes_its_first_half() {
+        let e = env(&OFFLINE);
+        e.stored("perso", "u-perso", HOUR);
+        let seen = oauth("a1", "r1", HOUR);
+        e.sign_in(oauth("a2", "r2-rotated", HOUR), account("u-work"));
+        let config_before = std::fs::read_to_string(e.tmp.path().join(".claude.json")).unwrap();
+
+        let perso = e.store.get("claude", "perso").unwrap().unwrap();
+        let err = e.claude.install(&perso, Some(&seen)).unwrap_err();
+
+        assert!(err.is::<crate::fsx::Changed>(), "{err}");
+        assert_eq!(e.live_refresh_token().as_deref(), Some("r2-rotated"));
+        let config: Value = serde_json::from_str(
+            &std::fs::read_to_string(e.tmp.path().join(".claude.json")).unwrap(),
+        )
+        .unwrap();
+        let before: Value = serde_json::from_str(&config_before).unwrap();
+        assert_eq!(config["oauthAccount"], before["oauthAccount"]);
     }
 
     #[test]

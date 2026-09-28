@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use crate::fsx::{now_ms, read_json, update_json};
+use crate::fsx::{Changed, now_ms, read_json, update_json};
 use crate::oauth;
 use crate::paths;
 use crate::pkce;
@@ -407,7 +407,7 @@ impl Provider for Claude {
     /// Writes the account first and the login second: Claude Code adopts a
     /// login when the credentials file changes, and by then the account the
     /// UI shows is already the new one. Every other key in both files is kept.
-    fn install(&self, entry: &Entry) -> Result<()> {
+    fn install(&self, entry: &Entry, outgoing: Option<&Value>) -> Result<()> {
         let oauth = Self::oauth(&entry.creds)
             .context("stored credential has no login")?
             .clone();
@@ -421,16 +421,33 @@ impl Provider for Claude {
                 bail!("{} is not a JSON object", path.display());
             }
         }
-        // Claude Code rewrites both files on its own and takes no lock, so each
-        // is edited in place rather than overwritten with an older read.
+        let expected = outgoing.and_then(|o| o.get(OAUTH_KEY));
+        let previous = read_json(&self.config_path)?.and_then(|c| c.get("oauthAccount").cloned());
         update_json(&self.config_path, |config| {
             config["oauthAccount"] = account.clone();
             Ok(())
         })?;
-        update_json(&self.creds_path, |file| {
+        let written = update_json(&self.creds_path, |file| {
+            if expected.is_some_and(|e| file.get(OAUTH_KEY) != Some(e)) {
+                return Err(Changed.into());
+            }
             file[OAUTH_KEY] = Value::Object(oauth.clone());
             Ok(())
-        })
+        });
+        if written.is_err() {
+            let _ = update_json(&self.config_path, |config| {
+                if config.get("oauthAccount") == Some(&account) {
+                    match &previous {
+                        Some(p) => config["oauthAccount"] = p.clone(),
+                        None => {
+                            config.as_object_mut().map(|c| c.remove("oauthAccount"));
+                        }
+                    }
+                }
+                Ok(())
+            });
+        }
+        written
     }
 
     fn refresh(&self, creds: &mut Value) -> Result<Option<String>> {
