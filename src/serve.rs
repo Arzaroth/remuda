@@ -699,6 +699,7 @@ mod tests {
             "/api/login",
             json!({"provider": "codex", "name": "x"}),
         );
+        assert_eq!(begun["opened"], false);
         let id = begun["id"].as_str().unwrap().to_owned();
         let waiting = {
             let app = Arc::clone(&app);
