@@ -65,8 +65,10 @@ A credential is addressed by its name when only one CLI has that name, and as
 | `remuda completions <shell>` | Print a completion script |
 | `remuda update [--check]` | Replace the binary with the latest release |
 
-`login` opens the provider's sign-in page. Sign in with the account to add (a
-private window keeps the account you are signed into out of the way). Claude
+`login` opens the provider's sign-in page in a private window of your default
+browser (Brave, Chrome, Chromium, Vivaldi, Edge, Firefox or LibreWolf), so the
+account you are signed into there stays put; with another browser, open it in a
+private window yourself. Sign in with the account to add. Claude
 then shows a `code#state` string to paste back; Codex calls back to
 `localhost:1455` on its own, so run it on the machine whose browser you use,
 and not while `codex login` is running.
@@ -142,5 +144,5 @@ Nothing in the test suite reaches the network or a real CLI install. The OAuth
 calls run against a local mock server, a Codex sign-in is completed through its
 callback listener on an ephemeral port, and `tests/cli.rs` runs the binary
 against a throwaway `HOME`. What stays uncovered on purpose is the process
-surface in `main.rs`: `remuda update` talking to GitHub, `login` reading stdin
-and opening a browser, and `serve` binding its port.
+surface in `main.rs`: `remuda update` talking to GitHub, `login` reading stdin,
+`serve` binding its port, and `browser.rs` starting a browser.

@@ -136,6 +136,15 @@ started by `xdg-open url` keeps that URL in its arguments for its whole
 session. The page's URL carries its token and a sign-in URL carries its state,
 so the browser is handed a 0600 redirect file under `$XDG_RUNTIME_DIR` instead.
 
+## Sign-in opens a private window
+
+Signing in as a second account in the browser's normal profile signs its
+claude.ai or ChatGPT session over to that account. A hint to use a private
+window came too late on the page, which had already opened a normal tab, so
+remuda opens the private window itself. A page cannot ask for one, so the
+server does it. It knows the common browsers' flags only; any other gets
+`xdg-open` and the hint, since a wrong flag could open nothing at all.
+
 ## The page is guarded by a token, Host and Origin
 
 A page on any site can make the browser send requests to `127.0.0.1`, and DNS
@@ -169,6 +178,7 @@ per provider, so a CLI release that moves them is one edit.
 
 - [src/ops.rs](../src/ops.rs)
 - [src/claude.rs](../src/claude.rs)
+- [src/browser.rs](../src/browser.rs)
 - [src/codex.rs](../src/codex.rs)
 - [src/commands.rs](../src/commands.rs)
 - [src/serve.rs](../src/serve.rs)

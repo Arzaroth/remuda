@@ -3,8 +3,16 @@
 `remuda login <name> [-p codex] [--force] [--no-browser]` adds an account
 without touching the CLI's live login. It checks the name first
 (`commands::begin_login`), prints the provider's authorize URL and opens it
-through a private redirect file, never as a command-line argument; a private
-window keeps the signed-in account out of the way.
+through a private redirect file, never as a command-line argument.
+
+It opens in a private window of the default browser (`browser::open_private`),
+because signing in as another account in the browser's normal profile replaces
+the claude.ai or ChatGPT session already there. `xdg-settings get
+default-web-browser` names the browser; Brave, Chrome, Chromium and Vivaldi get
+`--incognito`, Edge `--inprivate`, Firefox and LibreWolf `--private-window`.
+With no display, another browser (a Flatpak one included) or no such executable
+on `PATH`, it falls back to `xdg-open` and says a private window avoids the
+account you are signed into.
 
 - **Claude Code**: after sign-in, the callback page shows `code#state`; paste it.
   A pasted state that does not match refuses the login. The code is exchanged,
@@ -24,6 +32,7 @@ The page offers the same flow in two calls; see [web-page.md](web-page.md).
 
 ## Sources
 
+- [src/browser.rs](../../src/browser.rs) `open_private`, `launcher`
 - [src/commands.rs](../../src/commands.rs) `login`, `save_login`
 - [src/claude.rs](../../src/claude.rs) `start_login`, `finish_login`
 - [src/codex.rs](../../src/codex.rs) `begin_login`, `CodexPending`

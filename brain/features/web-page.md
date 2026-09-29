@@ -43,7 +43,11 @@ click within 400 ms, so a double-click only arms it.
 "Refresh tokens" refreshes every inactive credential due within the hour.
 
 "Add an account" picks a provider and a name and starts a sign-in: the
-provider's page opens in a new tab, then Claude shows a box for the pasted code
+server opens the provider's page in a private window, as `login` does (see
+[sign-in.md](sign-in.md)). When it cannot, or runs with `--no-browser`, the page
+opens a new tab instead. Either way the box can copy the link for pasting into
+a private window by hand, which also serves a page viewed through a tunnel from
+another machine. Then Claude shows a box for the pasted code
 while Codex waits for its callback. Cancel abandons it, and for Codex frees port
 1455 immediately.
 

@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Adding an account no longer signs your browser's own claude.ai or ChatGPT
+  session over to it. `remuda login` and the `serve` page open the sign-in page
+  in a private window of the default browser (Brave, Chrome, Chromium, Vivaldi,
+  Edge, Firefox, LibreWolf) instead of a normal tab. With another browser, or
+  no display, they fall back to the old behaviour. The page can also copy the
+  sign-in link for pasting into a private window by hand.
+
 ## [0.4.0] - 2026-09-29
 
 ### Added
