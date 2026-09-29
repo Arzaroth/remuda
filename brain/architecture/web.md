@@ -5,7 +5,8 @@ prints `http://127.0.0.1:<port>/#<token>`, and opens it. The token is 32 random
 bytes, base64url. The browser is not given the URL as an argument (every local
 user can read a command line): remuda writes a redirect page to
 `$XDG_RUNTIME_DIR/remuda/open.html` (0600, in a 0700 directory) and opens
-that. The same goes for the sign-in URLs `login` opens.
+that. The same goes for the sign-in URLs `login` and the page open, which go
+to a private window when the default browser allows it.
 
 The page reads the token from the fragment (fragments never reach a server log
 or a `Referer`), keeps it in `sessionStorage`, strips it from the address bar,
@@ -51,7 +52,7 @@ access to anything, and it ends when they stop.
 | `POST /api/import` `{provider?, name, force?}` | Store the live login |
 | `POST /api/label` `{name, text?}` / `rename` `{name, to}` / `remove` `{name}` | As the commands |
 | `POST /api/refresh` `{name?, force?}` | Refresh inactive credentials |
-| `POST /api/login` `{provider?, name, force?}` | Begin a sign-in: `{id, url, needsCode}` |
+| `POST /api/login` `{provider?, name, force?}` | Begin a sign-in and open it in a private window: `{id, url, needsCode, opened}` |
 | `POST /api/login/finish` `{id, code?}` | Finish it and store the result |
 | `POST /api/login/cancel` `{id}` | Abandon it; a waiting Codex callback stops |
 

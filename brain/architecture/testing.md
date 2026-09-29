@@ -39,7 +39,8 @@ network or touches the developer's own logins.
 
 `scripts/coverage.sh` (cargo-llvm-cov) prints the summary and the files with the
 most uncovered lines. Uncovered on purpose: `main.rs`'s process surface
-(`update`, stdin and `xdg-open` in `login`, binding in `serve`).
+(`update`, stdin in `login`, binding in `serve`) and `browser.rs` starting a
+browser; which browser and flag it picks is tested through `launcher`.
 
 ## Sources
 
