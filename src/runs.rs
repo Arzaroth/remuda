@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::fsx::{read_json, write_json};
+use crate::fsx::{read_record, write_record};
 use crate::store::Store;
 
 /// What the last scheduled refresh did, kept in the store it ran against so
@@ -39,21 +39,11 @@ impl Run {
 }
 
 pub fn last(store: &Store) -> Option<Run> {
-    read_json(&record_path(store))
-        .ok()
-        .flatten()
-        .and_then(|v| serde_json::from_value(v).ok())
+    read_record(&record_path(store))
 }
 
-/// Best effort, like the directory record: a run that cannot be noted still
-/// refreshed what it refreshed.
 pub fn record(store: &Store, run: &Run) {
-    let written = serde_json::to_value(run)
-        .map_err(anyhow::Error::from)
-        .and_then(|v| write_json(&record_path(store), &v));
-    if let Err(e) = written {
-        eprintln!("warning: could not note this refresh for the page: {e:#}");
-    }
+    write_record(&record_path(store), run, "this refresh for the page");
 }
 
 #[cfg(test)]
