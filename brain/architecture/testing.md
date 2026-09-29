@@ -26,8 +26,10 @@ network or touches the developer's own logins.
 - **PKCE is checked the way the real endpoints check it**: the mocks recompute
   the challenge from the verifier the exchange sent and compare it with the one
   in the authorize URL, and match the redirect URI.
-- The whole suite passes under `unshare -rn` with an empty `HOME`, which is the
-  check that nothing reaches the network or a real login.
+- The whole suite passes with no network and an empty `HOME`, which is the
+  check that nothing reaches the network or a real login:
+  `HOME=$(mktemp -d) unshare -rn sh -c 'ip link set lo up && cargo test --locked'`.
+  Loopback must be up: the mock servers listen on 127.0.0.1.
 - **`serve`** is tested through `App::handle` with synthetic requests; `http.rs`
   over real sockets, with short limits: refusal before a body, oversized,
   stalled and malformed requests, and the connection limit.

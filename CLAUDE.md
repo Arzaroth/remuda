@@ -33,9 +33,10 @@ Tests never touch the developer's real files or the network: providers are
 built with `::at(dir, Api::local(url))`, and `tests/cli.rs` points the binary
 at a mock through `REMUDA_TEST_CLAUDE_API` / `REMUDA_TEST_OPENAI_API`, which
 exist in debug builds only. A release build has no way to redirect an OAuth
-endpoint; keep it that way. The suite must pass under `unshare -rn` with an
-empty `HOME`. Manual smoke tests use `REMUDA_STORE` pointed at a scratch
-directory.
+endpoint; keep it that way. The suite must pass with no network and an empty
+`HOME`: `HOME=$(mktemp -d) unshare -rn sh -c 'ip link set lo up && cargo test'`
+(loopback up, for the mock servers). Manual smoke tests use `REMUDA_STORE`
+pointed at a scratch directory.
 
 ## The store is a contract
 

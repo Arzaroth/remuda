@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- The `serve` page can switch away from a live login remuda cannot keep, and
+  replace a stored credential on import or sign-in, each after a second click,
+  as `use --discard` and `--force` do.
+
+### Fixed
+
+- The `serve` page finds the refresh timer wherever systemd loads user units
+  from, not only `~/.config/systemd/user`.
+
 ## [0.2.0] - 2026-09-29
 
 ### Added
