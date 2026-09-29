@@ -66,8 +66,11 @@ that if the credential cannot follow.
 `<store>/.dirs.json` records where the last interactive command found each
 CLI's login; see [distribution.md](distribution.md). `<store>/.last-refresh.json`
 records the last scheduled refresh for the page; see
-[../features/refresh.md](../features/refresh.md). Neither is under a provider
-directory, so neither is a credential to TokenGauge.
+[../features/refresh.md](../features/refresh.md). `<store>/.last-switch.json`
+records when each provider was last switched; see
+[../features/switching.md](../features/switching.md). None is under a
+provider directory, and all are dot-files, so none is a credential to
+TokenGauge. They are written through `fsx::write_record`, best effort.
 
 `Store::lock` takes an exclusive `flock` on `<store>/.lock`, released when the
 process exits, so a crashed command never leaves the store locked.

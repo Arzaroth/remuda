@@ -25,12 +25,15 @@ interactive command found it, and skips a CLI where they differ or there is
 no record; naming a credential of a skipped CLI says so (see
 [distribution.md](../architecture/distribution.md)).
 
-A scheduled run then writes `<store>/.last-refresh.json` (`runs::record`):
-when it ran, a line per credential it refreshed, and a line per CLI it skipped
-or credential that failed. The page's health line reads it. A run that stops
-before refreshing (no store, a CLI that cannot be synced) leaves the previous
-record in place, so an old "last ran" is itself the sign. Interactive runs
-record nothing.
+`commands::refresh` prints each line as it goes and also fills a `Report`:
+the credentials it refreshed, and a line per problem. When any credential
+failed it returns `commands::Failed`. A scheduled run then writes
+`<store>/.last-refresh.json` (`runs::record`, built by `runs::Run::of`): when
+it ran, what it refreshed, and as problems the CLIs it skipped, the report's
+lines and any other error that ended the run (an unreadable store, a CLI that
+could not be synced), but not `Failed` itself, which only counts them. The
+page's health line reads it. Only a run with no store at all records nothing.
+Interactive runs record nothing.
 
 ## Sources
 

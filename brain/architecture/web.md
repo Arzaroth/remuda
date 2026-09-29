@@ -66,14 +66,25 @@ and `commands::stored_message`, shared with the CLI.
 
 `health` is `timer` (`enabled` when
 `$XDG_CONFIG_HOME/systemd/user/timers.target.wants/remuda-refresh.timer`
-exists, `disabled` when only the unit does, else `absent`), `lastRefresh`
-(`runs::last`, or null) and `tokengauge` (whether the snapshot exists).
-`usage` is `gauge::read` of TokenGauge's snapshot (`cache_file` from the top
-of `~/.config/tokengauge/config.toml`, else
-`$XDG_STATE_HOME/tokengauge/tokengauge-usage.json`), or null: `updatedAt` and,
-per provider id, `stale`, `error` and `windows` (`title`, `usedPercent`,
-`resetsAt`, `windowMinutes`), placeholders dropped. `App` takes both
-locations as `Places`, so tests point them at a temporary directory.
+exists, `disabled` when only the unit does, else `absent`; a timer enabled
+elsewhere, `--global` or `--runtime`, reads as absent, and an enabled timer
+that was stopped still reads as enabled), `lastRefresh` (`runs::last`, or
+null), `tokengauge` (whether the snapshot exists) and `switchedAt` (provider
+id to the time of its last switch, `runs::switches`).
+
+`usage` is `gauge::read` of TokenGauge's snapshot, or null. The snapshot is
+where TokenGauge puts it: the top-level `cache_file` of its config
+(`$TOKENGAUGE_CONFIG`, else `$XDG_CONFIG_HOME/tokengauge/config.toml`),
+unless that is TokenGauge's old temp path, which TokenGauge itself replaces
+with the default `$XDG_STATE_HOME/tokengauge/tokengauge-usage.json`. It is
+read only when it is a regular file, and at most 4 MiB of it. `usage` holds
+`updatedAt` and, per provider id, `stale`, `staleReason`, `error` (from the
+snapshot's top-level `errors`, where TokenGauge files a fetch that failed with
+nothing cached) and `windows` (`title`, `usedPercent`, `resetsAt`),
+placeholders dropped. A provider's usage is shown only when the snapshot is
+newer than its last switch, since the snapshot names no account. `App`
+takes both locations as `Places`, so tests point them at a temporary
+directory.
 
 The page is one self-contained file (`include_str!`), no external requests,
 light and dark. It reloads the state every minute unless an editor is open.
