@@ -113,7 +113,7 @@ mod tests {
                     {"provider": "claude", "stale": false, "error": null, "usage": {
                         "primary": {"usedPercent": 16, "resetsAt": "2026-09-29T03:30:00Z", "windowMinutes": 300},
                         "secondary": {"usedPercent": 140, "resetsAt": null, "windowMinutes": 10080},
-                        "tertiary": null,
+                        "tertiary": {"usedPercent": null, "windowMinutes": 60},
                         "extraRateWindows": [
                             {"title": "Daily Routines", "placeholder": true,
                              "window": {"usedPercent": 0, "windowMinutes": 10080}},

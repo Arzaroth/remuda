@@ -384,6 +384,16 @@ fn the_scheduled_refresh_stops_where_the_shell_looked_elsewhere() {
         "{}",
         stderr(&out)
     );
+    let last_run = home.path(".local/share/remuda/credentials/.last-refresh.json");
+    let run_record = read(&last_run);
+    assert_eq!(run_record["refreshed"], json!([]), "{run_record}");
+    assert!(
+        run_record["problems"][0]
+            .as_str()
+            .unwrap()
+            .contains("run `remuda ls` once"),
+        "{run_record}"
+    );
 
     assert!(
         run(&["ls"], &[("CLAUDE_CONFIG_DIR", &elsewhere)])
@@ -415,6 +425,17 @@ fn the_scheduled_refresh_stops_where_the_shell_looked_elsewhere() {
         "{}",
         stderr(&out)
     );
+    assert!(
+        read(&last_run)["problems"]
+            .to_string()
+            .contains("not refreshing work: its CLI was skipped"),
+        "{}",
+        read(&last_run)
+    );
+    std::fs::remove_file(&last_run).unwrap();
+    let out = run(&["refresh"], &[("CLAUDE_CONFIG_DIR", &elsewhere)]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(!last_run.exists());
 
     // A unit from 0.1.0 runs plain `refresh`: under systemd it is checked the
     // same way and records nothing.

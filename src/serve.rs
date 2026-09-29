@@ -453,6 +453,7 @@ mod tests {
             units.join("timers.target.wants/remuda-refresh.timer"),
         )
         .unwrap();
+        runs::switched(&e.store, "claude", 9);
         runs::record(
             &e.store,
             &runs::Run {
@@ -473,6 +474,7 @@ mod tests {
         assert_eq!(state["health"]["timer"], "enabled");
         assert_eq!(state["health"]["lastRefresh"]["at"], 7);
         assert_eq!(state["health"]["tokengauge"], true);
+        assert_eq!(state["health"]["switchedAt"]["claude"], 9);
         assert_eq!(
             state["usage"]["providers"]["claude"]["windows"][0]["usedPercent"],
             40
