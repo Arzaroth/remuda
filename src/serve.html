@@ -376,6 +376,8 @@ function health(state) {
     const what = !run ? "Refresh timer on, it has not run yet"
       : `Refresh timer ran ${esc(ago(run.at))}, refreshed ${run.refreshed.length}`;
     items.push(`<div><span class="dot ${tone}"></span><span>${what}${problems}</span></div>`);
+  } else if (h.timer === "masked") {
+    items.push('<div><span class="dot warn"></span><span>Refresh timer masked: <code>systemctl --user unmask remuda-refresh.timer</code></span></div>');
   } else if (h.timer === "disabled") {
     items.push('<div><span class="dot warn"></span><span>Refresh timer installed but off: <code>systemctl --user enable --now remuda-refresh.timer</code></span></div>');
   } else {
@@ -406,6 +408,15 @@ const liveOf = (provider) => groups.find((g) => g.p.id === provider)?.live;
 const dropsLive = (live) => live?.state === "foreign" || live?.state === "unstored"
   || (live?.state === "stored" && !live.confirmed);
 const taken = (provider, name) => groups.some((g) => g.p.id === provider && g.creds.some((c) => c.name === name));
+function overwrite(provider, name) {
+  const c = groups.find((g) => g.p.id === provider)?.creds.find((c) => c.name === name);
+  return `Overwrite ${name}${c?.email ? ` (${c.email})` : ""}?`;
+}
+function dropping(live) {
+  if (live.state === "unstored") return `Drop ${live.email || "the live login"} unsaved?`;
+  if (live.state === "foreign") return `Drop the ${live.what.replace(/^an? /, "")}?`;
+  return `Lose ${live.name}'s newest tokens?`;
+}
 async function load() {
   let state;
   try {
@@ -447,7 +458,7 @@ $("providers").addEventListener("click", async (ev) => {
     const provider = btn.dataset.import, name = input.value.trim();
     if (!name) return input.focus();
     const force = taken(provider, name);
-    if (force && !btn.dataset.armed) return arm(btn, `Replace ${name}?`);
+    if (force && !ask(btn, overwrite(provider, name), `${provider}/${name}`)) return;
     return act("/api/import", { provider, name, force });
   }
   const r = btn.closest(".row");
@@ -455,14 +466,16 @@ $("providers").addEventListener("click", async (ev) => {
   if (!spec) return;
   switch (btn.dataset.act) {
     case "save": return save(r);
-    case "use":
-      if (!dropsLive(liveOf(r.dataset.provider))) return act("/api/use", { name: spec });
-      if (btn.dataset.armed) return act("/api/use", { name: spec, discard: true });
-      return arm(btn, "Drop the live login?");
+    case "use": {
+      const live = liveOf(r.dataset.provider);
+      const discard = dropsLive(live);
+      if (discard && !ask(btn, dropping(live), spec)) return;
+      return act("/api/use", { name: spec, discard });
+    }
     case "refresh": return act("/api/refresh", { name: spec, force: true });
     case "remove":
-      if (btn.dataset.armed) return act("/api/remove", { name: spec });
-      return arm(btn, "Remove for good?");
+      if (!ask(btn, "Remove for good?")) return;
+      return act("/api/remove", { name: spec });
     case "label":
     case "rename": {
       const open = editors.get(r);
@@ -507,8 +520,17 @@ function reopen({ spec, btn, input }) {
   e.input.setSelectionRange(input.value.length, input.value.length);
 }
 
-function arm(btn, text) {
+function ask(btn, text, what = "") {
+  if (btn.dataset.armed && btn.armedFor === what) return Date.now() - btn.armedAt > 400;
+  disarm(btn);
+  arm(btn, text, what);
+  return false;
+}
+
+function arm(btn, text, what = "") {
   btn.original ??= btn.innerHTML;
+  btn.armedFor = what;
+  btn.armedAt = Date.now();
   btn.dataset.armed = "1";
   btn.classList.add("armed");
   btn.textContent = text;
@@ -534,11 +556,10 @@ function closeEditor(r) {
 function leave(r) {
   const e = editors.get(r);
   const changed = e.input.value.trim() !== e.original.trim();
-  if (!changed || e.btn.dataset.armed) {
+  if (!changed || ask(e.btn, "Discard?")) {
     closeEditor(r);
     return true;
   }
-  arm(e.btn, "Discard?");
   e.input.focus();
   return false;
 }
@@ -594,7 +615,7 @@ $("add").addEventListener("submit", async (ev) => {
   const provider = $("add-provider").value, name = $("add-name").value.trim();
   const go = $("add").querySelector("[type=submit]");
   const force = taken(provider, name);
-  if (force && !go.dataset.armed) return arm(go, `Replace ${name}?`);
+  if (force && !ask(go, overwrite(provider, name), `${provider}/${name}`)) return;
   disarm(go);
   const box = $("signin");
   if (openLogin) await api("/api/login/cancel", { id: openLogin }).catch(() => {});
