@@ -283,9 +283,19 @@ function lifetime(title, at, horizon, warnBelow) {
     ${meter(left / horizon, tone)}</div>`;
 }
 
+function usageOf(c, usage) {
+  if (!usage) return null;
+  const own = usage.accounts?.[c.name];
+  if (own) return own.error || !usage.error ? own : { ...own, error: usage.error };
+  if (Object.keys(usage.accounts || {}).length) return usage.error ? usage : { missing: true, windows: [] };
+  return c.active ? usage : { passive: true, windows: [] };
+}
+
 function windowsCell(c, usage, gaugeFound) {
   if (!gaugeFound) return "";
-  if (!c.active) return '<div class="aside">TokenGauge reports only the login in use</div>';
+  usage = usageOf(c, usage);
+  if (usage?.passive) return '<div class="aside">TokenGauge reports only the login in use</div>';
+  if (usage?.missing) return '<div class="aside">No usage from TokenGauge for this login yet</div>';
   if (!usage) return '<div class="aside">No usage from TokenGauge for this CLI yet</div>';
   if (usage.behind) return '<div class="aside">TokenGauge has not updated since the switch to this login</div>';
   if (usage.error) return `<div class="aside late">TokenGauge: ${esc(usage.error)}</div>`;
@@ -346,6 +356,7 @@ function tile(p, creds, live, usage) {
   const who = active ? `<span class="spec">${esc(active.name)}</span> in use`
     : live?.state === "unstored" ? "A login remuda has not stored is in use"
     : live?.state === "signed_out" ? "Signed out" : "No stored login in use";
+  usage = active ? usageOf(active, usage) : Object.keys(usage?.accounts || {}).length ? null : usage;
   const windows = usage && !usage.error ? usage.windows : [];
   if (!windows.length) return `<div class="tile">${head}<div class="big">&ndash;<small>${
     usage?.behind ? "waiting for TokenGauge" : "no usage figures"}</small></div>
@@ -418,6 +429,12 @@ function dropping(live) {
   if (live.state === "foreign") return `Drop the ${live.what.replace(/^an? /, "")}?`;
   return `Lose ${live.name}'s newest tokens?`;
 }
+function behind(state, id) {
+  const u = state.usage;
+  if (u?.updatedAt == null || Object.keys(u.providers?.[id]?.accounts || {}).length) return false;
+  return u.updatedAt < (state.health?.switchedAt?.[id] ?? 0);
+}
+
 async function load() {
   let state;
   try {
@@ -436,9 +453,7 @@ async function load() {
     p,
     creds: state.credentials.filter((c) => c.provider === p.id),
     live: state.live.find((l) => l.provider === p.id),
-    usage: state.usage?.updatedAt != null && state.usage.updatedAt < (state.health?.switchedAt?.[p.id] ?? 0)
-      ? { behind: true, windows: [] }
-      : state.usage?.providers?.[p.id] || null,
+    usage: behind(state, p.id) ? { behind: true, windows: [] } : state.usage?.providers?.[p.id] || null,
   }));
   drawStrip();
   const open = editors.get(document.querySelector("#providers .editing")?.closest(".row"));
