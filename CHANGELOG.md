@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- On the `serve` page, Enter confirms the Import name and the pasted sign-in
+  code too, as it already did the Add an account name and the editors.
+
 ## [0.3.0] - 2026-09-29
 
 ### Added
