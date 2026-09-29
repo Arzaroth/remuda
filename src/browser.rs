@@ -10,6 +10,9 @@ use crate::{fsx, paths, pkce};
 /// Long enough for a browser to have read its redirect page.
 const REDIRECT_KEPT: Duration = Duration::from_secs(600);
 
+/// `xdg-settings` asks the desktop; a sign-in does not wait on it for longer.
+const ASK_DESKTOP: Duration = Duration::from_secs(2);
+
 /// Default browsers that can be told to open a private window: their
 /// desktop entries, the executables those run, and the flag.
 const PRIVATE: &[(&[&str], &[&str], &str)] = &[
@@ -158,13 +161,37 @@ pub fn open_private(url: &str) -> bool {
 }
 
 fn default_browser() -> Option<String> {
-    let out = Command::new("xdg-settings")
-        .args(["get", "default-web-browser"])
+    let mut ask = Command::new("xdg-settings");
+    ask.args(["get", "default-web-browser"]);
+    let id = output_within(ask, ASK_DESKTOP)?.trim().to_owned();
+    (!id.is_empty()).then_some(id)
+}
+
+/// The standard output of a command that succeeded within `limit`.
+fn output_within(mut cmd: Command, limit: Duration) -> Option<String> {
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .output()
+        .spawn()
         .ok()?;
-    let id = String::from_utf8(out.stdout).ok()?.trim().to_owned();
-    (out.status.success() && !id.is_empty()).then_some(id)
+    let deadline = std::time::Instant::now() + limit;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    };
+    let mut out = String::new();
+    std::io::Read::read_to_string(&mut child.stdout.take()?, &mut out).ok()?;
+    status.success().then_some(out)
 }
 
 fn launcher(desktop: &str, path: Option<&OsStr>) -> Option<(PathBuf, &'static str)> {
@@ -265,5 +292,25 @@ mod tests {
         );
         assert!(!old.exists());
         assert!(other.exists());
+    }
+
+    #[test]
+    fn asking_the_desktop_gives_up_after_its_limit() {
+        let mut quick = Command::new("sh");
+        quick.args(["-c", "echo brave-browser.desktop"]);
+        assert_eq!(
+            output_within(quick, Duration::from_secs(5)).as_deref(),
+            Some("brave-browser.desktop\n")
+        );
+
+        let mut failing = Command::new("sh");
+        failing.args(["-c", "echo x; exit 1"]);
+        assert_eq!(output_within(failing, Duration::from_secs(5)), None);
+
+        let mut stuck = Command::new("sleep");
+        stuck.arg("30");
+        let started = std::time::Instant::now();
+        assert_eq!(output_within(stuck, Duration::from_millis(100)), None);
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 }
