@@ -28,7 +28,7 @@ struct Pending {
 }
 
 pub struct Places {
-    pub units: PathBuf,
+    pub units: Vec<PathBuf>,
     pub snapshot: PathBuf,
 }
 
@@ -106,10 +106,15 @@ impl App {
 
     fn health(&self) -> Value {
         let unit = "remuda-refresh.timer";
-        let exists = |p: PathBuf| p.symlink_metadata().is_ok();
-        let timer = if exists(self.places.units.join("timers.target.wants").join(unit)) {
+        let any = |rel: &str| {
+            self.places
+                .units
+                .iter()
+                .any(|d| d.join(rel).symlink_metadata().is_ok())
+        };
+        let timer = if any(&format!("timers.target.wants/{unit}")) {
             "enabled"
-        } else if exists(self.places.units.join(unit)) {
+        } else if any(unit) {
             "disabled"
         } else {
             "absent"
@@ -337,7 +342,7 @@ mod tests {
 
     fn places(e: &Env) -> Places {
         Places {
-            units: e.tmp.path().join("units"),
+            units: vec![e.tmp.path().join("units"), e.tmp.path().join("global")],
             snapshot: e.tmp.path().join("tokengauge-usage.json"),
         }
     }
@@ -444,13 +449,15 @@ mod tests {
         assert_eq!(state["usage"], Value::Null);
 
         let units = e.tmp.path().join("units");
-        std::fs::create_dir_all(units.join("timers.target.wants")).unwrap();
+        let global = e.tmp.path().join("global");
+        std::fs::create_dir_all(global.join("timers.target.wants")).unwrap();
+        std::fs::create_dir_all(&units).unwrap();
         std::fs::write(units.join("remuda-refresh.timer"), "").unwrap();
         let (_, state) = call(&app, "GET", "/api/state", Value::Null);
         assert_eq!(state["health"]["timer"], "disabled");
         std::os::unix::fs::symlink(
             units.join("remuda-refresh.timer"),
-            units.join("timers.target.wants/remuda-refresh.timer"),
+            global.join("timers.target.wants/remuda-refresh.timer"),
         )
         .unwrap();
         runs::switched(&e.store, "claude", 9);
