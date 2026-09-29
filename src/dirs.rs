@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::fsx::{read_json, write_json};
+use crate::fsx::{read_record, write_record};
 use crate::provider::Provider;
 use crate::store::Store;
 
@@ -30,23 +30,16 @@ pub fn now(providers: &[&dyn Provider]) -> Seen {
 }
 
 pub fn recorded(store: &Store) -> Option<Seen> {
-    read_json(&record_path(store))
-        .ok()
-        .flatten()
-        .and_then(|v| serde_json::from_value(v).ok())
+    read_record(&record_path(store))
 }
 
-/// Best effort: a record that cannot be written costs the timer its check,
-/// never a command its work.
 pub fn record(store: &Store, seen: &Seen) {
-    if recorded(store).as_ref() == Some(seen) {
-        return;
-    }
-    let written = serde_json::to_value(seen)
-        .map_err(anyhow::Error::from)
-        .and_then(|v| write_json(&record_path(store), &v));
-    if let Err(e) = written {
-        eprintln!("warning: could not note where the CLIs keep their logins: {e:#}");
+    if recorded(store).as_ref() != Some(seen) {
+        write_record(
+            &record_path(store),
+            seen,
+            "where the CLIs keep their logins",
+        );
     }
 }
 

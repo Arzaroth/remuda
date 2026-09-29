@@ -58,6 +58,24 @@ pub fn write_json(path: &Path, value: &Value) -> Result<()> {
     write_private(path, &body)
 }
 
+pub fn read_record<T: serde::de::DeserializeOwned>(path: &Path) -> Option<T> {
+    read_json(path)
+        .ok()
+        .flatten()
+        .and_then(|v| serde_json::from_value(v).ok())
+}
+
+/// Best effort: a record that cannot be written never fails the command that
+/// keeps it.
+pub fn write_record<T: serde::Serialize>(path: &Path, record: &T, what: &str) {
+    let written = serde_json::to_value(record)
+        .map_err(anyhow::Error::from)
+        .and_then(|v| write_json(path, &v));
+    if let Err(e) = written {
+        eprintln!("warning: could not note {what}: {e:#}");
+    }
+}
+
 /// Writes through a sibling temp file and a rename, keeping the target's mode
 /// when it exists and 0600 otherwise. A symlinked target is written where the
 /// link points, so the link survives.
