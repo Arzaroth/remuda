@@ -11,8 +11,9 @@
 
 ### Changed
 
-- The `serve` page is redesigned: a summary per CLI, then one row per
-  credential with meters and icon actions.
+- The `serve` page is redesigned: a summary per CLI whose limit you pick, then
+  one row per credential with meters and icon actions, and a light/dark
+  switch.
 
 ## [0.1.1] - 2026-09-28
 
