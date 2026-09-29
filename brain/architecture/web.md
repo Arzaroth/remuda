@@ -64,12 +64,14 @@ and `commands::stored_message`, shared with the CLI.
 `confirmed`), `unstored`, `foreign` (an API key; the page says only
 `remuda use --discard` replaces it) or `unreadable` (with the error).
 
-`health` is `timer` (`enabled` when `timers.target.wants/remuda-refresh.timer`
-exists in any directory systemd loads user units from (`paths::systemd_user_units`:
-the config, runtime and data directories, `/etc`, `/usr/local/lib` and
-`/usr/lib`), `disabled` when only the unit does, else `absent`; an enabled
-timer that was stopped still reads as enabled, and shows as a late last run), `lastRefresh` (`runs::last`, or
-null), `tokengauge` (whether the snapshot exists) and `switchedAt` (provider
+`health` is `timer`, from systemd's user unit search path in its order
+(`paths::systemd_user_units`: the config directory, `/etc`, the runtime
+directories, the data directory and `$XDG_DATA_DIRS`, `/usr/local/lib`,
+`/usr/lib`): `masked` when the first copy of the unit is a link to
+`/dev/null`, `enabled` when a `timers.target.wants/remuda-refresh.timer` link
+that still resolves exists in any of them, `disabled` when only the unit does,
+else `absent`. An enabled timer that was stopped still reads as enabled, and
+shows as a late last run. Then `lastRefresh` (`runs::last`, or null), `tokengauge` (whether the snapshot exists) and `switchedAt` (provider
 id to the time of its last switch, `runs::switches`).
 
 `usage` is `gauge::read` of TokenGauge's snapshot, or null. The snapshot is

@@ -11,7 +11,10 @@
 ### Fixed
 
 - The `serve` page finds the refresh timer wherever systemd loads user units
-  from, not only `~/.config/systemd/user`.
+  from, not only `~/.config/systemd/user`, and reports a masked timer as
+  masked rather than enabled.
+- `use --discard` no longer turns off the check that keeps a login the CLI
+  rotated mid-switch when the live login is stored and confirmed.
 
 ## [0.2.0] - 2026-09-29
 
