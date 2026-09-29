@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-29
+
 ### Added
 
 - remuda has an icon: a horseshoe holding a keyhole. The `serve` page uses it
