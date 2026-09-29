@@ -185,16 +185,35 @@ mod tests {
             "Usage"
         );
 
-        let named = json!({"payloads": [
-            {"provider": "claude", "credential": "perso", "usage": {"primary": {"usedPercent": 42, "windowMinutes": 300}}},
-            {"provider": "claude", "credential": "work", "usage": {"primary": {"usedPercent": 0, "windowMinutes": 300}}},
-        ], "errors": [{"provider": "codex", "message": "timed out"}]});
+        let named = json!({
+            "meta": {"schemaVersion": 2, "updatedAtMs": 1},
+            "payloads": [
+                {"provider": "claude", "credential": "perso", "active": true,
+                 "usage": {"primary": {"usedPercent": 42, "windowMinutes": 300}}},
+                {"provider": "claude", "usage": {"primary": {"usedPercent": 7, "windowMinutes": 300}}},
+                {"provider": "claude", "credential": "work", "active": false,
+                 "usage": {"primary": {"usedPercent": 0, "windowMinutes": 300}}},
+                {"provider": "claude", "credential": "old", "active": false,
+                 "credentialState": "expired", "usage": null},
+            ],
+            "errors": [
+                {"provider": "claude", "credential": "gone", "message": "401 Unauthorized"},
+                {"provider": "codex", "active": true, "message": "timed out"},
+            ],
+        });
         std::fs::write(&file, named.to_string()).unwrap();
         let usage = read(&file).unwrap();
         let claude = &usage["providers"]["claude"];
-        assert_eq!(claude["windows"], json!([]));
-        assert_eq!(claude["accounts"]["perso"]["windows"][0]["usedPercent"], 42);
-        assert_eq!(claude["accounts"]["work"]["windows"][0]["usedPercent"], 0);
+        assert_eq!(claude["windows"][0]["usedPercent"], 7);
+        assert_eq!(claude["error"], Value::Null);
+        let accounts = &claude["accounts"];
+        assert_eq!(accounts["perso"]["windows"][0]["usedPercent"], 42);
+        assert_eq!(accounts["work"]["windows"][0]["usedPercent"], 0);
+        assert_eq!(accounts["old"]["credentialState"], "expired");
+        assert_eq!(accounts["old"]["windows"], json!([]));
+        assert_eq!(accounts["gone"]["error"], "401 Unauthorized");
+        assert_eq!(accounts["perso"]["error"], Value::Null);
+        assert_eq!(usage["providers"]["codex"]["error"], "timed out");
         assert_eq!(usage["providers"]["codex"]["accounts"], json!({}));
 
         assert!(read(tmp.path()).is_none());
