@@ -15,7 +15,7 @@ mod runs;
 mod serve;
 mod store;
 
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead};
 use std::process::{Command, Stdio};
 
 use anyhow::{Result, bail};
@@ -264,37 +264,37 @@ fn main() -> Result<()> {
             for line in plan.iter().flat_map(|p| &p.skipped) {
                 eprintln!("{line}");
             }
-            let usable: Vec<&dyn Provider> = providers
-                .iter()
-                .copied()
-                .filter(|p| {
-                    plan.as_ref()
-                        .is_none_or(|plan| plan.usable.iter().any(|id| id == p.id()))
-                })
-                .collect();
-            let only = name
-                .as_deref()
-                .map(|spec| commands::resolve(&store, &providers, spec))
-                .transpose()?
-                .filter(|(p, _)| usable.iter().any(|u| u.id() == p.id()));
-            if name.is_some() && only.is_none() {
-                bail!(
-                    "not refreshing {}: its CLI was skipped",
-                    name.unwrap_or_default()
-                );
-            }
-            let lives = commands::sync_all(&store, &usable)?;
-            let scope = commands::RefreshScope {
-                only: only.as_ref().map(|(p, name)| (*p, name.as_str())),
-                force,
-                within_min: within,
-            };
-            let (mut done, mut failed) = (Vec::new(), Vec::new());
-            let result = commands::refresh(&store, &lives, scope, &mut done, &mut failed);
-            out.write_all(&done)?;
-            io::stderr().write_all(&failed)?;
+            let mut report = commands::Report::default();
+            let result = (|| {
+                let usable: Vec<&dyn Provider> = providers
+                    .iter()
+                    .copied()
+                    .filter(|p| {
+                        plan.as_ref()
+                            .is_none_or(|plan| plan.usable.iter().any(|id| id == p.id()))
+                    })
+                    .collect();
+                let only = name
+                    .as_deref()
+                    .map(|spec| commands::resolve(&store, &providers, spec))
+                    .transpose()?
+                    .filter(|(p, _)| usable.iter().any(|u| u.id() == p.id()));
+                if name.is_some() && only.is_none() {
+                    bail!(
+                        "not refreshing {}: its CLI was skipped",
+                        name.as_deref().unwrap_or_default()
+                    );
+                }
+                let lives = commands::sync_all(&store, &usable)?;
+                let scope = commands::RefreshScope {
+                    only: only.as_ref().map(|(p, name)| (*p, name.as_str())),
+                    force,
+                    within_min: within,
+                };
+                commands::refresh(&store, &lives, scope, out, &mut io::stderr(), &mut report)
+            })();
             if let Some(plan) = &plan {
-                let run = runs::Run::from_output(fsx::now_ms(), &plan.skipped, &done, &failed);
+                let run = runs::Run::of(fsx::now_ms(), &plan.skipped, report, &result);
                 runs::record(&store, &run);
             }
             result?;

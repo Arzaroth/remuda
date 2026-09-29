@@ -368,26 +368,47 @@ pub struct RefreshScope<'a> {
     pub within_min: i64,
 }
 
+#[derive(Debug, Default)]
+pub struct Report {
+    pub refreshed: Vec<String>,
+    pub problems: Vec<String>,
+}
+
+#[derive(Debug)]
+pub struct Failed(pub usize);
+
+impl std::fmt::Display for Failed {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{} credential(s) failed to refresh", self.0)
+    }
+}
+
+impl std::error::Error for Failed {}
+
 pub fn refresh(
     store: &Store,
     lives: &[Live],
     scope: RefreshScope,
     out: &mut dyn Write,
     err: &mut dyn Write,
+    report: &mut Report,
 ) -> Result<()> {
-    let mut failed = 0;
+    let mut problem = |line: String| -> Result<()> {
+        writeln!(err, "{line}")?;
+        report.problems.push(line);
+        Ok(())
+    };
+    let mut refreshed = Vec::new();
     for live in lives {
         let p = live.provider;
         if scope.only.is_some_and(|(only, _)| only.id() != p.id()) {
             continue;
         }
         if let LiveState::Unreadable { error } = &live.state {
-            failed += 1;
-            writeln!(
-                err,
+            problem(format!(
                 "{}: not refreshing, its login cannot be read: {error}",
                 p.id()
-            )?;
+            ))?;
             continue;
         }
         for mut entry in store.list(p.id())? {
@@ -395,12 +416,10 @@ pub fn refresh(
                 continue;
             }
             if !entry.verified {
-                failed += 1;
-                writeln!(
-                    err,
+                problem(format!(
                     "{}: not refreshing, it does not match its sidecar",
                     entry.qualified()
-                )?;
+                ))?;
                 continue;
             }
             if live.state.active_name() == Some(entry.name.as_str()) {
@@ -419,18 +438,19 @@ pub fn refresh(
                 continue;
             }
             match ops::refresh_entry(store, p, &mut entry).and_then(|()| store.save(&entry)) {
-                Ok(()) => writeln!(out, "{}: refreshed", entry.qualified())?,
-                Err(e) => {
-                    failed += 1;
-                    writeln!(err, "{}: {e:#}", entry.qualified())?;
+                Ok(()) => {
+                    writeln!(out, "{}: refreshed", entry.qualified())?;
+                    refreshed.push(entry.qualified());
                 }
+                Err(e) => problem(format!("{}: {e:#}", entry.qualified()))?,
             }
         }
     }
-    if failed > 0 {
-        bail!("{failed} credential(s) failed to refresh");
+    report.refreshed.append(&mut refreshed);
+    match report.problems.len() {
+        0 => Ok(()),
+        n => Err(Failed(n).into()),
     }
-    Ok(())
 }
 
 pub fn label(
@@ -756,6 +776,7 @@ mod tests {
             },
             &mut out,
             &mut Vec::new(),
+            &mut Report::default(),
         )
         .unwrap();
 
@@ -794,6 +815,7 @@ mod tests {
             },
             &mut Vec::new(),
             &mut err,
+            &mut Report::default(),
         );
         assert!(result.is_err());
         assert!(text(err).contains("not refreshing"));
@@ -843,6 +865,7 @@ mod tests {
             },
             &mut out,
             &mut Vec::new(),
+            &mut Report::default(),
         )
         .unwrap();
         token.assert();
@@ -881,6 +904,7 @@ mod tests {
             },
             &mut out,
             &mut Vec::new(),
+            &mut Report::default(),
         )
         .unwrap();
         token.assert();
@@ -893,6 +917,7 @@ mod tests {
         e.stored("active", "u-active", -HOUR);
         e.stored("other", "u-other", -HOUR);
         let mut out = Vec::new();
+        let mut report = Report::default();
         refresh(
             &e.store,
             &live(&e, active("active")),
@@ -903,12 +928,14 @@ mod tests {
             },
             &mut out,
             &mut Vec::new(),
+            &mut report,
         )
         .unwrap();
         assert_eq!(
             text(out),
             "claude/active: active, Claude Code refreshes it\n"
         );
+        assert!(report.refreshed.is_empty() && report.problems.is_empty());
     }
 
     #[test]
@@ -921,7 +948,7 @@ mod tests {
             .create();
         let e = env(&server.url());
         e.stored("dead", "u-dead", HOUR);
-        let mut err = Vec::new();
+        let (mut err, mut report) = (Vec::new(), Report::default());
         let result = refresh(
             &e.store,
             &live(&e, LiveState::SignedOut),
@@ -932,8 +959,11 @@ mod tests {
             },
             &mut Vec::new(),
             &mut err,
+            &mut report,
         );
-        assert!(result.unwrap_err().to_string().contains("1 credential(s)"));
+        assert!(result.unwrap_err().downcast_ref::<Failed>().is_some());
+        assert_eq!(report.problems.len(), 1);
+        assert!(report.problems[0].starts_with("claude/dead: the refresh token was rejected"));
         assert!(text(err).contains("claude/dead: the refresh token was rejected"));
         assert_eq!(e.stored_refresh_token("dead").as_deref(), Some("r-dead"));
     }
@@ -1184,6 +1214,7 @@ mod tests {
             },
             &mut Vec::new(),
             &mut err,
+            &mut Report::default(),
         );
         assert!(result.is_err());
         assert!(text(err).contains("does not match its sidecar"));
