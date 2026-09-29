@@ -96,7 +96,12 @@ h2 { font-size: 16px; font-weight: 700; margin: 0; }
   border-radius: 2px; background: var(--good); }
 .who { min-width: 0; }
 .spec { font-weight: 650; font-size: 14px; overflow-wrap: anywhere; }
-.who .label { margin-left: 8px; }
+.who .label, .who .edit-label { margin-left: 8px; }
+.who .label:empty { display: none; }
+.edit { height: 26px; padding: 0 8px; border-radius: 6px; border-color: var(--focus); min-width: 10ch; max-width: 100%;
+  field-sizing: content; vertical-align: baseline; }
+.edit.spec { font-weight: 650; }
+.btn.icon[aria-pressed="true"] { border-color: var(--ink); background: var(--sunk); }
 .who .mail { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
 .pills { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
 .pill { font-size: 12px; line-height: 20px; padding: 0 8px; border-radius: 10px; background: var(--sunk); color: var(--ink); }
@@ -299,7 +304,7 @@ function row(c, usage, gaugeFound) {
   ].join("");
   return `<div class="row${c.active ? " active" : ""}" data-spec="${esc(spec)}">
     <div class="who">
-      <div><span class="spec">${esc(c.name)}</span>${c.label ? `<span class="label">${esc(c.label)}</span>` : ""}</div>
+      <div><span class="spec">${esc(c.name)}</span><span class="label">${esc(c.label || "")}</span></div>
       <div class="mail">${esc(c.email)}</div>
       <div class="pills">${pills}</div>
     </div>
@@ -451,24 +456,75 @@ $("providers").addEventListener("click", async (ev) => {
       }, 4000);
     case "label":
     case "rename": {
-      r.querySelector(".inline")?.remove();
-      const rename = btn.dataset.act === "rename";
-      const box = document.createElement("div");
-      box.className = "inline";
-      box.innerHTML = `<input placeholder="${rename ? "New name" : "Label (empty clears it)"}">
-        <button class="btn go">${rename ? "Rename" : "Save label"}</button><button class="btn">Cancel</button>`;
-      r.append(box);
-      const [input, ok, cancel] = box.children;
-      input.focus();
-      const submit = () => rename
-        ? act("/api/rename", { name: spec, to: input.value.trim() })
-        : act("/api/label", { name: spec, text: input.value });
-      ok.onclick = submit;
-      input.onkeydown = (e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") box.remove(); };
-      cancel.onclick = () => box.remove();
+      const open = editors.get(r);
+      if (open?.btn === btn) return leave(r);
+      if (open && !leave(r)) return;
+      edit(r, btn, spec);
     }
   }
 });
+
+const editors = new WeakMap();
+
+function edit(r, btn, spec) {
+  const rename = btn.dataset.act === "rename";
+  const shown = r.querySelector(rename ? ".spec" : ".label");
+  const original = shown.textContent;
+  const input = document.createElement("input");
+  input.className = rename ? "edit spec" : "edit edit-label";
+  input.value = original;
+  input.placeholder = rename ? "Name" : "Label";
+  input.setAttribute("aria-label", rename ? `New name for ${original}` : `Label for ${spec}`);
+  shown.replaceWith(input);
+  btn.setAttribute("aria-pressed", "true");
+  editors.set(r, { btn, input, shown, original, rename, spec });
+  input.focus();
+  input.select();
+  input.onkeydown = (e) => {
+    if (e.key === "Enter") save(r);
+    if (e.key === "Escape") leave(r);
+  };
+}
+
+function disarm(btn) {
+  clearTimeout(btn.disarm);
+  delete btn.dataset.armed;
+  btn.classList.remove("armed");
+  btn.innerHTML = icon(btn.dataset.act);
+}
+
+function closeEditor(r) {
+  const e = editors.get(r);
+  disarm(e.btn);
+  e.btn.removeAttribute("aria-pressed");
+  e.input.replaceWith(e.shown);
+  editors.delete(r);
+}
+
+function leave(r) {
+  const e = editors.get(r);
+  const changed = e.input.value.trim() !== e.original.trim();
+  if (!changed || e.btn.dataset.armed) {
+    closeEditor(r);
+    return true;
+  }
+  e.btn.dataset.armed = "1";
+  e.btn.classList.add("armed");
+  e.btn.textContent = "Discard?";
+  e.btn.disarm = setTimeout(() => disarm(e.btn), 4000);
+  e.input.focus();
+  return false;
+}
+
+function save(r) {
+  const e = editors.get(r);
+  const value = e.rename ? e.input.value.trim() : e.input.value;
+  if (value.trim() === e.original.trim()) return closeEditor(r);
+  closeEditor(r);
+  return e.rename
+    ? act("/api/rename", { name: e.spec, to: value })
+    : act("/api/label", { name: e.spec, text: value });
+}
 
 function drawStrip() {
   $("strip").innerHTML = `<div class="strip">${groups.map((g) => tile(g.p, g.creds, g.live, g.usage)).join("")}</div>`;
@@ -552,7 +608,7 @@ $("add").addEventListener("submit", async (ev) => {
 
 load();
 setInterval(() => {
-  const editing = document.querySelector("#providers .row .inline")
+  const editing = document.querySelector("#providers .edit")
     || document.activeElement?.closest?.("#providers")
     || document.querySelector("#providers [data-armed]");
   if (!editing) load();
