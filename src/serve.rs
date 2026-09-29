@@ -27,7 +27,6 @@ struct Pending {
     cancel: Box<dyn Fn() + Send + Sync>,
 }
 
-/// Files outside the store the page reports on, never writes.
 pub struct Places {
     pub units: PathBuf,
     pub snapshot: PathBuf,

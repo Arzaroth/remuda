@@ -296,7 +296,8 @@ function windowsCell(c, usage, gaugeFound) {
   if (!usage) return '<div class="aside">No usage from TokenGauge for this CLI yet</div>';
   if (usage.error) return `<div class="aside late">TokenGauge: ${esc(usage.error)}</div>`;
   if (!usage.windows.length) return '<div class="aside">No rate limits reported</div>';
-  const stale = usage.stale ? '<div class="aside soon">TokenGauge could not update this; figures may be old</div>' : "";
+  const why = usage.staleReason ? ` (${esc(usage.staleReason)})` : "";
+  const stale = usage.stale ? `<div class="aside soon">TokenGauge could not update this${why}; figures may be old</div>` : "";
   return `<div class="windows">${usage.windows.map(windowCell).join("")}</div>${stale}`;
 }
 

@@ -1,23 +1,45 @@
+use std::fs::{self, File};
+use std::io::Read;
 use std::path::Path;
 
 use serde_json::{Map, Value, json};
 
-use crate::fsx::read_json;
+const LIMIT: u64 = 4 << 20;
 
-/// TokenGauge's usage snapshot, reduced to what the page draws: per provider,
-/// the rate windows of the login TokenGauge last saw. remuda only reads it.
+fn load(snapshot: &Path) -> Option<Value> {
+    if !fs::metadata(snapshot).ok()?.is_file() {
+        return None;
+    }
+    let mut text = String::new();
+    File::open(snapshot)
+        .ok()?
+        .take(LIMIT)
+        .read_to_string(&mut text)
+        .ok()?;
+    serde_json::from_str(&text).ok()
+}
+
 pub fn read(snapshot: &Path) -> Option<Value> {
-    let data = read_json(snapshot).ok().flatten()?;
-    let payloads = data
-        .get("payloads")
-        .or(Some(&data))
-        .and_then(Value::as_array)?;
+    let data = load(snapshot)?;
+    let payloads = data.get("payloads").unwrap_or(&data).as_array()?;
     let mut providers = Map::new();
     for p in payloads {
-        let Some(id) = p.get("provider").and_then(Value::as_str) else {
+        if let Some(id) = p.get("provider").and_then(Value::as_str) {
+            providers.insert(id.to_owned(), provider(p));
+        }
+    }
+    let errors = data.get("errors").and_then(Value::as_array);
+    for e in errors.into_iter().flatten() {
+        let (Some(id), Some(message)) = (
+            e.get("provider").and_then(Value::as_str),
+            e.get("message").and_then(Value::as_str),
+        ) else {
             continue;
         };
-        providers.insert(id.to_owned(), provider(p));
+        let entry = providers
+            .entry(id.to_owned())
+            .or_insert_with(|| provider(&Value::Null));
+        entry["error"] = message.into();
     }
     Some(json!({
         "updatedAt": data.pointer("/meta/updatedAtMs").and_then(Value::as_i64),
@@ -43,6 +65,7 @@ fn provider(p: &Value) -> Value {
         .filter_map(|w| window(w.get("title").and_then(Value::as_str), w.get("window")?));
     json!({
         "stale": p.get("stale").and_then(Value::as_bool).unwrap_or(false),
+        "staleReason": p.get("staleReason").and_then(Value::as_str),
         "error": p.pointer("/error/message").and_then(Value::as_str),
         "windows": fixed.chain(extra).collect::<Vec<_>>(),
     })
@@ -50,8 +73,7 @@ fn provider(p: &Value) -> Value {
 
 fn window(title: Option<&str>, w: &Value) -> Option<Value> {
     let used = w.get("usedPercent")?.as_u64()?;
-    let minutes = w.get("windowMinutes").and_then(Value::as_u64);
-    let title = match (title, minutes) {
+    let title = match (title, w.get("windowMinutes").and_then(Value::as_u64)) {
         (Some(t), _) => t.to_owned(),
         (None, Some(m)) => span(m),
         (None, None) => "Usage".to_owned(),
@@ -60,7 +82,6 @@ fn window(title: Option<&str>, w: &Value) -> Option<Value> {
         "title": title,
         "usedPercent": used.min(100),
         "resetsAt": w.get("resetsAt").and_then(Value::as_str),
-        "windowMinutes": minutes,
     }))
 }
 
@@ -100,9 +121,10 @@ mod tests {
                              "window": {"usedPercent": 3, "windowMinutes": 10080}}
                         ]
                     }},
-                    {"provider": "codex", "stale": true, "error": {"message": "401"}, "usage": null},
+                    {"provider": "codex", "stale": true, "staleReason": "timed out", "usage": null},
                     {"usage": {}}
-                ]
+                ],
+                "errors": [{"provider": "grok", "message": "401 Unauthorized", "raw": "..."}]
             })
             .to_string(),
         )
@@ -126,8 +148,20 @@ mod tests {
         );
         let codex = &usage["providers"]["codex"];
         assert_eq!(codex["stale"], true);
-        assert_eq!(codex["error"], "401");
+        assert_eq!(codex["staleReason"], "timed out");
         assert_eq!(codex["windows"], json!([]));
+        let grok = &usage["providers"]["grok"];
+        assert_eq!(grok["error"], "401 Unauthorized");
+        assert_eq!(grok["windows"], json!([]));
+
+        let legacy = json!([{"provider": "claude", "usage": {"primary": {"usedPercent": 5}}}]);
+        std::fs::write(&file, legacy.to_string()).unwrap();
+        assert_eq!(
+            read(&file).unwrap()["providers"]["claude"]["windows"][0]["title"],
+            "Usage"
+        );
+
+        assert!(read(tmp.path()).is_none());
 
         std::fs::write(&file, "{ torn").unwrap();
         assert!(read(&file).is_none());
