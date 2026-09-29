@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="remuda">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b3038"/>
+      <stop offset="1" stop-color="#15181c"/>
+    </linearGradient>
+    <linearGradient id="shoe" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#faf7ef"/>
+      <stop offset="1" stop-color="#d6cfbe"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#tile)"/>
+  <rect x="0.5" y="0.5" width="63" height="63" rx="13.5" fill="none" stroke="#fff" stroke-opacity="0.09"/>
+  <path fill="url(#shoe)" d="
+    M17.5 11.5
+    C11 21.5 9.8 33.5 13.8 42.3
+    C17.6 50.6 25 54.2 32 54.2
+    C39 54.2 46.4 50.6 50.2 42.3
+    C54.2 33.5 53 21.5 46.5 11.5
+    Q43.4 11.2 40.2 12.6
+    C44.6 21.6 45.2 31.6 42.3 38.2
+    C39.9 43.6 36.3 46.1 32 46.1
+    C27.7 46.1 24.1 43.6 21.7 38.2
+    C18.8 31.6 19.4 21.6 23.8 12.6
+    Q20.6 11.2 17.5 11.5 Z"/>
+  <g fill="#1b1f24">
+    <circle cx="17.6" cy="21.5" r="1.25"/>
+    <circle cx="15.9" cy="29.6" r="1.25"/>
+    <circle cx="17.6" cy="38.2" r="1.25"/>
+    <circle cx="46.4" cy="21.5" r="1.25"/>
+    <circle cx="48.1" cy="29.6" r="1.25"/>
+    <circle cx="46.4" cy="38.2" r="1.25"/>
+  </g>
+  <g fill="#45b884">
+    <circle cx="32" cy="25.5" r="4.6"/>
+    <path d="M29.4 28.2 h5.2 l1.3 9.3 h-7.8 z"/>
+  </g>
+</svg>
