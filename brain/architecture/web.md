@@ -64,11 +64,11 @@ and `commands::stored_message`, shared with the CLI.
 `confirmed`), `unstored`, `foreign` (an API key; the page says only
 `remuda use --discard` replaces it) or `unreadable` (with the error).
 
-`health` is `timer` (`enabled` when
-`$XDG_CONFIG_HOME/systemd/user/timers.target.wants/remuda-refresh.timer`
-exists, `disabled` when only the unit does, else `absent`; a timer enabled
-elsewhere, `--global` or `--runtime`, reads as absent, and an enabled timer
-that was stopped still reads as enabled), `lastRefresh` (`runs::last`, or
+`health` is `timer` (`enabled` when `timers.target.wants/remuda-refresh.timer`
+exists in any directory systemd loads user units from (`paths::systemd_user_units`:
+the config, runtime and data directories, `/etc`, `/usr/local/lib` and
+`/usr/lib`), `disabled` when only the unit does, else `absent`; an enabled
+timer that was stopped still reads as enabled, and shows as a late last run), `lastRefresh` (`runs::last`, or
 null), `tokengauge` (whether the snapshot exists) and `switchedAt` (provider
 id to the time of its last switch, `runs::switches`).
 

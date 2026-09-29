@@ -16,6 +16,9 @@
   the usage windows, how long its access token and its sign-in (refresh
   token) have left, and Use, Refresh, Label, Rename and Remove. Remove asks
   for a second click; Use, Refresh and Remove are disabled on the active one.
+  Use asks for a second click too ("Drop the live login?") when switching would
+  drop the CLI's live login: one not stored, an API key, or one that could
+  not be confirmed. It then switches with `discard`, as `remuda use --discard`.
   Label and Rename turn the label or the name into an input in its place,
   filled with the current value and sized to the text so nothing moves: the
   check button beside it or Enter saves, and the same button or Escape
@@ -28,6 +31,9 @@ header overrides it; the choice is kept in `localStorage` and applied in
 `<head>`, before the page draws.
 
 When a CLI's live login is not stored, its section offers an Import box.
+Import, and Sign in under "Add an account", ask "Replace <name>?" when the
+name is taken, and replace it with `force` on the second click, as `--force`
+does.
 "Refresh tokens" refreshes every inactive credential due within the hour.
 
 "Add an account" picks a provider and a name and starts a sign-in: the
