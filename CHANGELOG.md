@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The `serve` page shows each login's own usage again with TokenGauge 0.36 and
+  later, which reports every stored login. It used to show the last login
+  TokenGauge listed as the one in use, so another account's figures could
+  appear under it.
+
 ## [0.4.1] - 2026-09-29
 
 ### Fixed
