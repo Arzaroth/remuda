@@ -302,7 +302,7 @@ function row(c, usage, gaugeFound) {
     c.active ? '<span class="pill on">In use</span>' : "",
     unverified ? '<span class="pill odd" title="Its sidecar was written for other tokens; remuda identifies it again on its next run">Unverified</span>' : "",
   ].join("");
-  return `<div class="row${c.active ? " active" : ""}" data-spec="${esc(spec)}">
+  return `<div class="row${c.active ? " active" : ""}" data-spec="${esc(spec)}" data-provider="${esc(c.provider)}">
     <div class="who">
       <div><span class="spec">${esc(c.name)}</span><span class="label">${esc(c.label || "")}</span></div>
       <div class="mail">${esc(c.email)}</div>
@@ -329,9 +329,9 @@ function liveNote(p, live) {
   if (live.state === "signed_out") return note(`${esc(p.name)} is signed out. Pick a login above to use it.`);
   if (live.state === "unreadable") return note(`Cannot read the ${esc(p.name)} login: ${esc(live.error)}`);
   if (live.state === "foreign")
-    return note(`${esc(p.name)} is signed in with ${esc(live.what)}, which remuda cannot store. Only <code>remuda use --discard</code> replaces it.`);
+    return note(`${esc(p.name)} is signed in with ${esc(live.what)}, which remuda cannot store. Using a stored login replaces it, after a second click, since it is dropped.`);
   if (live.state === "stored" && !live.confirmed)
-    return note(`${esc(p.name)} looks signed into ${esc(live.name)}, but that could not be confirmed.`);
+    return note(`${esc(p.name)} looks signed into ${esc(live.name)}, but that could not be confirmed. Using another login asks first, since it would be dropped unsaved.`);
   if (live.state === "unstored")
     return note(`${esc(p.name)} is signed into ${esc(live.email || "an account")}, which remuda has not stored.
       <span class="inline"><input data-import-name="${esc(p.id)}" placeholder="Name to store it as">
@@ -402,6 +402,10 @@ function remember(key, value) {
 const picks = remembered("remuda-tiles") || {};
 
 let loaded = false, groups = [];
+const liveOf = (provider) => groups.find((g) => g.p.id === provider)?.live;
+const dropsLive = (live) => live?.state === "foreign" || live?.state === "unstored"
+  || (live?.state === "stored" && !live.confirmed);
+const taken = (provider, name) => groups.some((g) => g.p.id === provider && g.creds.some((c) => c.name === name));
 async function load() {
   let state;
   try {
@@ -440,15 +444,21 @@ $("providers").addEventListener("click", async (ev) => {
   if (!btn) return;
   if (btn.dataset.import) {
     const input = document.querySelector(`[data-import-name="${btn.dataset.import}"]`);
-    if (!input.value.trim()) return input.focus();
-    return act("/api/import", { provider: btn.dataset.import, name: input.value.trim() });
+    const provider = btn.dataset.import, name = input.value.trim();
+    if (!name) return input.focus();
+    const force = taken(provider, name);
+    if (force && !btn.dataset.armed) return arm(btn, `Replace ${name}?`);
+    return act("/api/import", { provider, name, force });
   }
   const r = btn.closest(".row");
   const spec = r?.dataset.spec;
   if (!spec) return;
   switch (btn.dataset.act) {
     case "save": return save(r);
-    case "use": return act("/api/use", { name: spec });
+    case "use":
+      if (!dropsLive(liveOf(r.dataset.provider))) return act("/api/use", { name: spec });
+      if (btn.dataset.armed) return act("/api/use", { name: spec, discard: true });
+      return arm(btn, "Drop the live login?");
     case "refresh": return act("/api/refresh", { name: spec, force: true });
     case "remove":
       if (btn.dataset.armed) return act("/api/remove", { name: spec });
@@ -498,6 +508,7 @@ function reopen({ spec, btn, input }) {
 }
 
 function arm(btn, text) {
+  btn.original ??= btn.innerHTML;
   btn.dataset.armed = "1";
   btn.classList.add("armed");
   btn.textContent = text;
@@ -508,7 +519,8 @@ function disarm(btn) {
   clearTimeout(btn.disarm);
   delete btn.dataset.armed;
   btn.classList.remove("armed");
-  btn.innerHTML = icon(btn.dataset.act);
+  if (btn.original != null) btn.innerHTML = btn.original;
+  delete btn.original;
 }
 
 function closeEditor(r) {
@@ -580,11 +592,15 @@ let openLogin = null;
 $("add").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const provider = $("add-provider").value, name = $("add-name").value.trim();
+  const go = $("add").querySelector("[type=submit]");
+  const force = taken(provider, name);
+  if (force && !go.dataset.armed) return arm(go, `Replace ${name}?`);
+  disarm(go);
   const box = $("signin");
   if (openLogin) await api("/api/login/cancel", { id: openLogin }).catch(() => {});
   let login;
   try {
-    login = await api("/api/login", { provider, name });
+    login = await api("/api/login", { provider, name, force });
   } catch (e) {
     return toast(e.message, true);
   }
