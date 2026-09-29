@@ -64,7 +64,10 @@ missing from a sidecar is trusted. `rename` moves the sidecar first and undoes
 that if the credential cannot follow.
 
 `<store>/.dirs.json` records where the last interactive command found each
-CLI's login; see [distribution.md](distribution.md).
+CLI's login; see [distribution.md](distribution.md). `<store>/.last-refresh.json`
+records the last scheduled refresh for the page; see
+[../features/refresh.md](../features/refresh.md). Neither is under a provider
+directory, so neither is a credential to TokenGauge.
 
 `Store::lock` takes an exclusive `flock` on `<store>/.lock`, released when the
 process exits, so a crashed command never leaves the store locked.

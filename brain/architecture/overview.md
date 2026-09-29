@@ -18,6 +18,8 @@ only long-running mode.
 | `http.rs` | The page's HTTP listener: bounded reads, checks before bodies, a connection limit |
 | `oauth.rs` | The HTTP client and token requests both providers share |
 | `dirs.rs` | The directories interactive commands used, for the scheduled refresh to check |
+| `runs.rs` | The last scheduled refresh's record, for the page |
+| `gauge.rs` | Reads TokenGauge's usage snapshot for the page |
 | `fsx.rs` | Atomic 0600 writes, compare-and-swap JSON edits, the file lock, timestamps |
 | `paths.rs` | Where each CLI's files and the store live, honouring their env vars |
 | `pkce.rs` | PKCE verifier/state generation and the S256 challenge |
