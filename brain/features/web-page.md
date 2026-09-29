@@ -17,7 +17,8 @@
   token) have left, and Use, Refresh, Label, Rename and Remove. Remove asks
   for a second click; Use, Refresh and Remove are disabled on the active one.
   Label and Rename turn the label or the name into an input in its place,
-  filled with the current value: Enter saves, and the same button or Escape
+  filled with the current value and sized to the text so nothing moves: the
+  check button beside it or Enter saves, and the same button or Escape
   cancels, asking for a second click ("Discard?") when the value was changed.
 
 The theme follows the system until the Auto / Light / Dark switch in the
