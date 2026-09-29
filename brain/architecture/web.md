@@ -85,9 +85,12 @@ with the default `$XDG_STATE_HOME/tokengauge/tokengauge-usage.json`. It is
 read only when it is a regular file, and at most 4 MiB of it. `usage` holds
 `updatedAt` and, per provider id, `stale`, `staleReason`, `error` (from the
 snapshot's top-level `errors`, where TokenGauge files a fetch that failed with
-nothing cached) and `windows` (`title`, `usedPercent`, `resetsAt`),
-placeholders dropped. A provider's usage is shown only when the snapshot is
-newer than its last switch, since the snapshot names no account. `App`
+nothing cached), `windows` (`title`, `usedPercent`, `resetsAt`),
+placeholders dropped, and `accounts`: the same fields per stored credential
+name, for payloads that carry an `account`. A row takes its own entry in
+`accounts`. When `accounts` is empty the snapshot names no credential, so the
+provider-level figures belong to the active login and are shown only when the
+snapshot is newer than its last switch. `App`
 takes both locations as `Places`, so tests point them at a temporary
 directory.
 
