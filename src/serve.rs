@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -106,18 +106,22 @@ impl App {
 
     fn health(&self) -> Value {
         let unit = "remuda-refresh.timer";
-        let any = |rel: &str| {
-            self.places
-                .units
-                .iter()
-                .any(|d| d.join(rel).symlink_metadata().is_ok())
-        };
-        let timer = if any(&format!("timers.target.wants/{unit}")) {
-            "enabled"
-        } else if any(unit) {
-            "disabled"
-        } else {
-            "absent"
+        let dirs = &self.places.units;
+        let found = dirs
+            .iter()
+            .map(|d| d.join(unit))
+            .find(|p| p.symlink_metadata().is_ok());
+        let masked = found
+            .as_ref()
+            .is_some_and(|p| std::fs::canonicalize(p).is_ok_and(|t| t == Path::new("/dev/null")));
+        let wanted = dirs
+            .iter()
+            .any(|d| d.join("timers.target.wants").join(unit).metadata().is_ok());
+        let timer = match (found, masked, wanted) {
+            (_, true, _) => "masked",
+            (Some(_), false, true) => "enabled",
+            (Some(_), false, false) => "disabled",
+            (None, ..) => "absent",
         };
         json!({
             "timer": timer,
@@ -486,6 +490,15 @@ mod tests {
             state["usage"]["providers"]["claude"]["windows"][0]["usedPercent"],
             40
         );
+
+        let timer = || call(&app, "GET", "/api/state", Value::Null).1["health"]["timer"].clone();
+        std::fs::remove_file(units.join("remuda-refresh.timer")).unwrap();
+        std::os::unix::fs::symlink("/dev/null", units.join("remuda-refresh.timer")).unwrap();
+        assert_eq!(timer(), "masked");
+        std::fs::remove_file(units.join("remuda-refresh.timer")).unwrap();
+        assert_eq!(timer(), "absent");
+        std::fs::write(global.join("remuda-refresh.timer"), "").unwrap();
+        assert_eq!(timer(), "disabled");
     }
 
     #[test]
