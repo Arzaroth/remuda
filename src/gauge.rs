@@ -179,6 +179,18 @@ mod tests {
             "Usage"
         );
 
+        let named = json!({"payloads": [
+            {"provider": "claude", "account": "perso", "usage": {"primary": {"usedPercent": 42, "windowMinutes": 300}}},
+            {"provider": "claude", "account": "work", "usage": {"primary": {"usedPercent": 0, "windowMinutes": 300}}},
+        ], "errors": [{"provider": "codex", "message": "timed out"}]});
+        std::fs::write(&file, named.to_string()).unwrap();
+        let usage = read(&file).unwrap();
+        let claude = &usage["providers"]["claude"];
+        assert_eq!(claude["windows"], json!([]));
+        assert_eq!(claude["accounts"]["perso"]["windows"][0]["usedPercent"], 42);
+        assert_eq!(claude["accounts"]["work"]["windows"][0]["usedPercent"], 0);
+        assert_eq!(usage["providers"]["codex"]["accounts"], json!({}));
+
         assert!(read(tmp.path()).is_none());
 
         std::fs::write(&file, "{ torn").unwrap();
