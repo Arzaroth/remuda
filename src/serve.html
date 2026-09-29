@@ -294,6 +294,7 @@ function windowsCell(c, usage, gaugeFound) {
   if (!gaugeFound) return "";
   if (!c.active) return '<div class="aside">TokenGauge reports only the login in use</div>';
   if (!usage) return '<div class="aside">No usage from TokenGauge for this CLI yet</div>';
+  if (usage.behind) return '<div class="aside">TokenGauge has not updated since the switch to this login</div>';
   if (usage.error) return `<div class="aside late">TokenGauge: ${esc(usage.error)}</div>`;
   if (!usage.windows.length) return '<div class="aside">No rate limits reported</div>';
   const why = usage.staleReason ? ` (${esc(usage.staleReason)})` : "";
@@ -353,7 +354,8 @@ function tile(p, creds, live, usage) {
     : live?.state === "unstored" ? "A login remuda has not stored is in use"
     : live?.state === "signed_out" ? "Signed out" : "No stored login in use";
   const windows = usage && !usage.error ? usage.windows : [];
-  if (!windows.length) return `<div class="tile">${head}<div class="big">&ndash;<small>no usage figures</small></div>
+  if (!windows.length) return `<div class="tile">${head}<div class="big">&ndash;<small>${
+    usage?.behind ? "waiting for TokenGauge" : "no usage figures"}</small></div>
     <div class="under">${who}</div></div>`;
   const shown = windows.find((w) => w.title === picks[p.id])
     || windows.reduce((a, b) => (b.usedPercent > a.usedPercent ? b : a));
@@ -426,7 +428,9 @@ async function load() {
     p,
     creds: state.credentials.filter((c) => c.provider === p.id),
     live: state.live.find((l) => l.provider === p.id),
-    usage: state.usage?.providers?.[p.id] || null,
+    usage: state.usage?.updatedAt != null && state.usage.updatedAt < (state.health?.switchedAt?.[p.id] ?? 0)
+      ? { behind: true, windows: [] }
+      : state.usage?.providers?.[p.id] || null,
   }));
   drawStrip();
   $("providers").innerHTML = groups.map(({ p, creds, live, usage }) => `<section class="group">

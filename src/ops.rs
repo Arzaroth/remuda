@@ -288,6 +288,7 @@ pub fn switch(store: &Store, p: &dyn Provider, name: &str, discard: bool) -> Res
             result => break result?,
         }
     }
+    crate::runs::switched(store, p.id(), now_ms());
     Ok(format!(
         "switched {} to {} ({})",
         p.name(),
@@ -626,6 +627,7 @@ mod tests {
         let said = switch(&e.store, &e.claude, "perso", false).unwrap();
 
         assert_eq!(said, "switched Claude Code to perso (u-perso@example.com)");
+        assert!(crate::runs::switches(&e.store)["claude"] > now_ms() - 60_000);
         let creds = read_json(&e.tmp.path().join(".credentials.json"))
             .unwrap()
             .unwrap();
@@ -739,6 +741,7 @@ mod tests {
             switch(&e.store, &e.claude, "work", false).unwrap(),
             "claude/work is already active"
         );
+        assert!(crate::runs::switches(&e.store).is_empty());
     }
 
     #[test]

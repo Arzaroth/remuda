@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -42,6 +43,20 @@ pub fn last(store: &Store) -> Option<Run> {
 
 pub fn record(store: &Store, run: &Run) {
     write_record(&record_path(store), run, "this refresh for the page");
+}
+
+fn switches_path(store: &Store) -> PathBuf {
+    store.root().join(".last-switch.json")
+}
+
+pub fn switches(store: &Store) -> BTreeMap<String, i64> {
+    read_record(&switches_path(store)).unwrap_or_default()
+}
+
+pub fn switched(store: &Store, provider: &str, at: i64) {
+    let mut all = switches(store);
+    all.insert(provider.to_owned(), at);
+    write_record(&switches_path(store), &all, "when this switch happened");
 }
 
 #[cfg(test)]
