@@ -182,8 +182,12 @@ fn main() -> Result<()> {
     {
         let p = commands::find(&providers, provider)?;
         let open = |url: &str| {
-            if !no_browser {
+            if *no_browser {
+                return false;
+            }
+            browser::open_private(url) || {
                 browser::open(url);
+                false
             }
         };
         let mut read_code = || {

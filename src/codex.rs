@@ -902,6 +902,7 @@ mod tests {
             let redirect = param(url, "redirect_uri").replace("localhost", "127.0.0.1");
             let state = param(url, "state");
             std::thread::spawn(move || browse(&format!("{redirect}?code=c&state={state}")));
+            true
         };
         let mut out = Vec::new();
         crate::commands::login(
@@ -917,6 +918,10 @@ mod tests {
         )
         .unwrap();
         let out = String::from_utf8(out).unwrap();
+        assert!(
+            out.starts_with("Opened a private window to sign in to"),
+            "{out}"
+        );
         assert!(out.contains("Waiting for the browser"), "{out}");
         assert!(
             out.ends_with("stored codex/nine (seat-9@example.com, pro)\n"),
