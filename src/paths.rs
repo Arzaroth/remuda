@@ -58,8 +58,23 @@ fn config_home() -> PathBuf {
     var_dir("XDG_CONFIG_HOME").unwrap_or_else(|| home().join(".config"))
 }
 
-pub fn systemd_user_units() -> PathBuf {
-    config_home().join("systemd/user")
+pub fn systemd_user_units() -> Vec<PathBuf> {
+    let mut dirs = vec![config_home().join("systemd/user")];
+    dirs.extend(var_dir("XDG_RUNTIME_DIR").map(|d| d.join("systemd/user")));
+    dirs.push(
+        var_dir("XDG_DATA_HOME")
+            .unwrap_or_else(|| home().join(".local/share"))
+            .join("systemd/user"),
+    );
+    dirs.extend(
+        [
+            "/etc/systemd/user",
+            "/usr/local/lib/systemd/user",
+            "/usr/lib/systemd/user",
+        ]
+        .map(PathBuf::from),
+    );
+    dirs
 }
 
 fn cache_file(config: &str) -> Option<PathBuf> {

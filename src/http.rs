@@ -264,7 +264,7 @@ mod tests {
         let app = Arc::new(App::new(
             Store::open(e.store.root()),
             crate::serve::Places {
-                units: e.tmp.path().join("units"),
+                units: vec![e.tmp.path().join("units")],
                 snapshot: e.tmp.path().join("tokengauge-usage.json"),
             },
             providers,
