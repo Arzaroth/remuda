@@ -16,6 +16,7 @@ use crate::runs;
 use crate::store::Store;
 
 const PAGE: &str = include_str!("serve.html");
+const ICON: &str = include_str!("../assets/remuda.svg");
 
 /// `login` is taken out while its `finish` runs; `cancel` stays behind so a
 /// cancel can still reach it.
@@ -173,6 +174,11 @@ impl App {
                 status: 200,
                 content_type: "text/html; charset=utf-8",
                 body: PAGE.to_owned(),
+            },
+            ("GET", "/favicon.svg") => Response {
+                status: 200,
+                content_type: "image/svg+xml",
+                body: ICON.to_owned(),
             },
             (_, path) if path.starts_with("/api/") => match self.api(req.method, path, req.body) {
                 Ok(v) => Response::json(200, v),
@@ -428,18 +434,30 @@ mod tests {
     #[test]
     fn the_page_is_self_contained() {
         let e = env(&OFFLINE);
-        let resp = app(&e, &OFFLINE).handle(&Request {
-            method: "GET",
-            path: "/",
-            host: Some("127.0.0.1:7429"),
-            origin: None,
-            token: None,
-            body: "",
-        });
+        let app = app(&e, &OFFLINE);
+        let get = |path| {
+            app.handle(&Request {
+                method: "GET",
+                path,
+                host: Some("127.0.0.1:7429"),
+                origin: None,
+                token: None,
+                body: "",
+            })
+        };
+        let resp = get("/");
         assert!(resp.content_type.starts_with("text/html"));
         assert!(resp.body.contains("X-Remuda-Token"));
         assert!(!resp.body.contains("<script src"));
-        assert!(!resp.body.contains("<link"));
+        assert_eq!(resp.body.matches("<link").count(), 1);
+        assert!(
+            resp.body
+                .contains(r#"<link rel="icon" href="/favicon.svg""#)
+        );
+
+        let icon = get("/favicon.svg");
+        assert_eq!((icon.status, icon.content_type), (200, "image/svg+xml"));
+        assert!(icon.body.starts_with("<svg"));
     }
 
     #[test]
