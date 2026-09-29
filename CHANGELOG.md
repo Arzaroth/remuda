@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-29
+
 ### Fixed
 
 - Adding an account no longer signs your browser's own claude.ai or ChatGPT
