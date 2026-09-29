@@ -265,7 +265,8 @@ pub fn import(
 }
 
 pub struct Prompt<'a> {
-    pub open: &'a dyn Fn(&str),
+    /// Opens the sign-in page; true when it went to a private window.
+    pub open: &'a dyn Fn(&str) -> bool,
     pub read_code: &'a mut dyn FnMut() -> Result<String>,
 }
 
@@ -278,13 +279,23 @@ pub fn login(
     out: &mut dyn Write,
 ) -> Result<()> {
     let pending = begin_login(store, p, name, force)?;
+    let (lead, tail) = if (prompt.open)(pending.url()) {
+        (
+            "Opened a private window to sign in to",
+            "If it did not appear, open this link in one:",
+        )
+    } else {
+        (
+            "Sign in to",
+            "A private window avoids the account you are signed into.",
+        )
+    };
     writeln!(
         out,
-        "Sign in to {} with the account to store as {name}. A private window avoids the account you are signed into.\n\n{}\n",
+        "{lead} {} with the account to store as {name}. {tail}\n\n{}\n",
         p.name(),
         pending.url()
     )?;
-    (prompt.open)(pending.url());
     let code = if pending.needs_code() {
         write!(out, "Paste the code the page shows: ")?;
         out.flush()?;
@@ -1030,7 +1041,10 @@ mod tests {
         let (server, verifiers) = login_server("u-new");
         let e = env(&server.url());
         let opened = std::cell::RefCell::new(String::new());
-        let open = |url: &str| *opened.borrow_mut() = url.to_owned();
+        let open = |url: &str| {
+            *opened.borrow_mut() = url.to_owned();
+            false
+        };
         let mut read_code = || Ok(format!("the-code#{}\n", state_of(&opened.borrow())));
         let mut out = Vec::new();
 
@@ -1048,6 +1062,7 @@ mod tests {
         .unwrap();
 
         let out = text(out);
+        assert!(out.starts_with("Sign in to "), "{out}");
         assert!(
             out.contains("https://claude.com/cai/oauth/authorize?"),
             "{out}"
@@ -1095,7 +1110,7 @@ mod tests {
             "new",
             false,
             Prompt {
-                open: &|_| {},
+                open: &|_| false,
                 read_code: &mut read_code,
             },
             &mut Vec::new(),
@@ -1111,7 +1126,10 @@ mod tests {
         let e = env(&server.url());
         e.stored("work", "u-work", HOUR);
         let opened = std::cell::RefCell::new(String::new());
-        let open = |url: &str| *opened.borrow_mut() = url.to_owned();
+        let open = |url: &str| {
+            *opened.borrow_mut() = url.to_owned();
+            false
+        };
         let mut read_code = || Ok(format!("the-code#{}", state_of(&opened.borrow())));
 
         let err = login(
