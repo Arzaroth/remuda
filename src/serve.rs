@@ -240,7 +240,14 @@ impl App {
                     within_min: 60,
                 };
                 let (mut out, mut err) = (Vec::new(), Vec::new());
-                let result = commands::refresh(store, &lives, scope, &mut out, &mut err);
+                let result = commands::refresh(
+                    store,
+                    &lives,
+                    scope,
+                    &mut out,
+                    &mut err,
+                    &mut commands::Report::default(),
+                );
                 let err = String::from_utf8_lossy(&err).trim().to_owned();
                 if let Err(e) = result {
                     bail!("{e}: {err}");
@@ -448,7 +455,11 @@ mod tests {
         .unwrap();
         runs::record(
             &e.store,
-            &runs::Run::from_output(7, &[], b"claude/work: refreshed\n", b""),
+            &runs::Run {
+                at: 7,
+                refreshed: vec!["claude/work".into()],
+                problems: vec![],
+            },
         );
         std::fs::write(
             e.tmp.path().join("tokengauge-usage.json"),

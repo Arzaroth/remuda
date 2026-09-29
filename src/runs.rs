@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+use crate::commands::{Failed, Report};
 use crate::fsx::{read_record, write_record};
 use crate::store::Store;
 
-/// What the last scheduled refresh did, kept in the store it ran against so
-/// the page can say whether the timer is keeping the inactive logins fresh.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Run {
@@ -19,21 +19,19 @@ fn record_path(store: &Store) -> PathBuf {
     store.root().join(".last-refresh.json")
 }
 
-fn lines(bytes: &[u8]) -> Vec<String> {
-    String::from_utf8_lossy(bytes)
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-        .map(str::to_owned)
-        .collect()
-}
-
 impl Run {
-    pub fn from_output(at: i64, skipped: &[String], out: &[u8], err: &[u8]) -> Run {
+    pub fn of(at: i64, skipped: &[String], report: Report, outcome: &Result<()>) -> Run {
+        let mut problems = skipped.to_vec();
+        problems.extend(report.problems);
+        if let Err(e) = outcome
+            && e.downcast_ref::<Failed>().is_none()
+        {
+            problems.push(format!("{e:#}"));
+        }
         Run {
             at,
-            refreshed: lines(out),
-            problems: skipped.iter().cloned().chain(lines(err)).collect(),
+            refreshed: report.refreshed,
+            problems,
         }
     }
 }
@@ -49,24 +47,37 @@ pub fn record(store: &Store, run: &Run) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::anyhow;
+
+    fn report() -> Report {
+        Report {
+            refreshed: vec!["claude/work".to_owned()],
+            problems: vec!["claude/perso: invalid_grant".to_owned()],
+        }
+    }
 
     #[test]
     fn a_run_keeps_what_it_refreshed_and_everything_that_went_wrong() {
-        let run = Run::from_output(
-            42,
-            &["codex: not refreshing, ...".to_owned()],
-            b"claude/work: refreshed\n\n",
-            b"claude/perso: invalid_grant\n",
-        );
-        assert_eq!(run.refreshed, ["claude/work: refreshed"]);
+        let skipped = ["codex: not refreshing, ...".to_owned()];
+        let run = Run::of(42, &skipped, report(), &Err(Failed(1).into()));
+        assert_eq!(run.refreshed, ["claude/work"]);
         assert_eq!(
             run.problems,
             ["codex: not refreshing, ...", "claude/perso: invalid_grant"]
         );
 
+        let run = Run::of(
+            42,
+            &[],
+            Report::default(),
+            &Err(anyhow!("store unreadable")),
+        );
+        assert_eq!(run.problems, ["store unreadable"]);
+
         let tmp = tempfile::tempdir().unwrap();
         let store = Store::open(tmp.path());
         assert!(last(&store).is_none());
+        let run = Run::of(42, &skipped, report(), &Ok(()));
         record(&store, &run);
         assert_eq!(last(&store), Some(run));
 
