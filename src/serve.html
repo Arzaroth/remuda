@@ -98,9 +98,14 @@ h2 { font-size: 16px; font-weight: 700; margin: 0; }
 .spec { font-weight: 650; font-size: 14px; overflow-wrap: anywhere; }
 .who .label, .who .edit-label { margin-left: 8px; }
 .who .label:empty { display: none; }
-.edit { height: 26px; padding: 0 8px; border-radius: 6px; border-color: var(--focus); min-width: 10ch; max-width: 100%;
-  field-sizing: content; vertical-align: baseline; }
-.edit.spec { font-weight: 650; }
+.who span.spec { line-height: 1; }
+.editing { display: inline-flex; align-items: center; gap: 4px; vertical-align: top; max-width: 100%; height: 1.5em; }
+.editing input { height: 1.5em; line-height: normal; padding: 0 4px; margin-left: -5px; border-radius: 5px;
+  border-color: var(--focus); min-width: 8ch; max-width: 100%; field-sizing: content; }
+.editing .spec { font-weight: 650; }
+.editing .ok { height: 1.5em; width: 1.5em; padding: 0; border-radius: 5px; border: 0; cursor: pointer;
+  display: inline-grid; place-items: center; background: var(--press); color: var(--press-ink); }
+.editing .ok svg { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 .btn.icon[aria-pressed="true"] { border-color: var(--ink); background: var(--sunk); }
 .who .mail { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
 .pills { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
@@ -212,6 +217,7 @@ const ICONS = {
   label: '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.2"/>',
   rename: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
   remove: '<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/>',
+  save: '<path d="m5 12.5 4.5 4.5L19 7"/>',
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
 
@@ -442,6 +448,7 @@ $("providers").addEventListener("click", async (ev) => {
   const spec = r?.dataset.spec;
   if (!spec) return;
   switch (btn.dataset.act) {
+    case "save": return save(r);
     case "use": return act("/api/use", { name: spec });
     case "refresh": return act("/api/refresh", { name: spec, force: true });
     case "remove":
@@ -470,14 +477,16 @@ function edit(r, btn, spec) {
   const rename = btn.dataset.act === "rename";
   const shown = r.querySelector(rename ? ".spec" : ".label");
   const original = shown.textContent;
-  const input = document.createElement("input");
-  input.className = rename ? "edit spec" : "edit edit-label";
+  const box = document.createElement("span");
+  box.className = rename ? "editing" : "editing edit-label";
+  box.innerHTML = `<input class="edit${rename ? " spec" : ""}"><button class="ok" data-act="save" aria-label="Save" title="Save (Enter)">${icon("save")}</button>`;
+  const input = box.firstChild;
   input.value = original;
   input.placeholder = rename ? "Name" : "Label";
   input.setAttribute("aria-label", rename ? `New name for ${original}` : `Label for ${spec}`);
-  shown.replaceWith(input);
+  shown.replaceWith(box);
   btn.setAttribute("aria-pressed", "true");
-  editors.set(r, { btn, input, shown, original, rename, spec });
+  editors.set(r, { btn, box, input, shown, original, rename, spec });
   input.focus();
   input.select();
   input.onkeydown = (e) => {
@@ -497,7 +506,7 @@ function closeEditor(r) {
   const e = editors.get(r);
   disarm(e.btn);
   e.btn.removeAttribute("aria-pressed");
-  e.input.replaceWith(e.shown);
+  e.box.replaceWith(e.shown);
   editors.delete(r);
 }
 
