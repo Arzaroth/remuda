@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/remuda.svg" width="112" alt=""></p>
+
 # remuda
 
 A remuda is the herd of spare horses a rider picks a fresh mount from each day,

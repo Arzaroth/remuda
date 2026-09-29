@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- remuda has an icon: a horseshoe holding a keyhole. The `serve` page uses it
+  as its favicon, served by remuda itself.
+
 ### Changed
 
 - On the `serve` page, Enter confirms the Import name and the pasted sign-in
