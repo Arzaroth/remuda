@@ -17,8 +17,9 @@ and sends it as `X-Remuda-Token`.
    rebinding.
 2. An `Origin`, when sent, must be that same listener: defeats a cross-site
    `fetch` from another tab.
-3. Every `/api/` call needs the token. `GET /` is served without it; the page
-   holds no data.
+3. Every `/api/` call needs the token. `GET /` and `GET /favicon.svg` (the
+   icon, `assets/remuda.svg`, compiled in) are served without it; neither holds
+   data.
 
 ## The listener (`http.rs`)
 
