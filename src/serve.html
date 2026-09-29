@@ -285,11 +285,17 @@ function lifetime(title, at, horizon, warnBelow) {
 
 function usageOf(c, usage) {
   if (!usage) return null;
-  const own = usage.accounts?.[c.name];
-  if (own) return own.error || !usage.error ? own : { ...own, error: usage.error };
-  if (Object.keys(usage.accounts || {}).length) return usage.error ? usage : { missing: true, windows: [] };
-  return c.active ? usage : { passive: true, windows: [] };
+  const accounts = usage.accounts || {};
+  if (Object.hasOwn(accounts, c.name)) return accounts[c.name];
+  const named = Object.keys(accounts).length > 0;
+  if (!c.active) return { [named ? "missing" : "passive"]: true, windows: [] };
+  return named && !usage.windows.length && !usage.error ? { missing: true, windows: [] } : usage;
 }
+
+const skipped = {
+  expired: "Its access token has expired, so TokenGauge waits for remuda to refresh it",
+  unverified: "TokenGauge skips it until remuda identifies it again",
+};
 
 function windowsCell(c, usage, gaugeFound) {
   if (!gaugeFound) return "";
@@ -299,6 +305,8 @@ function windowsCell(c, usage, gaugeFound) {
   if (!usage) return '<div class="aside">No usage from TokenGauge for this CLI yet</div>';
   if (usage.behind) return '<div class="aside">TokenGauge has not updated since the switch to this login</div>';
   if (usage.error) return `<div class="aside late">TokenGauge: ${esc(usage.error)}</div>`;
+  if (usage.credentialState)
+    return `<div class="aside soon">${skipped[usage.credentialState] || `TokenGauge did not read it (${esc(usage.credentialState)})`}</div>`;
   if (!usage.windows.length) return '<div class="aside">No rate limits reported</div>';
   const why = usage.staleReason ? ` (${esc(usage.staleReason)})` : "";
   const stale = usage.stale ? `<div class="aside soon">TokenGauge could not update this${why}; figures may be old</div>` : "";
@@ -356,7 +364,7 @@ function tile(p, creds, live, usage) {
   const who = active ? `<span class="spec">${esc(active.name)}</span> in use`
     : live?.state === "unstored" ? "A login remuda has not stored is in use"
     : live?.state === "signed_out" ? "Signed out" : "No stored login in use";
-  usage = active ? usageOf(active, usage) : Object.keys(usage?.accounts || {}).length ? null : usage;
+  usage = active ? usageOf(active, usage) : usage;
   const windows = usage && !usage.error ? usage.windows : [];
   if (!windows.length) return `<div class="tile">${head}<div class="big">&ndash;<small>${
     usage?.behind ? "waiting for TokenGauge" : "no usage figures"}</small></div>
