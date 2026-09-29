@@ -62,26 +62,60 @@ pub fn systemd_user_units() -> PathBuf {
     config_home().join("systemd/user")
 }
 
-/// TokenGauge's snapshot: the top-level `cache_file` of its config when set,
-/// else `$XDG_STATE_HOME/tokengauge/tokengauge-usage.json`.
+fn cache_file(config: &str) -> Option<PathBuf> {
+    config
+        .lines()
+        .map(str::trim)
+        .take_while(|l| !l.starts_with('['))
+        .find_map(|l| {
+            let value = l
+                .strip_prefix("cache_file")?
+                .trim_start()
+                .strip_prefix('=')?
+                .trim();
+            let quote = value.chars().next().filter(|c| *c == '"' || *c == '\'')?;
+            let value = value[1..].split(quote).next()?;
+            (!value.is_empty()).then(|| PathBuf::from(value))
+        })
+        .filter(|p| *p != env::temp_dir().join("tokengauge-usage.json"))
+}
+
 pub fn tokengauge_snapshot() -> PathBuf {
-    let config = std::fs::read_to_string(config_home().join("tokengauge/config.toml"));
-    let configured = config.ok().and_then(|text| {
-        text.lines()
-            .map(str::trim)
-            .take_while(|l| !l.starts_with('['))
-            .find_map(|l| {
-                let value = l
-                    .strip_prefix("cache_file")?
-                    .trim_start()
-                    .strip_prefix('=')?;
-                let value = value.trim().strip_prefix('"')?.split('"').next()?;
-                (!value.is_empty()).then(|| PathBuf::from(value))
-            })
-    });
-    configured.unwrap_or_else(|| {
-        var_dir("XDG_STATE_HOME")
-            .unwrap_or_else(|| home().join(".local/state"))
-            .join("tokengauge/tokengauge-usage.json")
-    })
+    let config = var_dir("TOKENGAUGE_CONFIG")
+        .unwrap_or_else(|| config_home().join("tokengauge/config.toml"));
+    std::fs::read_to_string(config)
+        .ok()
+        .and_then(|text| cache_file(&text))
+        .unwrap_or_else(|| {
+            var_dir("XDG_STATE_HOME")
+                .unwrap_or_else(|| home().join(".local/state"))
+                .join("tokengauge/tokengauge-usage.json")
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tokengauge_cache_file_is_read_like_tokengauge_reads_it() {
+        let at = |text: &str| cache_file(text).map(|p| p.display().to_string());
+        assert_eq!(
+            at("cache_file = \"/data/tg.json\"").as_deref(),
+            Some("/data/tg.json")
+        );
+        assert_eq!(
+            at("  cache_file='/data/tg.json'  ").as_deref(),
+            Some("/data/tg.json")
+        );
+        assert_eq!(at("# cache_file = \"/x\""), None);
+        assert_eq!(at("cache_file = \"\""), None);
+        assert_eq!(at("[waybar]\ncache_file = \"/x\""), None);
+        assert_eq!(
+            at("refresh_secs = 600\ncache_file = \"/x\"\n[a]").as_deref(),
+            Some("/x")
+        );
+        let legacy = env::temp_dir().join("tokengauge-usage.json");
+        assert_eq!(at(&format!("cache_file = \"{}\"", legacy.display())), None);
+    }
 }
