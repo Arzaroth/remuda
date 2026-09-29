@@ -33,6 +33,8 @@ header overrides it; the choice is kept in `localStorage` and applied in
 `<head>`, before the page draws.
 
 When a CLI's live login is not stored, its section offers an Import box.
+Enter in any of the page's inputs confirms it: the Import name, the pasted
+sign-in code, the Add an account name and the in-place editors.
 Import, and Sign in under "Add an account", ask "Overwrite <name> (<email>)?"
 when the name is taken, and replace it with `force` on the second click, as
 `--force` does. Every confirmation holds only for the provider and name it
