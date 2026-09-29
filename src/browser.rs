@@ -3,8 +3,12 @@ use std::ffi::OsStr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{Duration, SystemTime};
 
-use crate::{fsx, paths};
+use crate::{fsx, paths, pkce};
+
+/// Long enough for a browser to have read its redirect page.
+const REDIRECT_KEPT: Duration = Duration::from_secs(600);
 
 /// Default browsers that can be told to open a private window: their
 /// desktop entries, the executables those run, and the flag.
@@ -94,18 +98,39 @@ fn redirect_page(url: &str) -> String {
 }
 
 fn redirect_file(url: &str) -> Option<PathBuf> {
-    let page = paths::runtime_dir().join("open.html");
+    redirect_file_in(&paths::runtime_dir(), url, SystemTime::now())
+}
+
+/// One file per open, so two sign-ins started together each reach their own
+/// URL; the ones a browser has long since read are removed.
+fn redirect_file_in(dir: &Path, url: &str, now: SystemTime) -> Option<PathBuf> {
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let stale = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .is_ok_and(|t| now.duration_since(t).is_ok_and(|age| age > REDIRECT_KEPT));
+        if name.starts_with("open-") && name.ends_with(".html") && stale {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+    let page = dir.join(format!("open-{}.html", pkce::random().ok()?));
     fsx::write_private(&page, &redirect_page(url)).ok()?;
     Some(page)
 }
 
 fn spawn(program: &Path, args: &[&OsStr]) -> bool {
-    Command::new(program)
+    let child = Command::new(program)
         .args(args)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .spawn()
-        .is_ok()
+        .spawn();
+    let Ok(mut child) = child else {
+        return false;
+    };
+    std::thread::spawn(move || child.wait());
+    true
 }
 
 pub fn open(url: &str) {
@@ -207,5 +232,38 @@ mod tests {
         assert_eq!(launcher("com.brave.Browser.desktop", Some(path)), None);
         assert_eq!(launcher("firefox_firefox.desktop", Some(path)), None);
         assert_eq!(launcher("brave-browser.desktop", None), None);
+    }
+
+    #[test]
+    fn each_open_gets_its_own_redirect_file_and_old_ones_go() {
+        let tmp = tempfile::tempdir().unwrap();
+        let now = SystemTime::now();
+        let old = tmp.path().join("open-old.html");
+        std::fs::write(&old, "").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&old)
+            .unwrap()
+            .set_modified(now - REDIRECT_KEPT - Duration::from_secs(1))
+            .unwrap();
+        let other = tmp.path().join("keep.html");
+        std::fs::write(&other, "").unwrap();
+
+        let a = redirect_file_in(tmp.path(), "https://a.example/", now).unwrap();
+        let b = redirect_file_in(tmp.path(), "https://b.example/", now).unwrap();
+
+        assert_ne!(a, b);
+        assert!(
+            std::fs::read_to_string(&a)
+                .unwrap()
+                .contains("https://a.example/")
+        );
+        assert!(
+            std::fs::read_to_string(&b)
+                .unwrap()
+                .contains("https://b.example/")
+        );
+        assert!(!old.exists());
+        assert!(other.exists());
     }
 }
