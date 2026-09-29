@@ -27,18 +27,9 @@ pub fn read(snapshot: &Path) -> Option<Value> {
         let Some(id) = p.get("provider").and_then(Value::as_str) else {
             continue;
         };
-        let entry = providers
-            .entry(id.to_owned())
-            .or_insert_with(|| provider(&Value::Null));
-        match p.get("account").and_then(Value::as_str) {
-            Some(account) => {
-                entry["accounts"][account] = provider(p);
-            }
-            None => {
-                let accounts = entry["accounts"].take();
-                *entry = provider(p);
-                entry["accounts"] = accounts;
-            }
+        let slot = slot(&mut providers, id, p.get("credential"));
+        if let (Some(slot), Value::Object(fields)) = (slot.as_object_mut(), provider(p)) {
+            slot.extend(fields);
         }
     }
     let errors = data.get("errors").and_then(Value::as_array);
@@ -49,20 +40,34 @@ pub fn read(snapshot: &Path) -> Option<Value> {
         ) else {
             continue;
         };
-        let entry = providers
-            .entry(id.to_owned())
-            .or_insert_with(|| provider(&Value::Null));
-        entry["error"] = message.into();
-    }
-    for entry in providers.values_mut() {
-        if entry["accounts"].is_null() {
-            entry["accounts"] = json!({});
-        }
+        slot(&mut providers, id, e.get("credential"))["error"] = message.into();
     }
     Some(json!({
         "updatedAt": data.pointer("/meta/updatedAtMs").and_then(Value::as_i64),
         "providers": providers,
     }))
+}
+
+fn slot<'a>(
+    providers: &'a mut Map<String, Value>,
+    id: &str,
+    credential: Option<&Value>,
+) -> &'a mut Value {
+    let entry = providers.entry(id.to_owned()).or_insert_with(|| {
+        let mut entry = provider(&Value::Null);
+        entry["accounts"] = json!({});
+        entry
+    });
+    match credential.and_then(Value::as_str) {
+        Some(name) => {
+            let account = &mut entry["accounts"][name];
+            if account.is_null() {
+                *account = provider(&Value::Null);
+            }
+            account
+        }
+        None => entry,
+    }
 }
 
 fn provider(p: &Value) -> Value {
@@ -85,6 +90,7 @@ fn provider(p: &Value) -> Value {
         "stale": p.get("stale").and_then(Value::as_bool).unwrap_or(false),
         "staleReason": p.get("staleReason").and_then(Value::as_str),
         "error": p.pointer("/error/message").and_then(Value::as_str),
+        "credentialState": p.get("credentialState").and_then(Value::as_str),
         "windows": fixed.chain(extra).collect::<Vec<_>>(),
     })
 }
@@ -180,8 +186,8 @@ mod tests {
         );
 
         let named = json!({"payloads": [
-            {"provider": "claude", "account": "perso", "usage": {"primary": {"usedPercent": 42, "windowMinutes": 300}}},
-            {"provider": "claude", "account": "work", "usage": {"primary": {"usedPercent": 0, "windowMinutes": 300}}},
+            {"provider": "claude", "credential": "perso", "usage": {"primary": {"usedPercent": 42, "windowMinutes": 300}}},
+            {"provider": "claude", "credential": "work", "usage": {"primary": {"usedPercent": 0, "windowMinutes": 300}}},
         ], "errors": [{"provider": "codex", "message": "timed out"}]});
         std::fs::write(&file, named.to_string()).unwrap();
         let usage = read(&file).unwrap();
