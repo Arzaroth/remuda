@@ -1,5 +1,5 @@
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn home() -> PathBuf {
     env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
@@ -59,21 +59,29 @@ fn config_home() -> PathBuf {
 }
 
 pub fn systemd_user_units() -> Vec<PathBuf> {
-    let mut dirs = vec![config_home().join("systemd/user")];
-    dirs.extend(var_dir("XDG_RUNTIME_DIR").map(|d| d.join("systemd/user")));
-    dirs.push(
-        var_dir("XDG_DATA_HOME")
-            .unwrap_or_else(|| home().join(".local/share"))
-            .join("systemd/user"),
-    );
+    let data_dirs = env::var("XDG_DATA_DIRS").ok().filter(|v| !v.is_empty());
+    unit_dirs(
+        &config_home(),
+        var_dir("XDG_RUNTIME_DIR").as_deref(),
+        &var_dir("XDG_DATA_HOME").unwrap_or_else(|| home().join(".local/share")),
+        data_dirs
+            .as_deref()
+            .unwrap_or("/usr/local/share:/usr/share"),
+    )
+}
+
+fn unit_dirs(config: &Path, runtime: Option<&Path>, data: &Path, data_dirs: &str) -> Vec<PathBuf> {
+    let mut dirs = vec![config.join("systemd/user"), "/etc/systemd/user".into()];
+    dirs.extend(runtime.map(|r| r.join("systemd/user")));
+    dirs.push("/run/systemd/user".into());
+    dirs.push(data.join("systemd/user"));
     dirs.extend(
-        [
-            "/etc/systemd/user",
-            "/usr/local/lib/systemd/user",
-            "/usr/lib/systemd/user",
-        ]
-        .map(PathBuf::from),
+        data_dirs
+            .split(':')
+            .filter(|d| d.starts_with('/'))
+            .map(|d| Path::new(d).join("systemd/user")),
     );
+    dirs.extend(["/usr/local/lib/systemd/user", "/usr/lib/systemd/user"].map(PathBuf::from));
     dirs
 }
 
@@ -111,6 +119,31 @@ pub fn tokengauge_snapshot() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn user_units_are_searched_where_systemd_loads_them() {
+        let dirs = unit_dirs(
+            Path::new("/h/.config"),
+            Some(Path::new("/run/user/1000")),
+            Path::new("/h/.local/share"),
+            "/opt/share:relative:/usr/share",
+        );
+        let dirs: Vec<_> = dirs.iter().map(|d| d.to_str().unwrap()).collect();
+        assert_eq!(
+            dirs,
+            [
+                "/h/.config/systemd/user",
+                "/etc/systemd/user",
+                "/run/user/1000/systemd/user",
+                "/run/systemd/user",
+                "/h/.local/share/systemd/user",
+                "/opt/share/systemd/user",
+                "/usr/share/systemd/user",
+                "/usr/local/lib/systemd/user",
+                "/usr/lib/systemd/user",
+            ]
+        );
+    }
 
     #[test]
     fn tokengauge_cache_file_is_read_like_tokengauge_reads_it() {
