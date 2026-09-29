@@ -226,12 +226,18 @@ pub fn refresh_entry(store: &Store, p: &dyn Provider, entry: &mut Entry) -> Resu
     Ok(())
 }
 
+fn guards_live(discard: bool, live: &LiveState) -> bool {
+    !discard || matches!(live, LiveState::Stored { synced: true, .. })
+}
+
 /// Returns what to tell the user.
 pub fn switch(store: &Store, p: &dyn Provider, name: &str, discard: bool) -> Result<String> {
     let mut target = store
         .get(p.id(), name)?
         .with_context(|| format!("no credential named {}/{name}", p.id()))?;
-    match sync_live(store, p)? {
+    let live = sync_live(store, p)?;
+    let guarded = guards_live(discard, &live);
+    match live {
         LiveState::Stored { name: current, .. } if current == name => {
             return Ok(format!("{} is already active", target.qualified()));
         }
@@ -282,7 +288,7 @@ pub fn switch(store: &Store, p: &dyn Provider, name: &str, discard: bool) -> Res
         if refreshed || attempts > 0 {
             sync_live(store, p)?;
         }
-        let outgoing = if discard { None } else { p.live()? };
+        let outgoing = if guarded { p.live()? } else { None };
         match p.install(&target, outgoing.as_ref()) {
             Err(e) if e.is::<crate::fsx::Changed>() && attempts < 3 => attempts += 1,
             result => break result?,
@@ -681,6 +687,18 @@ mod tests {
         .unwrap();
         let before: Value = serde_json::from_str(&config_before).unwrap();
         assert_eq!(config["oauthAccount"], before["oauthAccount"]);
+    }
+
+    #[test]
+    fn discarding_keeps_the_rotation_guard_for_a_stored_confirmed_login() {
+        let stored = |synced| LiveState::Stored {
+            name: "work".into(),
+            synced,
+        };
+        assert!(guards_live(false, &LiveState::SignedOut));
+        assert!(guards_live(true, &stored(true)));
+        assert!(!guards_live(true, &stored(false)));
+        assert!(!guards_live(true, &LiveState::Unstored { email: None }));
     }
 
     #[test]
