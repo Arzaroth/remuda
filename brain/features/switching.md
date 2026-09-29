@@ -15,7 +15,8 @@
    refreshes under), read the live login once more and `Provider::install`
    against it: if the CLI rotated its login since, nothing is written, the new
    tokens are synced back into the store and the install is tried again (up to
-   three times; `--discard` skips the check). For Claude the install writes
+   three times). `--discard` skips that check, except when the live login is
+   stored and confirmed: then there is nothing to drop, and the check stays. For Claude the install writes
    `oauthAccount` into `.claude.json`, then `claudeAiOauth` into
    `.credentials.json`, keeping every other key; for Codex it replaces
    `auth.json`.

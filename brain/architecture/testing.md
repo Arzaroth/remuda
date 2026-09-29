@@ -28,8 +28,11 @@ network or touches the developer's own logins.
   in the authorize URL, and match the redirect URI.
 - The whole suite passes with no network and an empty `HOME`, which is the
   check that nothing reaches the network or a real login:
-  `HOME=$(mktemp -d) unshare -rn sh -c 'ip link set lo up && cargo test --locked'`.
-  Loopback must be up: the mock servers listen on 127.0.0.1.
+  `CARGO_HOME=~/.cargo RUSTUP_HOME=~/.rustup HOME=$(mktemp -d) unshare -rn sh -c
+  'ip link set lo up && cargo test --locked --offline'`, with rustup's `cargo`
+  first on `PATH` (a shim that reads `HOME`, such as mise's, fails there).
+  Cargo keeps its registry and toolchain under the real homes and must not
+  fetch; loopback must be up because the mock servers listen on 127.0.0.1.
 - **`serve`** is tested through `App::handle` with synthetic requests; `http.rs`
   over real sockets, with short limits: refusal before a body, oversized,
   stalled and malformed requests, and the connection limit.
