@@ -3,15 +3,23 @@
 `remuda serve` opens a page in three parts:
 
 - A health line: whether the refresh timer is enabled, when it last ran, how
-  many credentials it refreshed and what it skipped or failed on (from
-  `<store>/.last-refresh.json`); whether TokenGauge's snapshot was found and
-  how old it is; and the store's path.
-- A strip with one tile per CLI: the login in use and its tightest usage
-  window, as a large percentage with a meter and its reset.
+  many credentials it refreshed and, behind a toggle that opens a list under
+  the line, what it skipped or failed on (from `<store>/.last-refresh.json`);
+  whether TokenGauge's snapshot was found and how old it is; and the store's
+  path.
+- A strip with one tile per CLI: the login in use and one of its usage
+  windows, as a large percentage with a meter and its reset. It shows the
+  tightest window until a chip under it picks another (5 hours, Weekly, a
+  model-scoped limit, ...); the pick is kept per CLI in the browser's
+  `localStorage`.
 - One row per stored credential: name, label, email, plan and state pills,
   the usage windows, how long its access token and its sign-in (refresh
   token) have left, and Use, Refresh, Label, Rename and Remove. Remove asks
   for a second click; Use, Refresh and Remove are disabled on the active one.
+
+The theme follows the system until the Auto / Light / Dark switch in the
+header overrides it; the choice is kept in `localStorage` and applied in
+`<head>`, before the page draws.
 
 When a CLI's live login is not stored, its section offers an Import box.
 "Refresh tokens" refreshes every inactive credential due within the hour.
