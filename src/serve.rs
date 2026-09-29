@@ -48,8 +48,12 @@ pub struct App {
     providers: Vec<Box<dyn Provider>>,
     token: String,
     port: u16,
+    open: Opener,
     pending: Mutex<HashMap<String, Pending>>,
 }
+
+/// Opens a sign-in page in a private window; false leaves it to the page.
+pub type Opener = Box<dyn Fn(&str) -> bool + Send + Sync>;
 
 pub struct Request<'a> {
     pub method: &'a str,
@@ -90,6 +94,7 @@ impl App {
         providers: Vec<Box<dyn Provider>>,
         token: String,
         port: u16,
+        open: Opener,
     ) -> Self {
         App {
             store,
@@ -97,6 +102,7 @@ impl App {
             providers,
             token,
             port,
+            open,
             pending: Mutex::new(HashMap::new()),
         }
     }
@@ -289,9 +295,10 @@ impl App {
                 });
                 let login = commands::begin_login(store, p, name, force)?;
                 let id = pkce::random()?;
-                let answer = json!({"id": id, "url": login.url(), "needsCode": login.needs_code()});
+                let url = login.url().to_owned();
+                let needs_code = login.needs_code();
                 pending.insert(
-                    id,
+                    id.clone(),
                     Pending {
                         provider: p.id(),
                         name: name.to_owned(),
@@ -300,7 +307,9 @@ impl App {
                         login: Some(login),
                     },
                 );
-                Ok(answer)
+                drop(pending);
+                let opened = (self.open)(&url);
+                Ok(json!({"id": id, "url": url, "needsCode": needs_code, "opened": opened}))
             }
             ("POST", "/api/login/finish") => {
                 let id = text("id").context("id is required")?;
@@ -358,6 +367,10 @@ mod tests {
     }
 
     fn app(e: &Env, api_base: &str) -> App {
+        app_opening(e, api_base, Box::new(|_| false))
+    }
+
+    fn app_opening(e: &Env, api_base: &str, open: Opener) -> App {
         let providers: Vec<Box<dyn Provider>> =
             vec![Box::new(Claude::at(e.tmp.path(), Api::local(api_base)))];
         App::new(
@@ -366,6 +379,7 @@ mod tests {
             providers,
             TOKEN.into(),
             PORT,
+            open,
         )
     }
 
@@ -603,11 +617,22 @@ mod tests {
             .with_body(profile_body("u-new"))
             .create();
         let e = env(&server.url());
-        let app = app(&e, &server.url());
+        let opened = Arc::new(Mutex::new(Vec::new()));
+        let seen = opened.clone();
+        let app = app_opening(
+            &e,
+            &server.url(),
+            Box::new(move |url| {
+                seen.lock().unwrap().push(url.to_owned());
+                true
+            }),
+        );
 
         let (status, begun) = call(&app, "POST", "/api/login", json!({"name": "new"}));
         assert_eq!(status, 200);
         assert_eq!(begun["needsCode"], true);
+        assert_eq!(begun["opened"], true);
+        assert_eq!(*opened.lock().unwrap(), [begun["url"].as_str().unwrap()]);
         let url = reqwest::Url::parse(begun["url"].as_str().unwrap()).unwrap();
         let state = url.query_pairs().find(|(k, _)| k == "state").unwrap().1;
         let id = begun["id"].as_str().unwrap();
@@ -666,6 +691,7 @@ mod tests {
             providers,
             TOKEN.into(),
             PORT,
+            Box::new(|_| false),
         ));
         let (_, begun) = call(
             &app,

@@ -633,13 +633,21 @@ $("add").addEventListener("submit", async (ev) => {
     return toast(e.message, true);
   }
   openLogin = login.id;
-  window.open(login.url, "_blank", "noopener");
+  if (!login.opened) window.open(login.url, "_blank", "noopener");
   const tail = login.needsCode
     ? '<div class="inline"><input id="code" placeholder="Paste the code the sign-in page shows"><button class="btn go" id="finish">Finish sign-in</button><button class="btn" id="cancel">Cancel</button></div>'
     : '<div class="inline"><span class="aside">Waiting for the browser to finish signing in&hellip;</span><button class="btn" id="cancel">Cancel</button></div>';
+  const link = `<a href="${esc(login.url)}" target="_blank" rel="noopener">open the sign-in page</a>`;
+  const copy = '<button type="button" class="linkish" id="copy-link">copy its link</button>';
+  const where = login.opened
+    ? `A private window opened for it, so the account you are signed into here stays put.
+      If it did not appear, ${copy} into a private window.`
+    : `A private window keeps the account you are signed into out of the way: ${copy} into one.
+      If no tab opened, ${link}.`;
   box.innerHTML = `<div class="signin"><div>Sign in with the account to store as <b>${esc(name)}</b>.
-    A private window keeps the account you are signed into out of the way.
-    If no tab opened, <a href="${esc(login.url)}" target="_blank" rel="noopener">open the sign-in page</a>.</div>${tail}</div>`;
+    ${where}</div>${tail}</div>`;
+  $("copy-link").onclick = () => navigator.clipboard.writeText(login.url)
+    .then(() => toast("Sign-in link copied"), () => toast("Could not copy the link", true));
   const done = async (code) => {
     try {
       const r = await api("/api/login/finish", { id: login.id, code });
