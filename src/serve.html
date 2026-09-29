@@ -450,6 +450,12 @@ async function load() {
   loaded = true;
 }
 
+document.addEventListener("keydown", (ev) => {
+  if (ev.key !== "Enter" || ev.isComposing || !ev.target.matches(".inline input")) return;
+  ev.preventDefault();
+  ev.target.closest(".inline").querySelector(".btn.go")?.click();
+});
+
 $("providers").addEventListener("click", async (ev) => {
   const btn = ev.target.closest("button");
   if (!btn) return;
