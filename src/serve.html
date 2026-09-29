@@ -479,7 +479,8 @@ $("strip").addEventListener("click", (ev) => {
   if (!chip) return;
   picks[chip.dataset.provider] = chip.dataset.pick;
   remember("remuda-tiles", picks);
-  drawStrip();
+  const g = groups.find((g) => g.p.id === chip.dataset.provider);
+  chip.closest(".tile").outerHTML = tile(g.p, g.creds, g.live, g.usage);
   document.querySelector(`[data-provider="${CSS.escape(chip.dataset.provider)}"][aria-pressed="true"]`)?.focus();
 });
 
