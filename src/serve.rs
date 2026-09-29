@@ -118,6 +118,7 @@ impl App {
             "timer": timer,
             "lastRefresh": runs::last(&self.store),
             "tokengauge": self.places.snapshot.exists(),
+            "switchedAt": runs::switches(&self.store),
         })
     }
 
