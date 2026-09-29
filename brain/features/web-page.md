@@ -20,6 +20,8 @@
   filled with the current value and sized to the text so nothing moves: the
   check button beside it or Enter saves, and the same button or Escape
   cancels, asking for a second click ("Discard?") when the value was changed.
+  An open editor, and what was typed in it, survives the rows being redrawn
+  after another action.
 
 The theme follows the system until the Auto / Light / Dark switch in the
 header overrides it; the choice is kept in `localStorage` and applied in
@@ -35,7 +37,10 @@ while Codex waits for its callback. Cancel abandons it, and for Codex frees port
 
 Usage figures come from TokenGauge's snapshot, which remuda reads and never
 writes or refreshes. The snapshot holds the login TokenGauge last saw for each
-CLI, so only the active credential shows usage; the others say so. Once
+CLI, so only the active credential shows usage; the others say so. Until
+TokenGauge has fetched again after a switch, the new login says it is waiting
+for TokenGauge rather than showing the previous account's figures. A stale
+snapshot shows TokenGauge's reason, and a failed fetch its error. Once
 TokenGauge's ADR 0003 has payloads name their credential, each row can show
 its own. Without TokenGauge, the page points to it and shows everything else.
 How it is guarded and the API it calls are in

@@ -8,6 +8,8 @@
   have left, whether the refresh timer is on and what its last run refreshed
   or failed on, and, with TokenGauge installed, the usage of the login in use.
 - The scheduled refresh records its last run in `<store>/.last-refresh.json`.
+- A switch records when it happened in `<store>/.last-switch.json`, so the
+  page does not show the previous login's usage for the new one.
 
 ### Changed
 

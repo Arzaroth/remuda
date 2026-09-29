@@ -15,9 +15,13 @@
    refreshes under), read the live login once more and `Provider::install`
    against it: if the CLI rotated its login since, nothing is written, the new
    tokens are synced back into the store and the install is tried again (up to
-   three times; `--discard` skips the check).: for Claude, write `oauthAccount` into `.claude.json`,
-   then `claudeAiOauth` into `.credentials.json`, keeping every other key; for
-   Codex, replace `auth.json`.
+   three times; `--discard` skips the check). For Claude the install writes
+   `oauthAccount` into `.claude.json`, then `claudeAiOauth` into
+   `.credentials.json`, keeping every other key; for Codex it replaces
+   `auth.json`.
+6. Note the time in `<store>/.last-switch.json` under the provider id
+   (`runs::switched`, best effort), so the page can tell usage TokenGauge
+   fetched before the switch from usage of the new login.
 
 Running Claude Code sessions watch their credential files and adopt the new
 login. A running Codex session may keep the login it started with until it is
@@ -39,3 +43,4 @@ login also carries its `oauthAccount` block and email back (Claude). See
 - [src/ops.rs](../../src/ops.rs)
 - [src/claude.rs](../../src/claude.rs) `install`
 - [src/codex.rs](../../src/codex.rs) `install`
+- [src/runs.rs](../../src/runs.rs) `switched`
