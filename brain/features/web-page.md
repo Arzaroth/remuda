@@ -52,13 +52,15 @@ while Codex waits for its callback. Cancel abandons it, and for Codex frees port
 1455 immediately.
 
 Usage figures come from TokenGauge's snapshot, which remuda reads and never
-writes or refreshes. The snapshot holds the login TokenGauge last saw for each
-CLI, so only the active credential shows usage; the others say so. Until
-TokenGauge has fetched again after a switch, the new login says it is waiting
-for TokenGauge rather than showing the previous account's figures. A stale
-snapshot shows TokenGauge's reason, and a failed fetch its error. Once
-TokenGauge's ADR 0003 has payloads name their credential, each row can show
-its own. Without TokenGauge, the page points to it and shows everything else.
+writes or refreshes. Since TokenGauge's ADR 0003, its payloads name the stored
+credential they belong to, so each row shows its own login's figures and the
+tile the active one's. An older snapshot names no credential and holds the
+login TokenGauge last saw for each CLI: then only the active credential shows
+usage, the others say so, and until TokenGauge has fetched again after a
+switch the new login says it is waiting rather than showing the previous
+account's figures. A stale snapshot shows TokenGauge's reason, and a failed
+fetch its error. Without TokenGauge, the page points to it and shows
+everything else.
 How it is guarded and the API it calls are in
 [architecture/web.md](../architecture/web.md).
 
