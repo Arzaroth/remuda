@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-09-29
+
 ### Fixed
 
 - The `serve` page shows each login's own usage with TokenGauge 0.37 and
