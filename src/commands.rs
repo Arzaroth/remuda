@@ -374,6 +374,14 @@ pub struct Report {
     pub problems: Vec<String>,
 }
 
+impl Report {
+    fn problem(&mut self, err: &mut dyn Write, line: String) -> Result<()> {
+        writeln!(err, "{line}")?;
+        self.problems.push(line);
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 pub struct Failed(pub usize);
 
@@ -393,22 +401,19 @@ pub fn refresh(
     err: &mut dyn Write,
     report: &mut Report,
 ) -> Result<()> {
-    let mut problem = |line: String| -> Result<()> {
-        writeln!(err, "{line}")?;
-        report.problems.push(line);
-        Ok(())
-    };
-    let mut refreshed = Vec::new();
     for live in lives {
         let p = live.provider;
         if scope.only.is_some_and(|(only, _)| only.id() != p.id()) {
             continue;
         }
         if let LiveState::Unreadable { error } = &live.state {
-            problem(format!(
-                "{}: not refreshing, its login cannot be read: {error}",
-                p.id()
-            ))?;
+            report.problem(
+                err,
+                format!(
+                    "{}: not refreshing, its login cannot be read: {error}",
+                    p.id()
+                ),
+            )?;
             continue;
         }
         for mut entry in store.list(p.id())? {
@@ -416,10 +421,13 @@ pub fn refresh(
                 continue;
             }
             if !entry.verified {
-                problem(format!(
-                    "{}: not refreshing, it does not match its sidecar",
-                    entry.qualified()
-                ))?;
+                report.problem(
+                    err,
+                    format!(
+                        "{}: not refreshing, it does not match its sidecar",
+                        entry.qualified()
+                    ),
+                )?;
                 continue;
             }
             if live.state.active_name() == Some(entry.name.as_str()) {
@@ -440,13 +448,12 @@ pub fn refresh(
             match ops::refresh_entry(store, p, &mut entry).and_then(|()| store.save(&entry)) {
                 Ok(()) => {
                     writeln!(out, "{}: refreshed", entry.qualified())?;
-                    refreshed.push(entry.qualified());
+                    report.refreshed.push(entry.qualified());
                 }
-                Err(e) => problem(format!("{}: {e:#}", entry.qualified()))?,
+                Err(e) => report.problem(err, format!("{}: {e:#}", entry.qualified()))?,
             }
         }
     }
-    report.refreshed.append(&mut refreshed);
     match report.problems.len() {
         0 => Ok(()),
         n => Err(Failed(n).into()),
@@ -766,6 +773,7 @@ mod tests {
         e.stored("fresh", "u-fresh", 5 * HOUR);
         e.stored("stale", "u-stale", 10 * 60_000);
         let mut out = Vec::new();
+        let mut report = Report::default();
         refresh(
             &e.store,
             &live(&e, active("active")),
@@ -776,12 +784,13 @@ mod tests {
             },
             &mut out,
             &mut Vec::new(),
-            &mut Report::default(),
+            &mut report,
         )
         .unwrap();
 
         token.assert();
         assert_eq!(text(out), "claude/stale: refreshed\n");
+        assert_eq!(report.refreshed, ["claude/stale"]);
         assert_eq!(e.stored_refresh_token("stale").as_deref(), Some("r-new"));
         let stale = e.store.get("claude", "stale").unwrap().unwrap();
         assert!(ops::expires_in_ms(&e.claude, &stale).unwrap() > 7 * HOUR);
