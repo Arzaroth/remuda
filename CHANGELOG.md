@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- The `serve` page shows how long each credential's access token and sign-in
+  have left, whether the refresh timer is on and what its last run refreshed
+  or failed on, and, with TokenGauge installed, the usage of the login in use.
+- The scheduled refresh records its last run in `<store>/.last-refresh.json`.
+
+### Changed
+
+- The `serve` page is redesigned: a summary per CLI, then one row per
+  credential with meters and icon actions.
+
 ## [0.1.1] - 2026-09-28
 
 ### Fixed

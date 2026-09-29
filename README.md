@@ -73,8 +73,11 @@ and not while `codex login` is running.
 
 `remuda serve` listens on `127.0.0.1:7429` and opens a page listing each CLI's
 credentials, with use, refresh, label, rename and remove, an import button for
-a live login nobody stored yet, and sign-in for a new account. Usage meters are
-[TokenGauge](https://github.com/Arzaroth/TokenGauge)'s job, not this page's.
+a live login nobody stored yet, and sign-in for a new account. It also shows how
+long each credential's tokens have left, whether the refresh timer is running
+and what its last run did, and, when
+[TokenGauge](https://github.com/Arzaroth/TokenGauge) is installed, the usage of
+the login in use, read from TokenGauge's snapshot.
 
 The URL it prints carries an access token in its fragment. Every request must
 send that token back and name this listener in its `Host` and `Origin`, so

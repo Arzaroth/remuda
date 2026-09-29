@@ -45,7 +45,7 @@ access to anything, and it ends when they stop.
 
 | Route | Does |
 | --- | --- |
-| `GET /api/state` | Same JSON as `ls --json`, plus `providers` |
+| `GET /api/state` | Same JSON as `ls --json`, plus `providers`, `health` and `usage` |
 | `POST /api/use` `{name, discard?}` | Switch |
 | `POST /api/import` `{provider?, name, force?}` | Store the live login |
 | `POST /api/label` `{name, text?}` / `rename` `{name, to}` / `remove` `{name}` | As the commands |
@@ -63,6 +63,17 @@ and `commands::stored_message`, shared with the CLI.
 `/api/state` reports each CLI's live login as `signed_out`, `stored` (with
 `confirmed`), `unstored`, `foreign` (an API key; the page says only
 `remuda use --discard` replaces it) or `unreadable` (with the error).
+
+`health` is `timer` (`enabled` when
+`$XDG_CONFIG_HOME/systemd/user/timers.target.wants/remuda-refresh.timer`
+exists, `disabled` when only the unit does, else `absent`), `lastRefresh`
+(`runs::last`, or null) and `tokengauge` (whether the snapshot exists).
+`usage` is `gauge::read` of TokenGauge's snapshot (`cache_file` from the top
+of `~/.config/tokengauge/config.toml`, else
+`$XDG_STATE_HOME/tokengauge/tokengauge-usage.json`), or null: `updatedAt` and,
+per provider id, `stale`, `error` and `windows` (`title`, `usedPercent`,
+`resetsAt`, `windowMinutes`), placeholders dropped. `App` takes both
+locations as `Places`, so tests point them at a temporary directory.
 
 The page is one self-contained file (`include_str!`), no external requests,
 light and dark. It reloads the state every minute unless an editor is open.

@@ -25,8 +25,16 @@ interactive command found it, and skips a CLI where they differ or there is
 no record; naming a credential of a skipped CLI says so (see
 [distribution.md](../architecture/distribution.md)).
 
+A scheduled run then writes `<store>/.last-refresh.json` (`runs::record`):
+when it ran, a line per credential it refreshed, and a line per CLI it skipped
+or credential that failed. The page's health line reads it. A run that stops
+before refreshing (no store, a CLI that cannot be synced) leaves the previous
+record in place, so an old "last ran" is itself the sign. Interactive runs
+record nothing.
+
 ## Sources
 
 - [src/commands.rs](../../src/commands.rs) `refresh`
 - [src/ops.rs](../../src/ops.rs) `refresh_entry`
+- [src/runs.rs](../../src/runs.rs)
 - [systemd/remuda-refresh.timer](../../systemd/remuda-refresh.timer)

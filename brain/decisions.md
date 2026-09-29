@@ -83,6 +83,11 @@ Usage meters per credential belong to TokenGauge, whose ADR 0003 defines the
 store as a contract. remuda owns every write, TokenGauge only reads, so there
 is exactly one process that refreshes a stored token.
 
+The same split holds for usage the other way round: the page shows it by
+reading TokenGauge's snapshot, never by calling a usage endpoint itself, so
+TokenGauge stays the one process fetching usage and remuda needs no usage
+client of its own.
+
 ## The page reads its own requests
 
 An HTTP library that reads a body before handing over the request lets anyone
