@@ -270,6 +270,7 @@ mod tests {
             providers,
             TOKEN.into(),
             port,
+            Box::new(|_| false),
         ));
         std::thread::spawn(move || serve(app, listener, limits));
         port

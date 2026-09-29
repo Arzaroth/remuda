@@ -167,7 +167,19 @@ fn main() -> Result<()> {
         if !no_browser {
             browser::open(&url);
         }
-        let app = serve::App::new(store, serve::Places::from_env(), providers, token, port);
+        let open: serve::Opener = if no_browser {
+            Box::new(|_| false)
+        } else {
+            Box::new(browser::open_private)
+        };
+        let app = serve::App::new(
+            store,
+            serve::Places::from_env(),
+            providers,
+            token,
+            port,
+            open,
+        );
         http::serve(std::sync::Arc::new(app), listener, http::Limits::default());
         return Ok(());
     }
