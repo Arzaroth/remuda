@@ -4,6 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>remuda</title>
+<script>
+try {
+  const t = localStorage.getItem("remuda-theme");
+  if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+} catch {}
+</script>
 <style>
 :root {
   --paper: #f5f4f0; --surface: #fbfbf9; --sunk: #eeede8; --ink: #1f2328; --muted: #6b6f76;
@@ -11,8 +17,14 @@
   --press: #1f2328; --press-ink: #fbfbf9; --focus: #3b6fd8;
   color-scheme: light;
 }
+:root[data-theme="dark"] {
+  --paper: #18191b; --surface: #202124; --sunk: #26272a; --ink: #e8e8e6; --muted: #9a9ca1;
+  --rule: #2e3033; --good: #45b884; --warn: #d9a63a; --bad: #e5675c; --track: #323438;
+  --press: #e8e8e6; --press-ink: #18191b; --focus: #7aa2f7;
+  color-scheme: dark;
+}
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --paper: #18191b; --surface: #202124; --sunk: #26272a; --ink: #e8e8e6; --muted: #9a9ca1;
     --rule: #2e3033; --good: #45b884; --warn: #d9a63a; --bad: #e5675c; --track: #323438;
     --press: #e8e8e6; --press-ink: #18191b; --focus: #7aa2f7;
@@ -33,14 +45,28 @@ button, select, input { font: inherit; color: inherit; }
 h1 { font-size: 22px; font-weight: 750; letter-spacing: -0.02em; margin: 0; }
 .brand span { color: var(--muted); }
 
-.health { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 14px 0 26px; color: var(--muted); font-size: 13px; }
-.health > div { display: flex; align-items: baseline; gap: 7px; }
+.health { margin: 14px 0 26px; color: var(--muted); font-size: 13px; }
+.health-line { display: flex; flex-wrap: wrap; gap: 6px 22px; }
+.health-line > div { display: flex; align-items: baseline; gap: 7px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; transform: translateY(-1px); }
 .dot.good { background: var(--good); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
-.health details { display: inline; }
-.health summary { cursor: pointer; color: var(--ink); }
-.health ul { margin: 6px 0 0; padding-left: 18px; }
 .health a { color: var(--focus); }
+.linkish { border: 0; background: none; padding: 0; color: var(--ink); cursor: pointer; text-decoration: underline;
+  text-decoration-color: var(--rule); text-underline-offset: 3px; }
+.linkish:hover { text-decoration-color: currentColor; }
+.problems { margin: 10px 0 0; padding: 10px 14px 10px 30px; border-radius: 10px; background: var(--sunk); color: var(--ink); }
+.problems li + li { margin-top: 4px; }
+
+.theme { display: inline-flex; padding: 2px; gap: 2px; border: 1px solid var(--rule); border-radius: 9px; background: var(--surface); }
+.theme button { border: 0; background: none; height: 26px; padding: 0 10px; border-radius: 7px; cursor: pointer; color: var(--muted); }
+.theme button[aria-pressed="true"] { background: var(--sunk); color: var(--ink); font-weight: 600; }
+.top-actions { display: flex; gap: 10px; align-items: center; }
+
+.picks { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 12px; }
+.picks button { border: 1px solid var(--rule); background: none; border-radius: 13px; height: 24px; padding: 0 10px;
+  font-size: 12px; color: var(--muted); cursor: pointer; }
+.picks button:hover { color: var(--ink); }
+.picks button[aria-pressed="true"] { background: var(--press); border-color: var(--press); color: var(--press-ink); }
 
 .strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); background: var(--surface);
   border: 1px solid var(--rule); border-radius: 14px; overflow: hidden; }
@@ -139,7 +165,12 @@ input, select { background: var(--surface); border: 1px solid var(--rule); borde
 <main>
   <div class="top">
     <div class="brand"><h1>remuda</h1><span>Logins on this machine</span></div>
-    <button class="btn" id="refresh-all" title="Refresh the inactive logins that expire within the hour">Refresh tokens</button>
+    <div class="top-actions">
+      <div class="theme" id="theme" role="group" aria-label="Theme">
+        <button data-theme="auto">Auto</button><button data-theme="light">Light</button><button data-theme="dark">Dark</button>
+      </div>
+      <button class="btn" id="refresh-all" title="Refresh the inactive logins that expire within the hour">Refresh tokens</button>
+    </div>
   </div>
   <div class="health" id="health"></div>
   <div id="strip"></div>
@@ -309,24 +340,30 @@ function tile(p, creds, live, usage) {
   const who = active ? `<span class="spec">${esc(active.name)}</span> in use`
     : live?.state === "unstored" ? "A login remuda has not stored is in use"
     : live?.state === "signed_out" ? "Signed out" : "No stored login in use";
-  const tight = usage && !usage.error && usage.windows.length
-    ? usage.windows.reduce((a, b) => (b.usedPercent > a.usedPercent ? b : a)) : null;
-  if (!tight) return `<div class="tile">${head}<div class="big">&ndash;<small>no usage figures</small></div>
+  const windows = usage && !usage.error ? usage.windows : [];
+  if (!windows.length) return `<div class="tile">${head}<div class="big">&ndash;<small>no usage figures</small></div>
     <div class="under">${who}</div></div>`;
-  const resets = tight.resetsAt ? `, resets ${esc(until(Date.parse(tight.resetsAt)))}` : "";
+  const shown = windows.find((w) => w.title === picks[p.id])
+    || windows.reduce((a, b) => (b.usedPercent > a.usedPercent ? b : a));
+  const resets = shown.resetsAt ? `, resets ${esc(until(Date.parse(shown.resetsAt)))}` : "";
+  const chips = windows.length < 2 ? "" : `<div class="picks" role="group" aria-label="Limit shown">${
+    windows.map((w) => `<button data-provider="${esc(p.id)}" data-pick="${esc(w.title)}" aria-pressed="${w === shown}"
+      title="${w.usedPercent}% used">${esc(w.title)}</button>`).join("")}</div>`;
   return `<div class="tile">${head}
-    <div class="big">${tight.usedPercent}%<small>used, ${esc(tight.title)} limit</small></div>
-    ${meter(tight.usedPercent / 100, usedTone(tight.usedPercent))}
-    <div class="under">${who}${resets}</div></div>`;
+    <div class="big">${shown.usedPercent}%<small>used, ${esc(shown.title)} limit</small></div>
+    ${meter(shown.usedPercent / 100, usedTone(shown.usedPercent))}
+    <div class="under">${who}${resets}</div>${chips}</div>`;
 }
 
+let problemsOpen = false;
 function health(state) {
   const h = state.health || {};
   const items = [];
   const run = h.lastRefresh;
-  const problems = run?.problems?.length
-    ? ` <details><summary>${run.problems.length} problem${run.problems.length === 1 ? "" : "s"}</summary><ul>${
-        run.problems.map((l) => `<li>${esc(l)}</li>`).join("")}</ul></details>` : "";
+  const count = run?.problems?.length || 0;
+  const problems = count
+    ? `, <button class="linkish" id="problems-toggle" aria-expanded="${problemsOpen}" aria-controls="problems">${
+        count} problem${count === 1 ? "" : "s"}</button>` : "";
   if (h.timer === "enabled") {
     const late = run && Date.now() - run.at > 75 * MIN;
     const tone = !run || late ? "warn" : run.problems.length ? "bad" : "good";
@@ -345,10 +382,20 @@ function health(state) {
     items.push('<div><span class="dot"></span><span>Install <a href="https://github.com/Arzaroth/TokenGauge" target="_blank" rel="noopener noreferrer">TokenGauge</a> to see usage here</span></div>');
   }
   items.push(`<div><span>Store <code>${esc(state.store)}</code></span></div>`);
-  return items.join("");
+  const list = count ? `<ul class="problems" id="problems"${problemsOpen ? "" : " hidden"}>${
+    run.problems.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>` : "";
+  return `<div class="health-line">${items.join("")}</div>${list}`;
 }
 
-let loaded = false;
+function remembered(key) {
+  try { return JSON.parse(localStorage.getItem(key)) ?? null; } catch { return null; }
+}
+function remember(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+}
+const picks = remembered("remuda-tiles") || {};
+
+let loaded = false, groups = [];
 async function load() {
   let state;
   try {
@@ -363,13 +410,13 @@ async function load() {
   const gaugeFound = !!state.health?.tokengauge;
   document.body.classList.toggle("fresh", loaded);
   $("health").innerHTML = health(state);
-  const groups = state.providers.map((p) => ({
+  groups = state.providers.map((p) => ({
     p,
     creds: state.credentials.filter((c) => c.provider === p.id),
     live: state.live.find((l) => l.provider === p.id),
     usage: state.usage?.providers?.[p.id] || null,
   }));
-  $("strip").innerHTML = `<div class="strip">${groups.map((g) => tile(g.p, g.creds, g.live, g.usage)).join("")}</div>`;
+  drawStrip();
   $("providers").innerHTML = groups.map(({ p, creds, live, usage }) => `<section class="group">
       <div class="group-head"><h2>${esc(p.name)}</h2><span class="count">${creds.length}</span></div>
       ${creds.length ? creds.map((c) => row(c, usage, gaugeFound)).join("")
@@ -421,6 +468,38 @@ $("providers").addEventListener("click", async (ev) => {
       cancel.onclick = () => box.remove();
     }
   }
+});
+
+function drawStrip() {
+  $("strip").innerHTML = `<div class="strip">${groups.map((g) => tile(g.p, g.creds, g.live, g.usage)).join("")}</div>`;
+}
+
+$("strip").addEventListener("click", (ev) => {
+  const chip = ev.target.closest("[data-pick]");
+  if (!chip) return;
+  picks[chip.dataset.provider] = chip.dataset.pick;
+  remember("remuda-tiles", picks);
+  drawStrip();
+  document.querySelector(`[data-provider="${CSS.escape(chip.dataset.provider)}"][aria-pressed="true"]`)?.focus();
+});
+
+$("health").addEventListener("click", (ev) => {
+  if (!ev.target.closest("#problems-toggle")) return;
+  problemsOpen = !problemsOpen;
+  $("problems").hidden = !problemsOpen;
+  $("problems-toggle").setAttribute("aria-expanded", problemsOpen);
+});
+
+function setTheme(theme) {
+  if (theme === "auto") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = theme;
+  try { localStorage.setItem("remuda-theme", theme); } catch {}
+  for (const b of $("theme").children) b.setAttribute("aria-pressed", b.dataset.theme === theme);
+}
+setTheme(document.documentElement.dataset.theme || "auto");
+$("theme").addEventListener("click", (ev) => {
+  const b = ev.target.closest("[data-theme]");
+  if (b) setTheme(b.dataset.theme);
 });
 
 $("refresh-all").onclick = () => act("/api/refresh", {});
