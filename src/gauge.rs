@@ -24,8 +24,21 @@ pub fn read(snapshot: &Path) -> Option<Value> {
     let payloads = data.get("payloads").unwrap_or(&data).as_array()?;
     let mut providers = Map::new();
     for p in payloads {
-        if let Some(id) = p.get("provider").and_then(Value::as_str) {
-            providers.insert(id.to_owned(), provider(p));
+        let Some(id) = p.get("provider").and_then(Value::as_str) else {
+            continue;
+        };
+        let entry = providers
+            .entry(id.to_owned())
+            .or_insert_with(|| provider(&Value::Null));
+        match p.get("account").and_then(Value::as_str) {
+            Some(account) => {
+                entry["accounts"][account] = provider(p);
+            }
+            None => {
+                let accounts = entry["accounts"].take();
+                *entry = provider(p);
+                entry["accounts"] = accounts;
+            }
         }
     }
     let errors = data.get("errors").and_then(Value::as_array);
@@ -40,6 +53,11 @@ pub fn read(snapshot: &Path) -> Option<Value> {
             .entry(id.to_owned())
             .or_insert_with(|| provider(&Value::Null));
         entry["error"] = message.into();
+    }
+    for entry in providers.values_mut() {
+        if entry["accounts"].is_null() {
+            entry["accounts"] = json!({});
+        }
     }
     Some(json!({
         "updatedAt": data.pointer("/meta/updatedAtMs").and_then(Value::as_i64),
