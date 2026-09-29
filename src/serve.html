@@ -12,25 +12,17 @@ try {
 </script>
 <style>
 :root {
-  --paper: #f5f4f0; --surface: #fbfbf9; --sunk: #eeede8; --ink: #1f2328; --muted: #6b6f76;
-  --rule: #e4e2dc; --good: #2f8a5f; --warn: #b7821a; --bad: #bf3a2c; --track: #e6e4de;
-  --press: #1f2328; --press-ink: #fbfbf9; --focus: #3b6fd8;
-  color-scheme: light;
+  color-scheme: light dark;
+  --paper: light-dark(#f5f4f0, #18191b); --surface: light-dark(#fbfbf9, #202124);
+  --sunk: light-dark(#eeede8, #26272a); --ink: light-dark(#1f2328, #e8e8e6);
+  --muted: light-dark(#6b6f76, #9a9ca1); --rule: light-dark(#e4e2dc, #2e3033);
+  --good: light-dark(#2f8a5f, #45b884); --warn: light-dark(#b7821a, #d9a63a);
+  --bad: light-dark(#bf3a2c, #e5675c); --track: light-dark(#e6e4de, #323438);
+  --press: light-dark(#1f2328, #e8e8e6); --press-ink: light-dark(#fbfbf9, #18191b);
+  --focus: light-dark(#3b6fd8, #7aa2f7);
 }
-:root[data-theme="dark"] {
-  --paper: #18191b; --surface: #202124; --sunk: #26272a; --ink: #e8e8e6; --muted: #9a9ca1;
-  --rule: #2e3033; --good: #45b884; --warn: #d9a63a; --bad: #e5675c; --track: #323438;
-  --press: #e8e8e6; --press-ink: #18191b; --focus: #7aa2f7;
-  color-scheme: dark;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --paper: #18191b; --surface: #202124; --sunk: #26272a; --ink: #e8e8e6; --muted: #9a9ca1;
-    --rule: #2e3033; --good: #45b884; --warn: #d9a63a; --bad: #e5675c; --track: #323438;
-    --press: #e8e8e6; --press-ink: #18191b; --focus: #7aa2f7;
-    color-scheme: dark;
-  }
-}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--paper); color: var(--ink);
   font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
@@ -433,11 +425,13 @@ async function load() {
       : state.usage?.providers?.[p.id] || null,
   }));
   drawStrip();
+  const open = editors.get(document.querySelector("#providers .editing")?.closest(".row"));
   $("providers").innerHTML = groups.map(({ p, creds, live, usage }) => `<section class="group">
       <div class="group-head"><h2>${esc(p.name)}</h2><span class="count">${creds.length}</span></div>
       ${creds.length ? creds.map((c) => row(c, usage, gaugeFound)).join("")
         : `<div class="empty">No stored ${esc(p.name)} logins. Import the one in use or add an account below.</div>`}
       ${liveNote(p, live)}</section>`).join("");
+  if (open) reopen(open);
   loaded = true;
 }
 
@@ -458,14 +452,7 @@ $("providers").addEventListener("click", async (ev) => {
     case "refresh": return act("/api/refresh", { name: spec, force: true });
     case "remove":
       if (btn.dataset.armed) return act("/api/remove", { name: spec });
-      btn.dataset.armed = "1";
-      btn.classList.add("armed");
-      btn.textContent = "Remove for good?";
-      return setTimeout(() => {
-        delete btn.dataset.armed;
-        btn.classList.remove("armed");
-        btn.innerHTML = icon("remove");
-      }, 4000);
+      return arm(btn, "Remove for good?");
     case "label":
     case "rename": {
       const open = editors.get(r);
@@ -500,6 +487,23 @@ function edit(r, btn, spec) {
   };
 }
 
+function reopen({ spec, btn, input }) {
+  const r = document.querySelector(`#providers [data-spec="${CSS.escape(spec)}"]`);
+  const again = r?.querySelector(`[data-act="${btn.dataset.act}"]`);
+  if (!again || again.disabled) return;
+  edit(r, again, spec);
+  const e = editors.get(r);
+  e.input.value = input.value;
+  e.input.setSelectionRange(input.value.length, input.value.length);
+}
+
+function arm(btn, text) {
+  btn.dataset.armed = "1";
+  btn.classList.add("armed");
+  btn.textContent = text;
+  btn.disarm = setTimeout(() => disarm(btn), 4000);
+}
+
 function disarm(btn) {
   clearTimeout(btn.disarm);
   delete btn.dataset.armed;
@@ -522,10 +526,7 @@ function leave(r) {
     closeEditor(r);
     return true;
   }
-  e.btn.dataset.armed = "1";
-  e.btn.classList.add("armed");
-  e.btn.textContent = "Discard?";
-  e.btn.disarm = setTimeout(() => disarm(e.btn), 4000);
+  arm(e.btn, "Discard?");
   e.input.focus();
   return false;
 }
