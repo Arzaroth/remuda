@@ -6,24 +6,73 @@ use std::process::{Command, Stdio};
 
 use crate::{fsx, paths};
 
-/// Default browsers that can be told to open a private window: the
-/// desktop-entry name, the executables it ships as, and the flag.
-const PRIVATE: &[(&str, &[&str], &str)] = &[
-    ("brave", &["brave-browser", "brave"], "--incognito"),
+/// Default browsers that can be told to open a private window: their
+/// desktop entries, the executables those run, and the flag.
+const PRIVATE: &[(&[&str], &[&str], &str)] = &[
     (
-        "google-chrome",
+        &["brave-browser", "brave"],
+        &["brave-browser", "brave"],
+        "--incognito",
+    ),
+    (
+        &["brave-browser-beta"],
+        &["brave-browser-beta"],
+        "--incognito",
+    ),
+    (
+        &["brave-browser-nightly"],
+        &["brave-browser-nightly"],
+        "--incognito",
+    ),
+    (
+        &["google-chrome"],
         &["google-chrome-stable", "google-chrome"],
         "--incognito",
     ),
-    ("chromium", &["chromium", "chromium-browser"], "--incognito"),
-    ("vivaldi", &["vivaldi-stable", "vivaldi"], "--incognito"),
     (
-        "microsoft-edge",
+        &["google-chrome-beta"],
+        &["google-chrome-beta"],
+        "--incognito",
+    ),
+    (
+        &["google-chrome-unstable"],
+        &["google-chrome-unstable"],
+        "--incognito",
+    ),
+    (
+        &["chromium", "chromium-browser"],
+        &["chromium", "chromium-browser"],
+        "--incognito",
+    ),
+    (
+        &["vivaldi-stable"],
+        &["vivaldi-stable", "vivaldi"],
+        "--incognito",
+    ),
+    (&["vivaldi-snapshot"], &["vivaldi-snapshot"], "--incognito"),
+    (
+        &["microsoft-edge"],
         &["microsoft-edge-stable", "microsoft-edge"],
         "--inprivate",
     ),
-    ("firefox", &["firefox", "firefox-esr"], "--private-window"),
-    ("librewolf", &["librewolf"], "--private-window"),
+    (
+        &["microsoft-edge-beta"],
+        &["microsoft-edge-beta"],
+        "--inprivate",
+    ),
+    (
+        &["microsoft-edge-dev"],
+        &["microsoft-edge-dev"],
+        "--inprivate",
+    ),
+    (&["firefox"], &["firefox"], "--private-window"),
+    (&["firefox-esr"], &["firefox-esr"], "--private-window"),
+    (
+        &["firefox-developer-edition"],
+        &["firefox-developer-edition"],
+        "--private-window",
+    ),
+    (&["librewolf"], &["librewolf"], "--private-window"),
 ];
 
 /// A page that sends the browser on to `url`. The browser is handed this
@@ -95,10 +144,7 @@ fn default_browser() -> Option<String> {
 
 fn launcher(desktop: &str, path: Option<&OsStr>) -> Option<(PathBuf, &'static str)> {
     let id = desktop.strip_suffix(".desktop").unwrap_or(desktop);
-    let (_, programs, flag) = PRIVATE.iter().find(|(name, ..)| {
-        id.strip_prefix(name)
-            .is_some_and(|rest| rest.is_empty() || rest.starts_with('-'))
-    })?;
+    let (_, programs, flag) = PRIVATE.iter().find(|(ids, ..)| ids.contains(&id))?;
     let dirs: Vec<PathBuf> = env::split_paths(path?).collect();
     programs
         .iter()
@@ -133,6 +179,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         bin(tmp.path(), "brave-browser", 0o755);
         bin(tmp.path(), "firefox", 0o755);
+        bin(tmp.path(), "google-chrome-stable", 0o755);
         let path = env::join_paths(["/nonexistent".into(), tmp.path().to_owned()]).unwrap();
 
         assert_eq!(
@@ -143,6 +190,8 @@ mod tests {
             launcher("firefox.desktop", Some(&path)),
             Some((tmp.path().join("firefox"), "--private-window"))
         );
+        assert_eq!(launcher("google-chrome-beta.desktop", Some(&path)), None);
+        assert_eq!(launcher("firefox-esr.desktop", Some(&path)), None);
     }
 
     #[test]
@@ -156,6 +205,7 @@ mod tests {
         assert_eq!(launcher("google-chrome.desktop", Some(path)), None);
         assert_eq!(launcher("bravery.desktop", Some(path)), None);
         assert_eq!(launcher("com.brave.Browser.desktop", Some(path)), None);
+        assert_eq!(launcher("firefox_firefox.desktop", Some(path)), None);
         assert_eq!(launcher("brave-browser.desktop", None), None);
     }
 }
