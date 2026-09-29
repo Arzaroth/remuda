@@ -4,10 +4,11 @@
 
 ### Fixed
 
-- The `serve` page shows each login's own usage again with TokenGauge 0.36 and
+- The `serve` page shows each login's own usage with TokenGauge 0.37 and
   later, which reports every stored login. It used to show the last login
   TokenGauge listed as the one in use, so another account's figures could
-  appear under it.
+  appear under it. A login TokenGauge skipped, because its access token
+  expired or it is unverified, says so.
 
 ## [0.4.1] - 2026-09-29
 
