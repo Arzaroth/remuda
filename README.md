@@ -66,9 +66,9 @@ A credential is addressed by its name when only one CLI has that name, and as
 | `remuda update [--check]` | Replace the binary with the latest release |
 
 `login` opens the provider's sign-in page in a private window of your default
-browser (Brave, Chrome, Chromium, Vivaldi, Edge, Firefox or LibreWolf), so the
-account you are signed into there stays put; with another browser, open it in a
-private window yourself. Sign in with the account to add. Claude
+browser (Brave, Chrome, Chromium, Vivaldi, Edge, Firefox or LibreWolf, not
+their Snap or Flatpak packages), so the account you are signed into there stays
+put; with another browser, open it in a private window yourself. Sign in with the account to add. Claude
 then shows a `code#state` string to paste back; Codex calls back to
 `localhost:1455` on its own, so run it on the machine whose browser you use,
 and not while `codex login` is running.

@@ -8,11 +8,14 @@ through a private redirect file, never as a command-line argument.
 It opens in a private window of the default browser (`browser::open_private`),
 because signing in as another account in the browser's normal profile replaces
 the claude.ai or ChatGPT session already there. `xdg-settings get
-default-web-browser` names the browser; Brave, Chrome, Chromium and Vivaldi get
-`--incognito`, Edge `--inprivate`, Firefox and LibreWolf `--private-window`.
-With no display, another browser (a Flatpak one included) or no such executable
-on `PATH`, it falls back to `xdg-open` and says a private window avoids the
-account you are signed into.
+default-web-browser` names the browser, and remuda waits two seconds for it at
+most. Brave, Chrome, Chromium and Vivaldi get `--incognito`, Edge
+`--inprivate`, Firefox and LibreWolf `--private-window`. The desktop entry must
+match exactly, so each release channel (beta, dev, nightly, ESR, developer
+edition) runs its own executable and never the stable one. With no display, a
+browser not in the table (Snap and Flatpak ones included), no such executable
+on `PATH` or no answer in time, it falls back to `xdg-open` and says a private
+window avoids the account you are signed into.
 
 - **Claude Code**: after sign-in, the callback page shows `code#state`; paste it.
   A pasted state that does not match refuses the login. The code is exchanged,

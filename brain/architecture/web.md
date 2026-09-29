@@ -4,7 +4,8 @@
 prints `http://127.0.0.1:<port>/#<token>`, and opens it. The token is 32 random
 bytes, base64url. The browser is not given the URL as an argument (every local
 user can read a command line): remuda writes a redirect page to
-`$XDG_RUNTIME_DIR/remuda/open.html` (0600, in a 0700 directory) and opens
+`$XDG_RUNTIME_DIR/remuda/open-<random>.html` (0600, in a 0700 directory; one
+per open, removed ten minutes on) and opens
 that. The same goes for the sign-in URLs `login` and the page open, which go
 to a private window when the default browser allows it.
 
