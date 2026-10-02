@@ -32,6 +32,7 @@ shared.
 | How do I add a third CLI? | [architecture/providers.md](architecture/providers.md) |
 | Which OAuth endpoints and client ids, and where did they come from? | [architecture/providers.md](architecture/providers.md) |
 | Is the local page safe to leave running? | [architecture/web.md](architecture/web.md) |
+| How does `remuda open` find the page, and what runs it as a service? | [architecture/web.md](architecture/web.md) |
 | How is a release built, installed and updated? | [architecture/distribution.md](architecture/distribution.md) |
 | How do tests avoid real logins and the network? | [architecture/testing.md](architecture/testing.md) |
 | What does `claude/work` mean vs `work`? | [features/names-and-labels.md](features/names-and-labels.md) |

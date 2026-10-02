@@ -127,7 +127,20 @@ active credential. The installer copies the variables once; the directories
 record catches a change made later. It fails closed: no record, no refresh.
 It lives in its store rather than under `$XDG_STATE_HOME`, a variable the
 timer does not see either, and so that a one-off run against a scratch store
-cannot stop the timer for the real one.
+cannot stop the timer for the real one. `remuda-serve.service` has the same
+blind spot, so a `serve` under systemd is checked the same way and refuses to
+start.
+
+## A running page announces itself, its token apart
+
+A page that runs all the time is reached through `remuda open`, not a URL
+copied from a log: the token is per run, and a journal is persistent and
+readable by more than the page. So `serve` writes the URL to a 0600 file only
+`open` reads, and a separate `serve.json` with no secret for any other
+program that wants to know whether a page is up, such as a launcher button
+that then runs `remuda open`. Nothing cleans them up, because a killed
+process cannot; readers check that the pid still has the recorded start time,
+so a reused pid does not pass, and that the port answers.
 
 ## No secret on a command line
 
@@ -182,4 +195,5 @@ per provider, so a CLI release that moves them is one edit.
 - [src/codex.rs](../src/codex.rs)
 - [src/commands.rs](../src/commands.rs)
 - [src/serve.rs](../src/serve.rs)
+- [src/served.rs](../src/served.rs)
 - [src/project.rs](../src/project.rs)
