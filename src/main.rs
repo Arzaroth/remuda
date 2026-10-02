@@ -14,6 +14,7 @@ mod project;
 mod provider;
 mod runs;
 mod serve;
+mod served;
 mod store;
 
 use std::io::{self, BufRead};
@@ -101,6 +102,12 @@ enum Cmd {
         #[arg(long)]
         no_browser: bool,
     },
+    /// Open the page a running `remuda serve` shows, starting remuda-serve.service when it is installed.
+    Open {
+        /// Print the URL instead of opening it.
+        #[arg(long)]
+        no_browser: bool,
+    },
     /// Print a completion script for a shell.
     Completions { shell: clap_complete::Shell },
     /// Replace this binary with the latest release.
@@ -132,8 +139,41 @@ fn update(check_only: bool) -> Result<()> {
     Ok(())
 }
 
+const SERVE_UNIT: &str = "remuda-serve.service";
+
+fn start_service() -> bool {
+    let installed = paths::systemd_user_units()
+        .iter()
+        .any(|dir| dir.join(SERVE_UNIT).exists());
+    installed
+        && std::process::Command::new("systemctl")
+            .args(["--user", "start", SERVE_UNIT])
+            .stdin(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+}
+
+fn open(no_browser: bool) -> Result<()> {
+    let url = served::find(
+        &paths::runtime_dir(),
+        start_service,
+        std::time::Duration::from_secs(10),
+    )?;
+    if no_browser {
+        println!("{url}");
+    } else {
+        browser::open(&url);
+        let shown = url.split('#').next().unwrap_or_default();
+        println!("opened {shown}");
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    if let Cmd::Open { no_browser } = cli.command {
+        return open(no_browser);
+    }
     if let Cmd::Update { check } = cli.command {
         return update(check);
     }
@@ -161,6 +201,9 @@ fn main() -> Result<()> {
         let (listener, port) = http::bind(port)?;
         let token = pkce::random()?;
         let url = format!("http://127.0.0.1:{port}/#{token}");
+        if let Err(e) = served::announce(&paths::runtime_dir(), port, &url) {
+            eprintln!("warning: `remuda open` will not find this page: {e:#}");
+        }
         println!(
             "remuda is serving {url}\nThe link carries its access token; keep it to yourself. Ctrl-C stops it."
         );
@@ -303,7 +346,11 @@ fn main() -> Result<()> {
             let (p, name) = commands::resolve(&store, &providers, &name)?;
             commands::rename(&store, p, &name, &new_name, out)
         }
-        Cmd::Login { .. } | Cmd::Serve { .. } | Cmd::Completions { .. } | Cmd::Update { .. } => {
+        Cmd::Login { .. }
+        | Cmd::Serve { .. }
+        | Cmd::Open { .. }
+        | Cmd::Completions { .. }
+        | Cmd::Update { .. } => {
             unreachable!()
         }
     }
