@@ -139,7 +139,8 @@ readable by more than the page. So `serve` writes the URL to a 0600 file only
 `open` reads, and a separate `serve.json` with no secret for any other
 program that wants to know whether a page is up, such as a launcher button
 that then runs `remuda open`. Nothing cleans them up, because a killed
-process cannot; readers check that the pid lives and the port answers.
+process cannot; readers check that the pid still has the recorded start time,
+so a reused pid does not pass, and that the port answers.
 
 ## No secret on a command line
 
