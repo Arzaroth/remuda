@@ -8,6 +8,8 @@ and fish's to `~/.config/fish/completions/remuda.fish`.
 
 `remuda update` replaces the binary with the latest GitHub release through
 selvedge; `--check` only reports whether one is newer. Neither needs the store.
+After replacing the binary, `update` restarts `remuda-serve.service` if it
+runs.
 See [architecture/distribution.md](../architecture/distribution.md).
 
 ## Sources

@@ -13,7 +13,7 @@ the bump.
 The tag starts `.github/workflows/release.yml`: native x86_64 and aarch64 builds
 (tests first, then a check that `--version` matches the tag), then one archive
 per architecture, `remuda-vX.Y.Z-linux-<arch>.tar.gz`, holding the binary at
-its root, `systemd/` and the licences. Release notes are the version's
+its root, every unit in `systemd/` and the licences. Release notes are the version's
 `CHANGELOG.md` section.
 
 `project.rs` tests hold the workflow, the installer and selvedge to the same
@@ -26,7 +26,11 @@ asset name, so a rename that would break `update` fails `cargo test`.
 `uname -m`, runs the binary once to prove it works on this libc, installs it
 into `~/.local/bin`, enables `remuda-refresh.timer` (every 30 minutes, runs
 `remuda refresh --scheduled`), and writes completions for bash, zsh and fish when present.
-Flags: `--version` (with or without its `v`), `--no-timer`, `--no-completions`.
+Flags: `--version` (with or without its `v`), `--no-timer`, `--serve`,
+`--no-completions`. `--serve` installs `remuda-serve.service`, enables it and
+restarts it, so a reinstall moves it onto the new binary (see
+[web.md](web.md)). A `project.rs` test fails when a file in `systemd/` is not
+shipped or not installed.
 
 A systemd user service does not see what a shell exports, so the installer
 writes whichever of `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `REMUDA_STORE` are set
@@ -59,7 +63,9 @@ and a store that does not exist stops it before anything is created.
 
 `remuda update [--check]` is selvedge `check_cached` / `apply` over the
 `REMUDA` project (no frontends, no aliases). `REMUDA_REPO` overrides the repo
-for a fork.
+for a fork. An update that replaced the binary runs
+`systemctl --user try-restart remuda-serve.service`, which restarts the
+service only when it runs.
 
 ## CI
 
@@ -73,4 +79,5 @@ for a fork.
 - [.github/workflows/release.yml](../../.github/workflows/release.yml)
 - [.github/workflows/ci.yml](../../.github/workflows/ci.yml)
 - [systemd/remuda-refresh.timer](../../systemd/remuda-refresh.timer)
+- [systemd/remuda-serve.service](../../systemd/remuda-serve.service)
 - [src/project.rs](../../src/project.rs)
