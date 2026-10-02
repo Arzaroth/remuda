@@ -131,6 +131,13 @@ if $want_timer || $want_serve; then
   fi
 fi
 
+# A service installed by an earlier --serve would keep running the old binary.
+if ! $want_serve && command -v systemctl >/dev/null 2>&1 &&
+  systemctl --user is-active --quiet remuda-serve.service 2>/dev/null; then
+  systemctl --user restart remuda-serve.service
+  echo "Restarted remuda-serve.service"
+fi
+
 if $want_completions; then
   data="${XDG_DATA_HOME:-$HOME/.local/share}"
   if command -v bash >/dev/null 2>&1; then
