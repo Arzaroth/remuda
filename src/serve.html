@@ -696,13 +696,39 @@ $("add").addEventListener("submit", async (ev) => {
   }
 });
 
-load();
-setInterval(() => {
+function reload() {
   const editing = document.querySelector("#providers .edit")
     || document.activeElement?.closest?.("#providers")
     || document.querySelector("#providers [data-armed]");
   if (!editing) load();
-}, 60000);
+}
+
+async function follow() {
+  let wait = 1000, again = false;
+  for (;;) {
+    try {
+      const r = await fetch("/api/events", { headers: { "X-Remuda-Token": token } });
+      if (r.status === 401) return;
+      if (r.ok) {
+        wait = 1000;
+        if (again) reload();
+        again = true;
+        const events = r.body.pipeThrough(new TextDecoderStream()).getReader();
+        for (let buf = "", chunk; !(chunk = await events.read()).done; ) {
+          const parts = (buf + chunk.value).split("\n\n");
+          buf = parts.pop();
+          if (parts.some((e) => e.split("\n").includes("data: changed"))) reload();
+        }
+      }
+    } catch {}
+    await new Promise((done) => setTimeout(done, wait));
+    wait = Math.min(wait * 2, 30000);
+  }
+}
+
+load();
+follow();
+setInterval(reload, 60000);
 </script>
 </body>
 </html>
