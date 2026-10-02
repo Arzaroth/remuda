@@ -72,6 +72,18 @@ all, and on the accepting thread (the 503) only what has already arrived, so
 no client can hold a slot past its deadline or stall the accept loop.
 Responses carry `Cache-Control: no-store`, `nosniff` and `no-referrer`.
 
+`GET /api/events` is the one answer that stays open. After the guards (so
+only a holder of the token gets one), it takes one of 8 stream slots, inside
+the 32 connections, or gets a 503. It sends the head and `: connected`, then
+every 2 s compares `App::fingerprint`, the path, modification time and size
+of everything in the store one directory level down and of TokenGauge's
+snapshot, and sends `data: changed` when it moved. After 15 s with nothing
+to send it writes a `: ` comment, so a client that vanished is found by the
+failed write. The client has nothing to send after its head, so anything it
+sends, or its closing the connection, ends the stream and frees the slot.
+Reading the state writes nothing in the store unless the live login moved,
+so a page that reloads on `changed` does not wake itself.
+
 What the limits do not stop: another local user holding 32 idle connections,
 re-opened every 5 s, keeps the page answering 503. That is a nuisance with no
 access to anything, and it ends when they stop.
@@ -81,6 +93,7 @@ access to anything, and it ends when they stop.
 | Route | Does |
 | --- | --- |
 | `GET /api/state` | Same JSON as `ls --json`, plus `providers`, `health` and `usage` |
+| `GET /api/events` | A server-sent event stream: `data: changed` when the page should reload the state |
 | `POST /api/use` `{name, discard?}` | Switch |
 | `POST /api/import` `{provider?, name, force?}` | Store the live login |
 | `POST /api/label` `{name, text?}` / `rename` `{name, to}` / `remove` `{name}` | As the commands |
@@ -131,7 +144,14 @@ takes both locations as `Places`, so tests point them at a temporary
 directory.
 
 The page is one self-contained file (`include_str!`), no external requests,
-light and dark. It reloads the state every minute unless an editor is open.
+light and dark. It reads `/api/events` through `fetch` (an `EventSource`
+cannot send the token header) and reloads the state on each `changed`, on
+reconnecting, and every minute, which keeps the relative times current and
+catches what the stream does not watch: the CLIs' own files, so a sign-in
+made in the CLI shows within a minute. A dropped stream is retried after 1 s,
+doubling to 30 s; a 401 (the server restarted with another token) stops it.
+None of these reloads happens while an editor is open, a confirmation is
+armed or the focus is in the list.
 
 ## Sources
 

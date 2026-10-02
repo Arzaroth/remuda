@@ -6,7 +6,6 @@ done.
 
 ## Decisions before roadmap work
 
-- [ ] Live page: WebSocket or server-sent events, given what selvedge supports.
 - [ ] Auto-switch: what to do when every stored login is maxed.
 - [ ] Auto-switch: which login to pick (most headroom, soonest reset, a fixed
       order).

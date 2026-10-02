@@ -165,6 +165,20 @@ rebinding can make one look same-origin. So `serve` requires the random token
 from the URL it prints, a `Host` naming its own listener, and no foreign
 `Origin`. See [architecture/web.md](architecture/web.md).
 
+## The page follows changes over server-sent events, read by `fetch`
+
+The page learns of a change through `GET /api/events`, a server-sent event
+stream, rather than a WebSocket: data only flows one way, and the
+hand-written listener can hold a plain response open, where a WebSocket would
+need its own handshake (SHA-1, which remuda does not otherwise carry) and
+framing. The page reads it with `fetch`, not `EventSource`: neither
+`EventSource` nor a browser WebSocket can send the `X-Remuda-Token` header,
+and a token in the query string is one the fragment was chosen to avoid.
+The server polls file metadata every 2 s rather than using inotify, so it
+needs no new dependency and sees a store on any filesystem; the event says
+only that something changed, and the page reloads `/api/state` as before.
+See [architecture/web.md](architecture/web.md).
+
 ## selvedge for updates, a curl installer for installs
 
 Users do not have cargo, so releases ship prebuilt archives, `install.sh`

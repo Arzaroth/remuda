@@ -4,14 +4,6 @@ Features remuda may grow next. None is started; order is not priority.
 Small fixes and chores go in [TODO.md](TODO.md). When a feature ships, its entry
 leaves this file and a doc for it lands in `brain/features/`.
 
-## Live `serve` page
-
-The page shows usage as of its last load. Push changes instead: the server
-watches TokenGauge's snapshot and `.last-refresh.json` and sends updates over a
-WebSocket (or server-sent events, since data only flows one way), and the page
-redraws without a reload. The server is built on selvedge, so this depends on
-what selvedge can hold open.
-
 ## Auto-switch when a limit is maxed
 
 When the active login's usage window is used up, switch the CLI to a stored

@@ -13,6 +13,12 @@
   and it never writes the page's token to the journal. `remuda update` and
   the installer restart it on the new binary.
 
+### Changed
+
+- The `serve` page updates itself within a couple of seconds when the store
+  or TokenGauge's usage changes, for example after a switch from the CLI, a
+  refresh-timer run or a new TokenGauge fetch, instead of only once a minute.
+
 ## [0.4.2] - 2026-09-29
 
 ### Fixed
