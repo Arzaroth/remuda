@@ -464,3 +464,101 @@ fn the_scheduled_refresh_stops_where_the_shell_looked_elsewhere() {
         "{record}"
     );
 }
+
+struct Serving(std::process::Child);
+
+impl Drop for Serving {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+fn first_line(child: &mut std::process::Child) -> String {
+    use std::io::BufRead;
+    let mut line = String::new();
+    std::io::BufReader::new(child.stdout.as_mut().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    line
+}
+
+fn get_state(url: &str) -> String {
+    use std::io::{Read, Write};
+    let (base, token) = url.trim().split_once("/#").unwrap();
+    let host = base.strip_prefix("http://").unwrap();
+    let mut s = std::net::TcpStream::connect(host).unwrap();
+    write!(
+        s,
+        "GET /api/state HTTP/1.1\r\nHost: {host}\r\nX-Remuda-Token: {token}\r\n\r\n"
+    )
+    .unwrap();
+    let mut answer = String::new();
+    s.read_to_string(&mut answer).unwrap();
+    answer
+}
+
+#[test]
+fn open_finds_the_page_a_running_serve_shows() {
+    let home = Home::new();
+    home.sign_in("a-work", "r-work", "u-work");
+    home.ok(&["import", "work"]);
+    assert!(
+        home.fails(&["open", "--no-browser"])
+            .contains("not serving")
+    );
+
+    let mut serve = home.command(&["serve", "--no-browser", "--port", "0"]);
+    serve.stdout(std::process::Stdio::piped());
+    let mut serving = Serving(serve.spawn().unwrap());
+    let printed = first_line(&mut serving.0);
+    assert!(printed.contains("/#"), "{printed}");
+
+    let url = home.ok(&["open", "--no-browser"]);
+    assert!(printed.contains(url.trim()), "{printed} / {url}");
+    assert!(get_state(&url).starts_with("HTTP/1.1 200"));
+    let status = read(&home.path(".local/share/remuda/credentials/serve.json"));
+    assert!(
+        !status
+            .to_string()
+            .contains(url.trim().split_once('#').unwrap().1)
+    );
+    assert_eq!(status["pid"], json!(serving.0.id()));
+
+    drop(serving);
+    assert!(
+        home.fails(&["open", "--no-browser"])
+            .contains("not serving")
+    );
+}
+
+#[test]
+fn a_serve_run_by_systemd_checks_the_directories_and_prints_no_token() {
+    let home = Home::new();
+    home.sign_in("a-work", "r-work", "u-work");
+    home.ok(&["import", "work"]);
+    let unit = |envs: &[(&str, &Path)]| {
+        let mut cmd = home.command(&["serve", "--port", "0"]);
+        cmd.env("INVOCATION_ID", "abc")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        for (k, v) in envs {
+            cmd.env(k, v);
+        }
+        cmd
+    };
+
+    let out = unit(&[("CLAUDE_CONFIG_DIR", &home.path("elsewhere"))])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(stderr.contains("claude: not serving"), "{stderr}");
+
+    let mut serving = Serving(unit(&[]).spawn().unwrap());
+    let printed = first_line(&mut serving.0);
+    assert!(printed.contains("remuda open"), "{printed}");
+    assert!(!printed.contains('#'), "{printed}");
+    let url = home.ok(&["open", "--no-browser"]);
+    assert!(get_state(&url).starts_with("HTTP/1.1 200"));
+}
