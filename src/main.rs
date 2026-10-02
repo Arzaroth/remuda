@@ -197,6 +197,15 @@ fn main() -> Result<()> {
         dirs::record(&store, &seen);
     }
     if let Cmd::Serve { port, no_browser } = cli.command {
+        if scheduled {
+            let plan = dirs::plan(dirs::recorded(&store).as_ref(), &seen, "serving");
+            for line in &plan.skipped {
+                eprintln!("{line}");
+            }
+            if !plan.skipped.is_empty() {
+                bail!("not serving: the service would act on other logins than the shell's");
+            }
+        }
         let providers: Vec<Box<dyn Provider>> = vec![Box::new(claude), Box::new(codex)];
         let (listener, port) = http::bind(port)?;
         let token = pkce::random()?;
@@ -204,10 +213,14 @@ fn main() -> Result<()> {
         if let Err(e) = served::announce(&paths::runtime_dir(), port, &url) {
             eprintln!("warning: `remuda open` will not find this page: {e:#}");
         }
-        println!(
-            "remuda is serving {url}\nThe link carries its access token; keep it to yourself. Ctrl-C stops it."
-        );
-        if !no_browser {
+        if scheduled {
+            println!("remuda is serving http://127.0.0.1:{port}/; `remuda open` opens it");
+        } else {
+            println!(
+                "remuda is serving {url}\nThe link carries its access token; keep it to yourself. Ctrl-C stops it."
+            );
+        }
+        if !no_browser && !scheduled {
             browser::open(&url);
         }
         let open: serve::Opener = if no_browser {
