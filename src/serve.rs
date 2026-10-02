@@ -745,4 +745,30 @@ mod tests {
         assert_eq!(status, 400);
         assert_eq!(r["error"], "the sign-in was cancelled");
     }
+
+    #[test]
+    fn the_fingerprint_moves_with_the_store_and_the_snapshot_not_with_a_read() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let work = e.store.get("claude", "work").unwrap().unwrap();
+        e.sign_in(work.creds, account("u-work"));
+        let app = app(&e, &OFFLINE);
+        call(&app, "GET", "/api/state", Value::Null);
+
+        let before = app.fingerprint();
+        call(&app, "GET", "/api/state", Value::Null);
+        assert_eq!(app.fingerprint(), before);
+
+        call(
+            &app,
+            "POST",
+            "/api/label",
+            json!({"name": "work", "text": "Job"}),
+        );
+        let labelled = app.fingerprint();
+        assert_ne!(labelled, before);
+
+        std::fs::write(&places(&e).snapshot, "{}").unwrap();
+        assert_ne!(app.fingerprint(), labelled);
+    }
 }

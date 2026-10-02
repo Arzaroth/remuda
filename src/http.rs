@@ -540,4 +540,72 @@ mod tests {
         let turned_away = exchange(port, "GET / HTTP/1.1\r\n\r\n");
         assert!(turned_away.starts_with("HTTP/1.1 503"), "{turned_away}");
     }
+
+    fn watching() -> Limits {
+        Limits {
+            read_for: Duration::from_millis(300),
+            connections: 4,
+            streams: 1,
+            watch_every: Duration::from_millis(20),
+            keepalive: Duration::from_millis(200),
+        }
+    }
+
+    fn follow_events(port: u16, token: &str) -> TcpStream {
+        let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        s.write_all(
+            format!("GET /api/events HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nX-Remuda-Token: {token}\r\n\r\n")
+                .as_bytes(),
+        )
+        .unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        s
+    }
+
+    fn read_until(s: &mut TcpStream, what: &str) -> String {
+        let mut got = Vec::new();
+        let mut chunk = [0u8; 1024];
+        while !String::from_utf8_lossy(&got).contains(what) {
+            match s.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => got.extend_from_slice(&chunk[..n]),
+            }
+        }
+        String::from_utf8(got).unwrap()
+    }
+
+    #[test]
+    fn an_event_stream_says_when_the_store_or_the_snapshot_changes() {
+        let e = env(&OFFLINE);
+        let port = start(&e, watching());
+        assert!(
+            read_until(&mut follow_events(port, "wrong"), "\r\n\r\n").starts_with("HTTP/1.1 401")
+        );
+
+        let mut s = follow_events(port, TOKEN);
+        let head = read_until(&mut s, ": connected\n\n");
+        assert!(head.starts_with("HTTP/1.1 200 OK\r\n"), "{head}");
+        assert!(head.contains("Content-Type: text/event-stream"), "{head}");
+
+        std::fs::write(e.tmp.path().join("tokengauge-usage.json"), "{}").unwrap();
+        assert!(read_until(&mut s, "\n\n").ends_with("data: changed\n\n"));
+        e.stored("work", "u-work", HOUR);
+        assert!(read_until(&mut s, "\n\n").ends_with("data: changed\n\n"));
+        assert!(read_until(&mut s, ": \n\n").ends_with(": \n\n"));
+    }
+
+    #[test]
+    fn event_streams_past_their_limit_are_turned_away_until_one_closes() {
+        let e = env(&OFFLINE);
+        let port = start(&e, watching());
+        let mut first = follow_events(port, TOKEN);
+        read_until(&mut first, ": connected\n\n");
+        let turned_away = read_until(&mut follow_events(port, TOKEN), "\r\n\r\n");
+        assert!(turned_away.starts_with("HTTP/1.1 503"), "{turned_away}");
+
+        drop(first);
+        std::thread::sleep(Duration::from_millis(100));
+        let next = read_until(&mut follow_events(port, TOKEN), ": connected\n\n");
+        assert!(next.starts_with("HTTP/1.1 200"), "{next}");
+    }
 }
