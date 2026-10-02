@@ -50,7 +50,7 @@ pub struct Plan {
     pub skipped: Vec<String>,
 }
 
-pub fn plan(recorded: Option<&Seen>, now: &Seen) -> Plan {
+pub fn plan(recorded: Option<&Seen>, now: &Seen, doing: &str) -> Plan {
     let mut plan = Plan {
         usable: Vec::new(),
         skipped: Vec::new(),
@@ -59,12 +59,12 @@ pub fn plan(recorded: Option<&Seen>, now: &Seen) -> Plan {
         match recorded.map(|r| r.homes.get(id)) {
             Some(Some(there)) if there == here => plan.usable.push(id.clone()),
             Some(Some(there)) => plan.skipped.push(format!(
-                "{id}: not refreshing, its login was last found in {} and this run looks in {}; set its directory in ~/.config/environment.d/60-remuda.conf",
+                "{id}: not {doing}, its login was last found in {} and this run looks in {}; set its directory in ~/.config/environment.d/60-remuda.conf",
                 there.display(),
                 here.display()
             )),
             _ => plan.skipped.push(format!(
-                "{id}: not refreshing, no interactive remuda command has recorded where its login lives in this store yet; run `remuda ls` once"
+                "{id}: not {doing}, no interactive remuda command has recorded where its login lives in this store yet; run `remuda ls` once"
             )),
         }
     }
@@ -94,15 +94,19 @@ mod tests {
 
     #[test]
     fn a_plan_skips_what_moved_and_everything_without_a_record() {
-        let p = plan(Some(&seen("/h/.claude")), &seen("/h/.claude"));
+        let p = plan(Some(&seen("/h/.claude")), &seen("/h/.claude"), "refreshing");
         assert_eq!(p.usable, ["claude", "codex"]);
         assert!(p.skipped.is_empty());
 
-        let p = plan(Some(&seen("/work/.claude")), &seen("/h/.claude"));
+        let p = plan(
+            Some(&seen("/work/.claude")),
+            &seen("/h/.claude"),
+            "refreshing",
+        );
         assert_eq!(p.usable, ["codex"]);
         assert!(p.skipped[0].contains("/work/.claude"), "{:?}", p.skipped);
 
-        let p = plan(None, &seen("/h/.claude"));
+        let p = plan(None, &seen("/h/.claude"), "refreshing");
         assert!(p.usable.is_empty());
         assert!(p.skipped.iter().all(|s| s.contains("run `remuda ls` once")));
     }

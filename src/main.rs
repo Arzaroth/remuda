@@ -289,7 +289,8 @@ fn main() -> Result<()> {
             within,
             ..
         } => {
-            let plan = scheduled.then(|| dirs::plan(dirs::recorded(&store).as_ref(), &seen));
+            let plan =
+                scheduled.then(|| dirs::plan(dirs::recorded(&store).as_ref(), &seen, "refreshing"));
             for line in plan.iter().flat_map(|p| &p.skipped) {
                 eprintln!("{line}");
             }
