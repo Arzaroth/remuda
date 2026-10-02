@@ -1,4 +1,4 @@
-use std::io::{Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -17,6 +17,13 @@ pub struct Limits {
     pub read_for: Duration,
     /// Connections handled at once; more are answered 503 and closed.
     pub connections: usize,
+    /// Event streams held open at once, within `connections`.
+    pub streams: usize,
+    /// How often an event stream looks for a change.
+    pub watch_every: Duration,
+    /// How long an event stream stays silent before it sends a comment, so a
+    /// client that vanished without closing is found by the failed write.
+    pub keepalive: Duration,
 }
 
 impl Default for Limits {
@@ -24,6 +31,9 @@ impl Default for Limits {
         Limits {
             read_for: Duration::from_secs(5),
             connections: 32,
+            streams: 8,
+            watch_every: Duration::from_secs(2),
+            keepalive: Duration::from_secs(15),
         }
     }
 }
@@ -45,6 +55,7 @@ impl Drop for Slot {
 
 pub fn serve(app: Arc<App>, listener: TcpListener, limits: Limits) {
     let busy = Arc::new(AtomicUsize::new(0));
+    let streams = Arc::new(AtomicUsize::new(0));
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
         if busy.fetch_add(1, Ordering::SeqCst) >= limits.connections {
@@ -56,11 +67,12 @@ pub fn serve(app: Arc<App>, listener: TcpListener, limits: Limits) {
         }
         let slot = Slot(Arc::clone(&busy));
         let app = Arc::clone(&app);
+        let streams = Arc::clone(&streams);
         // A thread that cannot be started is a refused connection, not a
         // stopped server.
         let _ = std::thread::Builder::new().spawn(move || {
             let _slot = slot;
-            answer(&app, stream, limits);
+            answer(&app, stream, limits, &streams);
         });
     }
 }
@@ -188,7 +200,7 @@ fn request<'a>(head: &'a Head, body: &'a str) -> Request<'a> {
     }
 }
 
-fn answer(app: &App, mut stream: TcpStream, limits: Limits) {
+fn answer(app: &App, mut stream: TcpStream, limits: Limits, streams: &Arc<AtomicUsize>) {
     let deadline = Instant::now() + limits.read_for;
     let Some(head) = read_head(&mut stream, deadline) else {
         close_with(stream, &error(400, "bad request"), LINGER);
@@ -197,6 +209,16 @@ fn answer(app: &App, mut stream: TcpStream, limits: Limits) {
     // Nobody may make remuda wait on a body before showing it may ask.
     if let Some(refused) = app.check(&request(&head, "")) {
         close_with(stream, &refused, LINGER);
+        return;
+    }
+    if head.method == "GET" && head.path == "/api/events" {
+        if streams.fetch_add(1, Ordering::SeqCst) >= limits.streams {
+            streams.fetch_sub(1, Ordering::SeqCst);
+            close_with(stream, &error(503, "too many pages open"), LINGER);
+            return;
+        }
+        let _slot = Slot(Arc::clone(streams));
+        follow(app, stream, limits);
         return;
     }
     if head.header("Transfer-Encoding").is_some() {
@@ -216,6 +238,53 @@ fn answer(app: &App, mut stream: TcpStream, limits: Limits) {
     };
     let response = app.handle(&request(&head, &body));
     close_with(stream, &response, LINGER);
+}
+
+/// Holds the connection open as server-sent events and sends `changed`
+/// whenever `App::fingerprint` moves. The client sends nothing after its
+/// head, so anything it does send, or its closing, ends the stream.
+fn follow(app: &App, mut stream: TcpStream, limits: Limits) {
+    let mut seen = app.fingerprint();
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
+    if write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\
+         X-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nConnection: close\r\n\r\n\
+         : connected\n\n"
+    )
+    .and_then(|()| stream.flush())
+    .is_err()
+    {
+        return;
+    }
+    let mut quiet = Instant::now();
+    let mut sink = [0u8; 64];
+    loop {
+        if stream.set_read_timeout(Some(limits.watch_every)).is_err() {
+            return;
+        }
+        match stream.read(&mut sink) {
+            Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
+            _ => return,
+        }
+        let now = app.fingerprint();
+        let message: &[u8] = if now != seen {
+            seen = now;
+            b"data: changed\n\n"
+        } else if quiet.elapsed() >= limits.keepalive {
+            b": \n\n"
+        } else {
+            continue;
+        };
+        quiet = Instant::now();
+        if stream
+            .write_all(message)
+            .and_then(|()| stream.flush())
+            .is_err()
+        {
+            return;
+        }
+    }
 }
 
 fn reason(status: u16) -> &'static str {
@@ -288,6 +357,7 @@ mod tests {
         Limits {
             read_for: Duration::from_millis(300),
             connections: 4,
+            ..Limits::default()
         }
     }
 
@@ -399,6 +469,7 @@ mod tests {
             Limits {
                 read_for: Duration::from_secs(5),
                 connections: 1,
+                ..Limits::default()
             },
         );
         let _holder = TcpStream::connect(("127.0.0.1", port)).unwrap();
@@ -461,6 +532,7 @@ mod tests {
             Limits {
                 read_for: Duration::from_secs(5),
                 connections: 1,
+                ..Limits::default()
             },
         );
         let _holder = TcpStream::connect(("127.0.0.1", port)).unwrap();
