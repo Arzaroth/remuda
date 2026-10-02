@@ -135,6 +135,12 @@ fn update(check_only: bool) -> Result<()> {
         println!("remuda {} is the latest release", applied.version);
     } else {
         println!("updated remuda {} -> {}", REMUDA.version, applied.version);
+        let _ = std::process::Command::new("systemctl")
+            .args(["--user", "try-restart", SERVE_UNIT])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
     }
     Ok(())
 }
