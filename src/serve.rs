@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
 use serde_json::{Value, json};
@@ -136,6 +137,36 @@ impl App {
             "tokengauge": self.places.snapshot.exists(),
             "switchedAt": runs::switches(&self.store),
         })
+    }
+
+    /// Changes whenever a file the page draws from does: anything in the
+    /// store, one level of provider directories down, and TokenGauge's
+    /// snapshot. Reading the state writes none of them unless the live login
+    /// moved, so a page that reloads on a change does not wake itself.
+    pub fn fingerprint(&self) -> Vec<(PathBuf, SystemTime, u64)> {
+        fn stamp(path: PathBuf, meta: &std::fs::Metadata) -> (PathBuf, SystemTime, u64) {
+            (path, meta.modified().unwrap_or(UNIX_EPOCH), meta.len())
+        }
+        let entries = |dir: &Path| {
+            std::fs::read_dir(dir)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter_map(|e| Some((e.path(), e.metadata().ok()?)))
+                .collect::<Vec<_>>()
+        };
+        let mut seen = Vec::new();
+        for (path, meta) in entries(self.store.root()) {
+            if meta.is_dir() {
+                seen.extend(entries(&path).into_iter().map(|(p, m)| stamp(p, &m)));
+            }
+            seen.push(stamp(path, &meta));
+        }
+        if let Ok(meta) = self.places.snapshot.metadata() {
+            seen.push(stamp(self.places.snapshot.clone(), &meta));
+        }
+        seen.sort();
+        seen
     }
 
     /// A page on another site can reach 127.0.0.1 through the user's browser,
