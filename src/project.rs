@@ -57,6 +57,23 @@ mod tests {
     }
 
     #[test]
+    fn every_unit_ships_in_the_archive_and_the_installer_installs_it() {
+        assert!(release_workflow().contains(r#"cp systemd/* "$stage/systemd/""#));
+        let install =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/install.sh"))
+                .expect("install.sh");
+        let units = std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/systemd")).unwrap();
+        for unit in units {
+            let name = unit.unwrap().file_name();
+            let name = name.to_str().unwrap();
+            assert!(
+                install.contains(&format!("\"$tmp/systemd/{name}\"")),
+                "install.sh never installs {name}"
+            );
+        }
+    }
+
+    #[test]
     fn the_release_refuses_a_tag_the_binary_disagrees_with() {
         assert!(release_workflow().contains("does not match the binary's version"));
     }

@@ -1,0 +1,9 @@
+[Unit]
+Description=Serve remuda's page on 127.0.0.1
+
+[Service]
+ExecStart=%h/.local/bin/remuda serve
+Restart=on-abnormal
+
+[Install]
+WantedBy=default.target
