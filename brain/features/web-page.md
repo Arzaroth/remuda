@@ -63,7 +63,9 @@ switch the new login says it is waiting rather than showing the previous
 account's figures. A stale snapshot shows TokenGauge's reason, and a failed
 fetch its error. Without TokenGauge, the page points to it and shows
 everything else.
-How it is guarded and the API it calls are in
+`remuda open` opens the page a running `serve` shows, and
+`install.sh --serve` keeps one running as a user service. How the page is
+guarded, the API it calls and the service are in
 [architecture/web.md](../architecture/web.md).
 
 ## Sources
