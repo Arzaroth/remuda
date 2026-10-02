@@ -35,7 +35,9 @@ network or touches the developer's own logins.
   fetch; loopback must be up because the mock servers listen on 127.0.0.1.
 - **`serve`** is tested through `App::handle` with synthetic requests; `http.rs`
   over real sockets, with short limits: refusal before a body, oversized,
-  stalled and malformed requests, and the connection limit. `tests/cli.rs`
+  stalled and malformed requests, the connection limit, and the event
+  stream: a change to the store or the snapshot, the keepalive, and its slot
+  limit. `tests/cli.rs`
   starts the real `serve` on port 0 to check that `open` reaches it, and runs
   it with `INVOCATION_ID` set to check the systemd behaviour.
 

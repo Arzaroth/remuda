@@ -63,6 +63,11 @@ switch the new login says it is waiting rather than showing the previous
 account's figures. A stale snapshot shows TokenGauge's reason, and a failed
 fetch its error. Without TokenGauge, the page points to it and shows
 everything else.
+The page follows the store and TokenGauge's snapshot: a switch, import,
+label or refresh made from the CLI or another page, a run of the refresh
+timer, or a new TokenGauge fetch shows within a couple of seconds, without a
+reload. A change to a CLI's own login, such as signing in from the CLI,
+shows within a minute.
 `remuda open` opens the page a running `serve` shows, and
 `install.sh --serve` keeps one running as a user service. How the page is
 guarded, the API it calls and the service are in
