@@ -10,8 +10,8 @@
   `remuda-serve.service`, so `remuda open` works any time; `open` starts the
   service when it is stopped. Like the refresh timer, the service refuses to
   start when the shell has moved `CLAUDE_CONFIG_DIR` or `CODEX_HOME` since,
-  and it never writes the page's token to the journal. `remuda update`
-  restarts it on the new binary.
+  and it never writes the page's token to the journal. `remuda update` and
+  the installer restart it on the new binary.
 
 ## [0.4.2] - 2026-09-29
 

@@ -28,8 +28,8 @@ into `~/.local/bin`, enables `remuda-refresh.timer` (every 30 minutes, runs
 `remuda refresh --scheduled`), and writes completions for bash, zsh and fish when present.
 Flags: `--version` (with or without its `v`), `--no-timer`, `--serve`,
 `--no-completions`. `--serve` installs `remuda-serve.service`, enables it and
-restarts it, so a reinstall moves it onto the new binary (see
-[web.md](web.md)). A `project.rs` test fails when a file in `systemd/` is not
+restarts it (see [web.md](web.md)). Without `--serve`, a service an earlier
+install left running is restarted, so it does not stay on the old binary. A `project.rs` test fails when a file in `systemd/` is not
 shipped or not installed.
 
 A systemd user service does not see what a shell exports, so the installer
@@ -63,9 +63,9 @@ and a store that does not exist stops it before anything is created.
 
 `remuda update [--check]` is selvedge `check_cached` / `apply` over the
 `REMUDA` project (no frontends, no aliases). `REMUDA_REPO` overrides the repo
-for a fork. An update that replaced the binary runs
-`systemctl --user try-restart remuda-serve.service`, which restarts the
-service only when it runs.
+for a fork. An update that replaced the binary restarts
+`remuda-serve.service` when `systemctl --user is-active` says it runs, and
+warns with the command to run when that restart fails.
 
 ## CI
 
