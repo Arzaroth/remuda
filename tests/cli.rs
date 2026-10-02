@@ -344,7 +344,7 @@ fn completions_cover_every_command() {
     let home = Home::new();
     let zsh = home.ok(&["completions", "zsh"]);
     for command in [
-        "import", "login", "use", "label", "rename", "serve", "update",
+        "import", "login", "use", "label", "rename", "serve", "open", "update",
     ] {
         assert!(zsh.contains(command), "zsh completions miss {command}");
     }
