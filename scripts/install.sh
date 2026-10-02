@@ -1,9 +1,10 @@
 #!/bin/bash
 # Usage: curl -fsSL https://raw.githubusercontent.com/Arzaroth/remuda/master/scripts/install.sh | bash
-#        ... | bash -s -- [--version vX.Y.Z] [--no-timer] [--no-completions]
+#        ... | bash -s -- [--version vX.Y.Z] [--no-timer] [--serve] [--no-completions]
 #
 # Installs the latest release into ~/.local/bin, enables the refresh timer and
-# installs completions for the shells it finds.
+# installs completions for the shells it finds. --serve also keeps the page
+# served by a user service, for `remuda open`.
 
 set -euo pipefail
 
@@ -12,6 +13,7 @@ bindir="$HOME/.local/bin"
 unitdir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 tag=""
 want_timer=true
+want_serve=false
 want_completions=true
 
 while (($# > 0)); do
@@ -22,9 +24,10 @@ while (($# > 0)); do
     shift
     ;;
   --no-timer) want_timer=false ;;
+  --serve) want_serve=true ;;
   --no-completions) want_completions=false ;;
   -h | --help)
-    echo "usage: install.sh [--version vX.Y.Z] [--no-timer] [--no-completions]"
+    echo "usage: install.sh [--version vX.Y.Z] [--no-timer] [--serve] [--no-completions]"
     exit 0
     ;;
   *)
@@ -84,11 +87,16 @@ case ":$PATH:" in
 *) echo "install: warning - $bindir is not on your PATH" >&2 ;;
 esac
 
-if $want_timer; then
+if $want_timer || $want_serve; then
   mkdir -p "$unitdir"
-  install -m 644 "$tmp/systemd/remuda-refresh.service" "$tmp/systemd/remuda-refresh.timer" "$unitdir/"
-  # The timer must see the same directories as the shell, or it takes the
-  # active login for an inactive one and refreshes it.
+  if $want_timer; then
+    install -m 644 "$tmp/systemd/remuda-refresh.service" "$tmp/systemd/remuda-refresh.timer" "$unitdir/"
+  fi
+  if $want_serve; then
+    install -m 644 "$tmp/systemd/remuda-serve.service" "$unitdir/"
+  fi
+  # The units must see the same directories as the shell, or the timer takes
+  # the active login for an inactive one and refreshes it.
   envdir="${XDG_CONFIG_HOME:-$HOME/.config}/environment.d"
   envs=()
   for var in CLAUDE_CONFIG_DIR CODEX_HOME REMUDA_STORE; do
@@ -101,18 +109,25 @@ if $want_timer; then
     printf '%s\n' "${envs[@]}" >"$envdir/60-remuda.conf"
     echo "Wrote $envdir/60-remuda.conf: ${envs[*]}"
   fi
-  # The timer refreshes only where the last interactive command looked; this
-  # is that command, run from the installing shell.
+  # The units act only where the last interactive command looked; this is
+  # that command, run from the installing shell.
   "$bindir/remuda" ls >/dev/null 2>&1 || true
   if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
     if ((${#envs[@]} > 0)); then
       systemctl --user set-environment "${envs[@]}"
     fi
     systemctl --user daemon-reload
-    systemctl --user enable --now remuda-refresh.timer
-    echo "Enabled remuda-refresh.timer"
+    if $want_timer; then
+      systemctl --user enable --now remuda-refresh.timer
+      echo "Enabled remuda-refresh.timer"
+    fi
+    if $want_serve; then
+      systemctl --user enable remuda-serve.service
+      systemctl --user restart remuda-serve.service
+      echo "Enabled remuda-serve.service; 'remuda open' opens its page"
+    fi
   else
-    echo "install: no systemd user session; run 'remuda refresh' yourself to keep stored logins fresh" >&2
+    echo "install: no systemd user session; run 'remuda refresh' yourself to keep stored logins fresh, and 'remuda serve' for the page" >&2
   fi
 fi
 
@@ -142,4 +157,5 @@ Next:
   remuda login other            sign another account in through the browser
   remuda use other              switch to it
   remuda serve                  do all of that from a page in the browser
+  remuda open                   open the page install.sh --serve keeps running
 EOF

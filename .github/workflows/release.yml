@@ -80,7 +80,7 @@ jobs:
             rm -rf "$stage"
             mkdir -p "$stage/systemd"
             install -m 755 "binaries/remuda-$arch/remuda" "$stage/remuda"
-            cp systemd/remuda-refresh.service systemd/remuda-refresh.timer "$stage/systemd/"
+            cp systemd/* "$stage/systemd/"
             cp LICENSE LICENSE-MIT LICENSE-WTFPL "$stage/"
             tar -czf "dist/remuda-$safe-linux-$arch.tar.gz" -C "$stage" .
           done
