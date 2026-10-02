@@ -135,12 +135,18 @@ fn update(check_only: bool) -> Result<()> {
         println!("remuda {} is the latest release", applied.version);
     } else {
         println!("updated remuda {} -> {}", REMUDA.version, applied.version);
-        let _ = std::process::Command::new("systemctl")
-            .args(["--user", "try-restart", SERVE_UNIT])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
+        let systemctl = |action: &str| {
+            std::process::Command::new("systemctl")
+                .args(["--user", action, "--quiet", SERVE_UNIT])
+                .stdin(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|s| s.success())
+        };
+        if systemctl("is-active") && !systemctl("restart") {
+            eprintln!(
+                "warning: {SERVE_UNIT} still runs the old binary; run `systemctl --user restart {SERVE_UNIT}`"
+            );
+        }
     }
     Ok(())
 }
