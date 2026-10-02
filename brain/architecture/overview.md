@@ -1,8 +1,9 @@
 # Overview
 
-One binary, one crate, no daemon. Every command reads the CLI's files, the
-store, or both, does its work under the store lock, and exits. `serve` is the
-only long-running mode.
+One binary, one crate, no daemon of its own. Every command reads the CLI's
+files, the store, or both, does its work under the store lock, and exits.
+`serve` is the only long-running mode; `remuda-serve.service` can keep it
+running.
 
 ## Modules
 
@@ -16,6 +17,7 @@ only long-running mode.
 | `claude.rs`, `codex.rs` | The two providers, including their OAuth clients |
 | `store.rs` | The credential store: entries, sidecars, rename, remove, the lock |
 | `serve.rs`, `serve.html` | The local page and its JSON API |
+| `served.rs` | The files a running page announces itself in, and finding it again for `open` |
 | `http.rs` | The page's HTTP listener: bounded reads, checks before bodies, a connection limit |
 | `oauth.rs` | The HTTP client and token requests both providers share |
 | `dirs.rs` | The directories interactive commands used, for the scheduled refresh to check |
@@ -31,7 +33,7 @@ only long-running mode.
 1. `main` builds `Claude` and `Codex` and resolves the name (`commands::resolve`)
    or the `-p` flag (`commands::find`) to one provider.
 2. It takes `<store>/.lock` (except `login`, which takes it only to save, and
-   `completions`/`update`, which need no store).
+   `completions`/`update`/`open`, which need no store).
 3. `ops::sync_live` copies the live login back into its credential, and reports
    the live state: signed out, stored (and whether that was confirmed), or
    unstored.

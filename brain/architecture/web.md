@@ -13,6 +13,38 @@ The page reads the token from the fragment (fragments never reach a server log
 or a `Referer`), keeps it in `sessionStorage`, strips it from the address bar,
 and sends it as `X-Remuda-Token`.
 
+## Finding a running page (`served.rs`)
+
+Once listening, `serve` writes two files into the same runtime directory
+(`paths::runtime_dir`, the store when `$XDG_RUNTIME_DIR` is unset):
+`serve.url`, the URL with its token (0600), and then `serve.json`,
+`{pid, started, port, version}`, which holds no secret and is what other
+programs read to learn a page is up. `started` is the process's start time,
+field 22 of `/proc/<pid>/stat`. Nothing removes them: a page that stopped is
+told apart by `/proc/<pid>/stat` no longer giving that start time (the
+process is gone, or the pid was reused) or its port no longer answering, and
+the next `serve` overwrites both. Two pages on two ports: the last one started
+wins.
+
+`remuda open [--no-browser]` (`served::find`) takes the URL only when the
+status passes that check and `serve.url` names its port, then opens it through
+a redirect file like everything else (or prints it). When nothing serves and
+`remuda-serve.service` is found in the user unit search path, it runs
+`systemctl --user start` on it and waits up to 10 s for the page.
+
+## Under systemd
+
+`systemd/remuda-serve.service` runs `remuda serve` (`Restart=on-abnormal`, so
+a refusal is not retried). `INVOCATION_ID` is set, and `serve` then:
+
+- checks the directories record like the scheduled refresh
+  ([distribution.md](distribution.md)), printing one line per CLI it would not
+  serve and exiting non-zero rather than serve a login other than the
+  shell's;
+- prints the URL without its token, since stdout is the journal;
+- opens no browser at start. Sign-ins still open their private window when
+  the user manager has a display.
+
 ## Guards (`App::handle`)
 
 1. `Host` must be `127.0.0.1:<port>` or `localhost:<port>`: defeats DNS
@@ -104,6 +136,8 @@ light and dark. It reloads the state every minute unless an editor is open.
 ## Sources
 
 - [src/serve.rs](../../src/serve.rs)
+- [src/served.rs](../../src/served.rs)
 - [src/http.rs](../../src/http.rs)
 - [src/serve.html](../../src/serve.html)
-- [src/main.rs](../../src/main.rs)
+- [src/main.rs](../../src/main.rs) `Serve`, `open`
+- [systemd/remuda-serve.service](../../systemd/remuda-serve.service)

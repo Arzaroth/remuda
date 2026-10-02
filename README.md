@@ -35,7 +35,9 @@ This installs `remuda` into `~/.local/bin`, enables `remuda-refresh.timer`,
 which keeps the inactive logins' tokens fresh every 30 minutes, and installs
 completions for bash, zsh and fish when it finds them. Pass `--no-timer`,
 `--no-completions`, or `--version vX.Y.Z` to pin a release
-(`... | bash -s -- --no-timer`). Afterwards, `remuda update` replaces the binary
+(`... | bash -s -- --no-timer`). `--serve` also enables
+`remuda-serve.service`, which keeps [the page](#the-page) running for
+`remuda open`. Afterwards, `remuda update` replaces the binary
 with the latest release.
 
 If your shell sets `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `REMUDA_STORE`, the
@@ -62,6 +64,7 @@ A credential is addressed by its name when only one CLI has that name, and as
 | `remuda rename <name> <new>` | Rename a stored credential |
 | `remuda rm <name>` | Delete a stored credential |
 | `remuda serve [--port N] [--no-browser]` | Do all of the above from a page in the browser |
+| `remuda open [--no-browser]` | Open the page a running `serve` shows |
 | `remuda completions <shell>` | Print a completion script |
 | `remuda update [--check]` | Replace the binary with the latest release |
 
@@ -87,6 +90,10 @@ TokenGauge 0.37).
 The URL it prints carries an access token in its fragment. Every request must
 send that token back and name this listener in its `Host` and `Origin`, so
 another site open in the same browser cannot drive it.
+
+`remuda open` opens the page a running `serve` shows, without the printed
+URL. Installed with `--serve`, `remuda-serve.service` keeps one running (or
+`open` starts it), and the token never reaches its journal.
 
 ## How a switch works
 
