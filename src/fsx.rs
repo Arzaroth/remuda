@@ -259,19 +259,20 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("config.json");
         fs::write(&path, r#"{"numStartups": "#).unwrap();
-        let fixer = {
-            let path = path.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(30));
+        let mut pauses = 0;
+        update_json_pacing(
+            &path,
+            |v| {
+                v["k"] = serde_json::json!(1);
+                Ok(())
+            },
+            || {
+                pauses += 1;
                 fs::write(&path, r#"{"numStartups": 3}"#).unwrap();
-            })
-        };
-        update_json(&path, |v| {
-            v["k"] = serde_json::json!(1);
-            Ok(())
-        })
+            },
+        )
         .unwrap();
-        fixer.join().unwrap();
+        assert_eq!(pauses, 1);
         let v = read_json(&path).unwrap().unwrap();
         assert_eq!(
             (v["numStartups"].clone(), v["k"].clone()),
