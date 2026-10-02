@@ -18,10 +18,12 @@ and sends it as `X-Remuda-Token`.
 Once listening, `serve` writes two files into the same runtime directory
 (`paths::runtime_dir`, the store when `$XDG_RUNTIME_DIR` is unset):
 `serve.url`, the URL with its token (0600), and then `serve.json`,
-`{pid, port, version}`, which holds no secret and is what other programs
-read to learn a page is up. Nothing removes them: a page that stopped is told
-apart by its pid no longer existing or its port no longer answering, and the
-next `serve` overwrites both. Two pages on two ports: the last one started
+`{pid, started, port, version}`, which holds no secret and is what other
+programs read to learn a page is up. `started` is the process's start time,
+field 22 of `/proc/<pid>/stat`. Nothing removes them: a page that stopped is
+told apart by `/proc/<pid>/stat` no longer giving that start time (the
+process is gone, or the pid was reused) or its port no longer answering, and
+the next `serve` overwrites both. Two pages on two ports: the last one started
 wins.
 
 `remuda open [--no-browser]` (`served::find`) takes the URL only when the
