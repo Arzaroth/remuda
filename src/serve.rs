@@ -139,32 +139,34 @@ impl App {
         })
     }
 
-    /// Changes whenever a file the page draws from does: anything in the
-    /// store, one level of provider directories down, and TokenGauge's
-    /// snapshot. Reading the state writes none of them unless the live login
-    /// moved, so a page that reloads on a change does not wake itself.
+    /// Only the store's JSON files count: the temp files its writes go
+    /// through and the redirect pages kept there without `$XDG_RUNTIME_DIR`
+    /// would wake every page for nothing. Links are followed, since a write
+    /// goes through them to the file they name.
     pub fn fingerprint(&self) -> Vec<(PathBuf, SystemTime, u64)> {
-        fn stamp(path: PathBuf, meta: &std::fs::Metadata) -> (PathBuf, SystemTime, u64) {
-            (path, meta.modified().unwrap_or(UNIX_EPOCH), meta.len())
-        }
+        let stamp = |path: PathBuf| {
+            let meta = std::fs::metadata(&path).ok()?;
+            Some((path, meta.modified().unwrap_or(UNIX_EPOCH), meta.len()))
+        };
         let entries = |dir: &Path| {
             std::fs::read_dir(dir)
                 .into_iter()
                 .flatten()
                 .flatten()
-                .filter_map(|e| Some((e.path(), e.metadata().ok()?)))
+                .map(|e| e.path())
                 .collect::<Vec<_>>()
         };
-        let mut seen = Vec::new();
-        for (path, meta) in entries(self.store.root()) {
-            if meta.is_dir() {
-                seen.extend(entries(&path).into_iter().map(|(p, m)| stamp(p, &m)));
+        let is_json = |p: &PathBuf| p.extension().is_some_and(|x| x == "json");
+        let mut files = Vec::new();
+        for path in entries(self.store.root()) {
+            if path.is_dir() {
+                files.extend(entries(&path).into_iter().filter(is_json));
+            } else if is_json(&path) {
+                files.push(path);
             }
-            seen.push(stamp(path, &meta));
         }
-        if let Ok(meta) = self.places.snapshot.metadata() {
-            seen.push(stamp(self.places.snapshot.clone(), &meta));
-        }
+        files.push(self.places.snapshot.clone());
+        let mut seen: Vec<_> = files.into_iter().filter_map(stamp).collect();
         seen.sort();
         seen
     }
