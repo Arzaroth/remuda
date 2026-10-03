@@ -47,6 +47,16 @@ pub fn bind(port: u16) -> Result<(TcpListener, u16)> {
 
 struct Slot(Arc<AtomicUsize>);
 
+impl Slot {
+    fn take(taken: &Arc<AtomicUsize>, limit: usize) -> Option<Slot> {
+        if taken.fetch_add(1, Ordering::SeqCst) >= limit {
+            taken.fetch_sub(1, Ordering::SeqCst);
+            return None;
+        }
+        Some(Slot(Arc::clone(taken)))
+    }
+}
+
 impl Drop for Slot {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::SeqCst);
@@ -58,14 +68,12 @@ pub fn serve(app: Arc<App>, listener: TcpListener, limits: Limits) {
     let streams = Arc::new(AtomicUsize::new(0));
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
-        if busy.fetch_add(1, Ordering::SeqCst) >= limits.connections {
-            busy.fetch_sub(1, Ordering::SeqCst);
+        let Some(slot) = Slot::take(&busy, limits.connections) else {
             // On the accepting thread: only what has already arrived is
             // drained, so no client can hold this loop.
             close_with(stream, &error(503, "busy"), Duration::ZERO);
             continue;
-        }
-        let slot = Slot(Arc::clone(&busy));
+        };
         let app = Arc::clone(&app);
         let streams = Arc::clone(&streams);
         // A thread that cannot be started is a refused connection, not a
@@ -211,14 +219,11 @@ fn answer(app: &App, mut stream: TcpStream, limits: Limits, streams: &Arc<Atomic
         close_with(stream, &refused, LINGER);
         return;
     }
-    if head.method == "GET" && head.path == "/api/events" {
-        if streams.fetch_add(1, Ordering::SeqCst) >= limits.streams {
-            streams.fetch_sub(1, Ordering::SeqCst);
-            close_with(stream, &error(503, "too many pages open"), LINGER);
-            return;
+    if app.streams(&request(&head, "")) {
+        match Slot::take(streams, limits.streams) {
+            Some(_slot) => follow(app, stream, limits),
+            None => close_with(stream, &error(503, "too many pages open"), LINGER),
         }
-        let _slot = Slot(Arc::clone(streams));
-        follow(app, stream, limits);
         return;
     }
     if head.header("Transfer-Encoding").is_some() {
@@ -240,29 +245,22 @@ fn answer(app: &App, mut stream: TcpStream, limits: Limits, streams: &Arc<Atomic
     close_with(stream, &response, LINGER);
 }
 
-/// Holds the connection open as server-sent events and sends `changed`
-/// whenever `App::fingerprint` moves. The client sends nothing after its
-/// head, so anything it does send, or its closing, ends the stream.
+/// The client sends nothing after its head, so anything it does send, or its
+/// closing, ends the stream.
 fn follow(app: &App, mut stream: TcpStream, limits: Limits) {
     let mut seen = app.fingerprint();
     let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
-    if write!(
-        stream,
-        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\
-         X-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nConnection: close\r\n\r\n\
-         : connected\n\n"
-    )
-    .and_then(|()| stream.flush())
-    .is_err()
+    if write_head(&mut stream, 200, "text/event-stream", None)
+        .and_then(|()| stream.write_all(b": connected\n\n"))
+        .and_then(|()| stream.flush())
+        .is_err()
+        || stream.set_read_timeout(Some(limits.watch_every)).is_err()
     {
         return;
     }
     let mut quiet = Instant::now();
     let mut sink = [0u8; 64];
     loop {
-        if stream.set_read_timeout(Some(limits.watch_every)).is_err() {
-            return;
-        }
         match stream.read(&mut sink) {
             Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
             _ => return,
@@ -302,16 +300,30 @@ fn reason(status: u16) -> &'static str {
     }
 }
 
-fn write_response(stream: &mut TcpStream, r: &Response) -> std::io::Result<()> {
+/// Without a length, the body runs until the connection closes.
+fn write_head(
+    stream: &mut TcpStream,
+    status: u16,
+    content_type: &str,
+    length: Option<usize>,
+) -> std::io::Result<()> {
     write!(
         stream,
-        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: no-store\r\n\
-         X-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nConnection: close\r\n\r\n",
-        r.status,
-        reason(r.status),
-        r.content_type,
-        r.body.len()
+        "HTTP/1.1 {status} {}\r\nContent-Type: {content_type}\r\n",
+        reason(status)
     )?;
+    if let Some(length) = length {
+        write!(stream, "Content-Length: {length}\r\n")?;
+    }
+    write!(
+        stream,
+        "Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n\
+         Referrer-Policy: no-referrer\r\nConnection: close\r\n\r\n"
+    )
+}
+
+fn write_response(stream: &mut TcpStream, r: &Response) -> std::io::Result<()> {
+    write_head(stream, r.status, r.content_type, Some(r.body.len()))?;
     stream.write_all(r.body.as_bytes())?;
     stream.flush()
 }

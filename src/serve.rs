@@ -202,6 +202,11 @@ impl App {
         None
     }
 
+    /// A stream outlives one `Response`, so the listener serves it itself.
+    pub fn streams(&self, req: &Request) -> bool {
+        req.method == "GET" && req.path == "/api/events"
+    }
+
     pub fn handle(&self, req: &Request) -> Response {
         if let Some(refused) = self.check(req) {
             return refused;
