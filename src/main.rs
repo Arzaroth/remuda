@@ -165,9 +165,9 @@ fn systemctl(args: &[&str]) -> bool {
 }
 
 fn sync_units() -> Result<()> {
-    let changed = units::refresh(&paths::installed_units())?;
-    if !changed.is_empty() {
-        println!("updated {}", changed.join(", "));
+    let done = units::refresh(&paths::installed_units());
+    if !done.changed.is_empty() {
+        println!("updated {}", done.changed.join(", "));
         if !systemctl(&["daemon-reload"]) {
             eprintln!("warning: run `systemctl --user daemon-reload`");
         }
@@ -176,6 +176,9 @@ fn sync_units() -> Result<()> {
         eprintln!(
             "warning: {SERVE_UNIT} still runs the old binary; run `systemctl --user restart {SERVE_UNIT}`"
         );
+    }
+    if !done.failed.is_empty() {
+        bail!("{}", done.failed.join("\n"));
     }
     Ok(())
 }
