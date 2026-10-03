@@ -776,6 +776,19 @@ mod tests {
         assert_ne!(labelled, before);
 
         std::fs::write(&places(&e).snapshot, "{}").unwrap();
-        assert_ne!(app.fingerprint(), labelled);
+        let snapshot = app.fingerprint();
+        assert_ne!(snapshot, labelled);
+
+        let elsewhere = e.tmp.path().join("kept-elsewhere.json");
+        std::fs::write(&elsewhere, "{}").unwrap();
+        std::os::unix::fs::symlink(
+            &elsewhere,
+            e.store.root().join("claude").join("linked.json"),
+        )
+        .unwrap();
+        let linked = app.fingerprint();
+        assert_ne!(linked, snapshot);
+        std::fs::write(&elsewhere, "{\"changed\": true}").unwrap();
+        assert_ne!(app.fingerprint(), linked);
     }
 }

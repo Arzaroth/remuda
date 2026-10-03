@@ -553,13 +553,13 @@ mod tests {
         assert!(turned_away.starts_with("HTTP/1.1 503"), "{turned_away}");
     }
 
-    fn watching() -> Limits {
+    fn watching(keepalive: Duration) -> Limits {
         Limits {
             read_for: Duration::from_millis(300),
             connections: 4,
             streams: 1,
             watch_every: Duration::from_millis(20),
-            keepalive: Duration::from_millis(200),
+            keepalive,
         }
     }
 
@@ -586,38 +586,120 @@ mod tests {
         String::from_utf8(got).unwrap()
     }
 
+    struct Events {
+        s: TcpStream,
+        pending: String,
+    }
+
+    impl Events {
+        fn open(port: u16) -> (String, Events) {
+            let mut s = follow_events(port, TOKEN);
+            let head = read_until(&mut s, ": connected\n\n");
+            let pending = String::new();
+            (head, Events { s, pending })
+        }
+
+        /// Waits for a slot a closed stream is still giving back.
+        fn open_when_free(port: u16) -> Events {
+            let until = Instant::now() + Duration::from_secs(2);
+            loop {
+                let (head, events) = Events::open(port);
+                if head.starts_with("HTTP/1.1 200") {
+                    return events;
+                }
+                assert!(head.starts_with("HTTP/1.1 503"), "{head}");
+                assert!(Instant::now() < until, "the slot was never freed");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+
+        /// The next event or comment; None when the stream ended or stayed
+        /// silent for `wait`.
+        fn next(&mut self, wait: Duration) -> Option<String> {
+            let until = Instant::now() + wait;
+            let mut chunk = [0u8; 256];
+            loop {
+                if let Some(i) = self.pending.find("\n\n") {
+                    let event = self.pending[..i].to_owned();
+                    self.pending.drain(..i + 2);
+                    return Some(event);
+                }
+                let left = until.checked_duration_since(Instant::now())?;
+                self.s
+                    .set_read_timeout(Some(left.max(Duration::from_millis(1))))
+                    .unwrap();
+                match self.s.read(&mut chunk) {
+                    Ok(0) | Err(_) => return None,
+                    Ok(n) => self
+                        .pending
+                        .push_str(std::str::from_utf8(&chunk[..n]).unwrap()),
+                }
+            }
+        }
+
+        /// Drops what a write in several steps may still be reporting.
+        fn settle(&mut self) {
+            while self.next(Duration::from_millis(150)).is_some() {}
+        }
+
+        fn ended(&mut self) -> bool {
+            self.s
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            matches!(self.s.read(&mut [0u8; 256]), Ok(0))
+        }
+    }
+
+    const NEVER: Duration = Duration::from_secs(60);
+    const SOON: Duration = Duration::from_secs(2);
+
     #[test]
     fn an_event_stream_says_when_the_store_or_the_snapshot_changes() {
         let e = env(&OFFLINE);
-        let port = start(&e, watching());
+        let port = start(&e, watching(NEVER));
         assert!(
             read_until(&mut follow_events(port, "wrong"), "\r\n\r\n").starts_with("HTTP/1.1 401")
         );
 
-        let mut s = follow_events(port, TOKEN);
-        let head = read_until(&mut s, ": connected\n\n");
+        let (head, mut events) = Events::open(port);
         assert!(head.starts_with("HTTP/1.1 200 OK\r\n"), "{head}");
         assert!(head.contains("Content-Type: text/event-stream"), "{head}");
+        assert!(!head.contains("Content-Length"), "{head}");
+        assert!(head.contains("Cache-Control: no-store"), "{head}");
 
         std::fs::write(e.tmp.path().join("tokengauge-usage.json"), "{}").unwrap();
-        assert!(read_until(&mut s, "\n\n").ends_with("data: changed\n\n"));
+        assert_eq!(events.next(SOON).as_deref(), Some("data: changed"));
+        events.settle();
         e.stored("work", "u-work", HOUR);
-        assert!(read_until(&mut s, "\n\n").ends_with("data: changed\n\n"));
-        assert!(read_until(&mut s, ": \n\n").ends_with(": \n\n"));
+        assert_eq!(events.next(SOON).as_deref(), Some("data: changed"));
+        events.settle();
+
+        let root = e.store.root();
+        std::fs::write(root.join("claude").join(".work.json.remuda-1"), "{}").unwrap();
+        std::fs::write(root.join("open-x.html"), "<p>").unwrap();
+        assert_eq!(events.next(Duration::from_millis(300)), None);
     }
 
     #[test]
-    fn event_streams_past_their_limit_are_turned_away_until_one_closes() {
+    fn a_quiet_event_stream_sends_a_keepalive() {
         let e = env(&OFFLINE);
-        let port = start(&e, watching());
-        let mut first = follow_events(port, TOKEN);
-        read_until(&mut first, ": connected\n\n");
-        let turned_away = read_until(&mut follow_events(port, TOKEN), "\r\n\r\n");
+        let port = start(&e, watching(Duration::from_millis(100)));
+        let (_, mut events) = Events::open(port);
+        assert_eq!(events.next(SOON).as_deref(), Some(": "));
+    }
+
+    #[test]
+    fn event_streams_past_their_limit_are_turned_away_until_one_ends() {
+        let e = env(&OFFLINE);
+        let port = start(&e, watching(NEVER));
+        let (_, first) = Events::open(port);
+        let (turned_away, _) = Events::open(port);
         assert!(turned_away.starts_with("HTTP/1.1 503"), "{turned_away}");
 
         drop(first);
-        std::thread::sleep(Duration::from_millis(100));
-        let next = read_until(&mut follow_events(port, TOKEN), ": connected\n\n");
-        assert!(next.starts_with("HTTP/1.1 200"), "{next}");
+        let mut second = Events::open_when_free(port);
+        second.s.write_all(b"x").unwrap();
+        assert!(second.ended());
+        Events::open_when_free(port);
     }
 }
