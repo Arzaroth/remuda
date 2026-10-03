@@ -58,6 +58,11 @@ fn config_home() -> PathBuf {
     var_dir("XDG_CONFIG_HOME").unwrap_or_else(|| home().join(".config"))
 }
 
+/// Where `install.sh` puts the units.
+pub fn installed_units() -> PathBuf {
+    config_home().join("systemd/user")
+}
+
 pub fn systemd_user_units() -> Vec<PathBuf> {
     let data_dirs = env::var("XDG_DATA_DIRS").ok().filter(|v| !v.is_empty());
     unit_dirs(

@@ -16,6 +16,7 @@ mod runs;
 mod serve;
 mod served;
 mod store;
+mod units;
 
 use std::io::{self, BufRead};
 
@@ -116,6 +117,9 @@ enum Cmd {
         #[arg(long)]
         check: bool,
     },
+    /// Run by `update` as the new binary: bring the installed units up to date.
+    #[command(hide = true)]
+    SyncUnits,
 }
 
 fn update(check_only: bool) -> Result<()> {
@@ -147,6 +151,31 @@ fn update(check_only: bool) -> Result<()> {
                 "warning: {SERVE_UNIT} still runs the old binary; run `systemctl --user restart {SERVE_UNIT}`"
             );
         }
+    }
+    Ok(())
+}
+
+fn systemctl(args: &[&str]) -> bool {
+    std::process::Command::new("systemctl")
+        .arg("--user")
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+fn sync_units() -> Result<()> {
+    let changed = units::refresh(&paths::installed_units())?;
+    if !changed.is_empty() {
+        println!("updated {}", changed.join(", "));
+        if !systemctl(&["daemon-reload"]) {
+            eprintln!("warning: run `systemctl --user daemon-reload`");
+        }
+    }
+    if systemctl(&["is-active", "--quiet", SERVE_UNIT]) && !systemctl(&["restart", SERVE_UNIT]) {
+        eprintln!(
+            "warning: {SERVE_UNIT} still runs the old binary; run `systemctl --user restart {SERVE_UNIT}`"
+        );
     }
     Ok(())
 }
@@ -188,6 +217,9 @@ fn main() -> Result<()> {
     }
     if let Cmd::Update { check } = cli.command {
         return update(check);
+    }
+    if let Cmd::SyncUnits = cli.command {
+        return sync_units();
     }
     if let Cmd::Completions { shell } = cli.command {
         clap_complete::generate(shell, &mut Cli::command(), "remuda", &mut io::stdout());
@@ -376,7 +408,8 @@ fn main() -> Result<()> {
         | Cmd::Serve { .. }
         | Cmd::Open { .. }
         | Cmd::Completions { .. }
-        | Cmd::Update { .. } => {
+        | Cmd::Update { .. }
+        | Cmd::SyncUnits => {
             unreachable!()
         }
     }
