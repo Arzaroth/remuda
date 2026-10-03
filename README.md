@@ -85,7 +85,8 @@ long each credential's tokens have left, whether the refresh timer is running
 and what its last run did, and, when
 [TokenGauge](https://github.com/Arzaroth/TokenGauge) is installed, each login's
 usage, read from TokenGauge's snapshot (only the login in use before
-TokenGauge 0.37).
+TokenGauge 0.37). It keeps itself current: a change made from the CLI, by the
+refresh timer or by a TokenGauge fetch shows within a couple of seconds.
 
 The URL it prints carries an access token in its fragment. Every request must
 send that token back and name this listener in its `Host` and `Origin`, so
