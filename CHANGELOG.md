@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-03
+
 ### Changed
 
 - `remuda update` also brings the systemd units you installed up to date
