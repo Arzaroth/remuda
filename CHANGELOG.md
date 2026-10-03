@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `remuda update` also brings the systemd units you installed up to date
+  with the new release, and reloads systemd when one changed. It never adds a
+  unit you did not install: `remuda-serve.service` still comes only from
+  `install.sh --serve`. This takes effect from the update after this release.
+
 ## [0.5.0] - 2026-10-03
 
 ### Added

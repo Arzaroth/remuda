@@ -562,3 +562,69 @@ fn a_serve_run_by_systemd_checks_the_directories_and_prints_no_token() {
     let url = home.ok(&["open", "--no-browser"]);
     assert!(get_state(&url).starts_with("HTTP/1.1 200"));
 }
+
+#[test]
+fn sync_units_rewrites_the_installed_units_and_reloads_systemd() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = Home::new();
+    let bin = home.path("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let log = home.path("systemctl.log");
+    std::fs::write(
+        bin.join("systemctl"),
+        format!(
+            "#!/bin/sh\necho \"$*\" >> '{}'\ncase \"$*\" in *is-active*) [ -e '{}' ] || exit 3;; esac\n",
+            log.display(),
+            home.path("serve-active").display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(
+        bin.join("systemctl"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    let units = home.path(".config/systemd/user");
+    std::fs::create_dir_all(&units).unwrap();
+    std::fs::write(units.join("remuda-refresh.service"), "old").unwrap();
+    let run = || {
+        home.command(&["sync-units"])
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .output()
+            .unwrap()
+    };
+
+    let out = run();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).contains("remuda-refresh.service"));
+    assert_eq!(
+        std::fs::read_to_string(units.join("remuda-refresh.service")).unwrap(),
+        std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/systemd/remuda-refresh.service"
+        ))
+        .unwrap()
+    );
+    assert!(!units.join("remuda-serve.service").exists());
+    let calls = std::fs::read_to_string(&log).unwrap();
+    assert!(calls.contains("--user daemon-reload"), "{calls}");
+    assert!(!calls.contains("restart"), "{calls}");
+
+    std::fs::remove_file(&log).unwrap();
+    assert!(run().status.success());
+    let calls = std::fs::read_to_string(&log).unwrap();
+    assert!(!calls.contains("daemon-reload"), "{calls}");
+
+    std::fs::remove_file(&log).unwrap();
+    std::fs::write(home.path("serve-active"), "").unwrap();
+    assert!(run().status.success());
+    let calls = std::fs::read_to_string(&log).unwrap();
+    assert!(
+        calls.contains("--user restart remuda-serve.service"),
+        "{calls}"
+    );
+}

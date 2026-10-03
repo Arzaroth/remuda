@@ -63,9 +63,23 @@ and a store that does not exist stops it before anything is created.
 
 `remuda update [--check]` is selvedge `check_cached` / `apply` over the
 `REMUDA` project (no frontends, no aliases). `REMUDA_REPO` overrides the repo
-for a fork. An update that replaced the binary restarts
-`remuda-serve.service` when `systemctl --user is-active` says it runs, and
-warns with the command to run when that restart fails.
+for a fork.
+
+selvedge replaces the binary only, so an update that replaced it then runs
+the new binary's hidden `remuda sync-units` (the path is taken before the
+swap). The binary carries the units the release ships (`units.rs`,
+`include_str!` of `systemd/`, a test holding the two to the same list), and
+`sync-units` rewrites the ones already in `~/.config/systemd/user` (where
+`install.sh` puts them) that differ. It never adds a unit, so `--no-timer` and
+an install without `--serve` stay that way, and it leaves a link alone: a
+masked unit, or one pointed elsewhere. When it changed any, it runs
+`systemctl --user daemon-reload`. Then it restarts `remuda-serve.service` when
+`is-active` says it runs. A step that fails is a warning naming the command to
+run by hand.
+
+The hook runs from the new binary, so it applies from the update after the
+release that carries it: updating from 0.5.0 only restarts
+`remuda-serve.service`, as 0.5.0 itself does, and refreshes no unit.
 
 ## CI
 
@@ -81,3 +95,4 @@ warns with the command to run when that restart fails.
 - [systemd/remuda-refresh.timer](../../systemd/remuda-refresh.timer)
 - [systemd/remuda-serve.service](../../systemd/remuda-serve.service)
 - [src/project.rs](../../src/project.rs)
+- [src/units.rs](../../src/units.rs)
