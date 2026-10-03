@@ -134,21 +134,21 @@ fn update(check_only: bool) -> Result<()> {
         }
         return Ok(());
     }
+    let exe = std::env::current_exe();
     let applied = selvedge::update::apply(&REMUDA, &cache)?;
     if applied.version == REMUDA.version {
         println!("remuda {} is the latest release", applied.version);
     } else {
         println!("updated remuda {} -> {}", REMUDA.version, applied.version);
-        let systemctl = |action: &str| {
-            std::process::Command::new("systemctl")
-                .args(["--user", action, "--quiet", SERVE_UNIT])
+        let synced = exe.and_then(|exe| {
+            std::process::Command::new(exe)
+                .arg("sync-units")
                 .stdin(std::process::Stdio::null())
                 .status()
-                .is_ok_and(|s| s.success())
-        };
-        if systemctl("is-active") && !systemctl("restart") {
+        });
+        if !synced.is_ok_and(|s| s.success()) {
             eprintln!(
-                "warning: {SERVE_UNIT} still runs the old binary; run `systemctl --user restart {SERVE_UNIT}`"
+                "warning: the systemd units were not brought up to date; run `remuda sync-units`"
             );
         }
     }
