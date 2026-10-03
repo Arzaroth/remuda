@@ -38,7 +38,7 @@ completions for bash, zsh and fish when it finds them. Pass `--no-timer`,
 (`... | bash -s -- --no-timer`). `--serve` also enables
 `remuda-serve.service`, which keeps [the page](#the-page) running for
 `remuda open`. Afterwards, `remuda update` replaces the binary
-with the latest release.
+with the latest release and brings the systemd units you installed up to date.
 
 If your shell sets `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `REMUDA_STORE`, the
 installer copies them to `~/.config/environment.d/60-remuda.conf` so the timer
