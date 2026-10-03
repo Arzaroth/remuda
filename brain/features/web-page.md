@@ -66,8 +66,8 @@ everything else.
 The page follows the store and TokenGauge's snapshot: a switch, import,
 label or refresh made from the CLI or another page, a run of the refresh
 timer, or a new TokenGauge fetch shows within a couple of seconds, without a
-reload. A change to a CLI's own login, such as signing in from the CLI,
-shows within a minute.
+reload, in every open tab. A change to a CLI's own login, such as signing in
+from the CLI, or enabling the refresh timer shows within a minute.
 `remuda open` opens the page a running `serve` shows, and
 `install.sh --serve` keeps one running as a user service. How the page is
 guarded, the API it calls and the service are in

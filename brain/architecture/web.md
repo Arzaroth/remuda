@@ -66,26 +66,33 @@ body. A chunked body gets a 411. At most 32 connections are handled at once;
 the next gets a 503 and is closed. Each runs on its own thread, because a
 Codex `login/finish` holds its request open until the browser calls back, and
 a thread that cannot start is a refused connection rather than a stopped
-server. Every answer closes the connection after draining what the client
-sent, so it is not reset before it reads the answer: for at most 300 ms in
-all, and on the accepting thread (the 503) only what has already arrived, so
-no client can hold a slot past its deadline or stall the accept loop.
+server. Every answer but the event stream below closes the connection after
+draining what the client sent, so it is not reset before it reads the
+answer: for at most 300 ms in all, and on the accepting thread (the 503) only
+what has already arrived, so no client without the token can hold a slot past
+its deadline or stall the accept loop.
 Responses carry `Cache-Control: no-store`, `nosniff` and `no-referrer`.
 
 `GET /api/events` is the one answer that stays open. After the guards (so
 only a holder of the token gets one), it takes one of 8 stream slots, inside
 the 32 connections, or gets a 503. It sends the head and `: connected`, then
 every 2 s compares `App::fingerprint`, the path, modification time and size
-of everything in the store one directory level down and of TokenGauge's
-snapshot, and sends `data: changed` when it moved. After 15 s with nothing
+of the store's `*.json` files, one directory level down, and of TokenGauge's
+snapshot, links followed, and sends `data: changed` when it moved. Other files
+in the store are left out: the temp files writes go through, and the redirect
+pages kept there when `$XDG_RUNTIME_DIR` is unset. `App::streams` names the
+route; the listener serves it itself, since it outlives one `Response`. After 15 s with nothing
 to send it writes a `: ` comment, so a client that vanished is found by the
 failed write. The client has nothing to send after its head, so anything it
 sends, or its closing the connection, ends the stream and frees the slot.
-Reading the state writes nothing in the store unless the live login moved,
-so a page that reloads on `changed` does not wake itself.
+Reading the state writes in the store only when it brings the live login
+forward or confirms an unverified entry, which the next read then finds done
+(and, on a fresh store, creates `.lock`, which is not JSON), so a page that
+reloads on `changed` does not keep waking itself.
 
-What the limits do not stop: another local user holding 32 idle connections,
-re-opened every 5 s, keeps the page answering 503. That is a nuisance with no
+What the limits do not stop: another local user holding the free connections
+(32, less one per browser following the page), re-opened every 5 s, keeps the
+page answering 503. That is a nuisance with no
 access to anything, and it ends when they stop.
 
 ## API
@@ -145,11 +152,17 @@ directory.
 
 The page is one self-contained file (`include_str!`), no external requests,
 light and dark. It reads `/api/events` through `fetch` (an `EventSource`
-cannot send the token header) and reloads the state on each `changed`, on
-reconnecting, and every minute, which keeps the relative times current and
-catches what the stream does not watch: the CLIs' own files, so a sign-in
-made in the CLI shows within a minute. A dropped stream is retried after 1 s,
-doubling to 30 s; a 401 (the server restarted with another token) stops it.
+cannot send the token header). A browser allows only about 6 connections per
+host across all its tabs, so one tab follows the stream, holding the Web Lock
+`remuda-events`, and passes each change to the others over the
+BroadcastChannel `remuda-changes`; when it closes, the next tab takes the lock.
+Every tab reloads the state on each `changed`, on the stream reconnecting, and
+every minute, which keeps the relative times current and catches what the
+stream does not watch: the CLIs' own files (a sign-in made in the CLI) and the
+systemd unit directories (the timer's state), which show within a minute.
+Only the newest load is drawn, so a slow one never overwrites a later one. A dropped stream is retried after 1 s,
+doubling to 30 s; a 401 (the server restarted with another token) stops it
+and frees the lock for another tab.
 None of these reloads happens while an editor is open, a confirmation is
 armed or the focus is in the list.
 
