@@ -16,6 +16,7 @@ mod runs;
 mod serve;
 mod served;
 mod store;
+mod units;
 
 use std::io::{self, BufRead};
 
@@ -116,6 +117,9 @@ enum Cmd {
         #[arg(long)]
         check: bool,
     },
+    /// Run by `update` as the new binary: bring the installed units up to date.
+    #[command(hide = true)]
+    SyncUnits,
 }
 
 fn update(check_only: bool) -> Result<()> {
@@ -130,23 +134,51 @@ fn update(check_only: bool) -> Result<()> {
         }
         return Ok(());
     }
+    let exe = std::env::current_exe();
     let applied = selvedge::update::apply(&REMUDA, &cache)?;
     if applied.version == REMUDA.version {
         println!("remuda {} is the latest release", applied.version);
     } else {
         println!("updated remuda {} -> {}", REMUDA.version, applied.version);
-        let systemctl = |action: &str| {
-            std::process::Command::new("systemctl")
-                .args(["--user", action, "--quiet", SERVE_UNIT])
+        let synced = exe.and_then(|exe| {
+            std::process::Command::new(exe)
+                .arg("sync-units")
                 .stdin(std::process::Stdio::null())
                 .status()
-                .is_ok_and(|s| s.success())
-        };
-        if systemctl("is-active") && !systemctl("restart") {
+        });
+        if !synced.is_ok_and(|s| s.success()) {
             eprintln!(
-                "warning: {SERVE_UNIT} still runs the old binary; run `systemctl --user restart {SERVE_UNIT}`"
+                "warning: the systemd units were not brought up to date; run `remuda sync-units`"
             );
         }
+    }
+    Ok(())
+}
+
+fn systemctl(args: &[&str]) -> bool {
+    std::process::Command::new("systemctl")
+        .arg("--user")
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+fn sync_units() -> Result<()> {
+    let done = units::refresh(&paths::installed_units());
+    if !done.changed.is_empty() {
+        println!("updated {}", done.changed.join(", "));
+        if !systemctl(&["daemon-reload"]) {
+            eprintln!("warning: run `systemctl --user daemon-reload`");
+        }
+    }
+    if systemctl(&["is-active", "--quiet", SERVE_UNIT]) && !systemctl(&["restart", SERVE_UNIT]) {
+        eprintln!(
+            "warning: {SERVE_UNIT} still runs the old binary; run `systemctl --user restart {SERVE_UNIT}`"
+        );
+    }
+    if !done.failed.is_empty() {
+        bail!("{}", done.failed.join("\n"));
     }
     Ok(())
 }
@@ -188,6 +220,9 @@ fn main() -> Result<()> {
     }
     if let Cmd::Update { check } = cli.command {
         return update(check);
+    }
+    if let Cmd::SyncUnits = cli.command {
+        return sync_units();
     }
     if let Cmd::Completions { shell } = cli.command {
         clap_complete::generate(shell, &mut Cli::command(), "remuda", &mut io::stdout());
@@ -376,7 +411,8 @@ fn main() -> Result<()> {
         | Cmd::Serve { .. }
         | Cmd::Open { .. }
         | Cmd::Completions { .. }
-        | Cmd::Update { .. } => {
+        | Cmd::Update { .. }
+        | Cmd::SyncUnits => {
             unreachable!()
         }
     }
