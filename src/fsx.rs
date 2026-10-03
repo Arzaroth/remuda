@@ -108,6 +108,16 @@ fn read_text(path: &Path) -> Result<Option<String>> {
 /// read, starting over otherwise. A read caught halfway through the other
 /// program's write is retried too. `edit` returning [`Changed`] stops it.
 pub fn update_json(path: &Path, edit: impl Fn(&mut Value) -> Result<()>) -> Result<()> {
+    update_json_pacing(path, edit, || {
+        std::thread::sleep(std::time::Duration::from_millis(20))
+    })
+}
+
+fn update_json_pacing(
+    path: &Path,
+    edit: impl Fn(&mut Value) -> Result<()>,
+    mut pause: impl FnMut(),
+) -> Result<()> {
     for _ in 0..10 {
         let before = read_text(path)?;
         let mut value = match &before {
@@ -115,7 +125,7 @@ pub fn update_json(path: &Path, edit: impl Fn(&mut Value) -> Result<()>) -> Resu
             Some(text) => match serde_json::from_str(text) {
                 Ok(value) => value,
                 Err(_) => {
-                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    pause();
                     continue;
                 }
             },
@@ -131,7 +141,7 @@ pub fn update_json(path: &Path, edit: impl Fn(&mut Value) -> Result<()>) -> Resu
         })? {
             return Ok(());
         }
-        std::thread::sleep(std::time::Duration::from_millis(20));
+        pause();
     }
     anyhow::bail!("{} kept changing while remuda wrote it", path.display())
 }
@@ -249,19 +259,20 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("config.json");
         fs::write(&path, r#"{"numStartups": "#).unwrap();
-        let fixer = {
-            let path = path.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(30));
+        let mut pauses = 0;
+        update_json_pacing(
+            &path,
+            |v| {
+                v["k"] = serde_json::json!(1);
+                Ok(())
+            },
+            || {
+                pauses += 1;
                 fs::write(&path, r#"{"numStartups": 3}"#).unwrap();
-            })
-        };
-        update_json(&path, |v| {
-            v["k"] = serde_json::json!(1);
-            Ok(())
-        })
+            },
+        )
         .unwrap();
-        fixer.join().unwrap();
+        assert_eq!(pauses, 1);
         let v = read_json(&path).unwrap().unwrap();
         assert_eq!(
             (v["numStartups"].clone(), v["k"].clone()),
