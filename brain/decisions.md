@@ -177,6 +177,8 @@ and a token in the query string is one the fragment was chosen to avoid.
 The server polls file metadata every 2 s rather than using inotify, so it
 needs no new dependency and sees a store on any filesystem; the event says
 only that something changed, and the page reloads `/api/state` as before.
+One tab per browser holds the stream and relays it over a BroadcastChannel,
+since a stream per tab would use up the browser's few connections per host.
 See [architecture/web.md](architecture/web.md).
 
 ## selvedge for updates, a curl installer for installs

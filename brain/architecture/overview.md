@@ -18,7 +18,7 @@ running.
 | `store.rs` | The credential store: entries, sidecars, rename, remove, the lock |
 | `serve.rs`, `serve.html` | The local page and its JSON API |
 | `served.rs` | The files a running page announces itself in, and finding it again for `open` |
-| `http.rs` | The page's HTTP listener: bounded reads, checks before bodies, a connection limit |
+| `http.rs` | The page's HTTP listener: bounded reads, checks before bodies, a connection limit, the event stream |
 | `oauth.rs` | The HTTP client and token requests both providers share |
 | `dirs.rs` | The directories interactive commands used, for the scheduled refresh to check |
 | `runs.rs` | The last scheduled refresh's record, for the page |
