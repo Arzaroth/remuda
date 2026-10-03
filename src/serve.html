@@ -443,11 +443,15 @@ function behind(state, id) {
   return u.updatedAt < (state.health?.switchedAt?.[id] ?? 0);
 }
 
+let loads = 0;
 async function load() {
+  const seq = ++loads;
   let state;
   try {
     state = await api("/api/state");
+    if (seq !== loads) return;
   } catch (e) {
+    if (seq !== loads) return;
     $("providers").innerHTML = `<div class="note">${esc(e.message)}. Open the link remuda printed when it started.</div>`;
     return;
   }
@@ -703,6 +707,13 @@ function reload() {
   if (!editing) load();
 }
 
+const changes = new BroadcastChannel("remuda-changes");
+changes.onmessage = reload;
+function changed() {
+  changes.postMessage(null);
+  reload();
+}
+
 async function follow() {
   let wait = 1000, again = false;
   for (;;) {
@@ -711,13 +722,13 @@ async function follow() {
       if (r.status === 401) return;
       if (r.ok) {
         wait = 1000;
-        if (again) reload();
+        if (again) changed();
         again = true;
         const events = r.body.pipeThrough(new TextDecoderStream()).getReader();
         for (let buf = "", chunk; !(chunk = await events.read()).done; ) {
           const parts = (buf + chunk.value).split("\n\n");
           buf = parts.pop();
-          if (parts.some((e) => e.split("\n").includes("data: changed"))) reload();
+          if (parts.some((e) => e.split("\n").includes("data: changed"))) changed();
         }
       }
     } catch {}
@@ -727,7 +738,10 @@ async function follow() {
 }
 
 load();
-follow();
+// Browsers allow a handful of connections per host across all tabs, so one
+// tab holds the stream and tells the others.
+if (navigator.locks) navigator.locks.request("remuda-events", follow);
+else follow();
 setInterval(reload, 60000);
 </script>
 </body>
