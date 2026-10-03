@@ -573,8 +573,9 @@ fn sync_units_rewrites_the_installed_units_and_reloads_systemd() {
     std::fs::write(
         bin.join("systemctl"),
         format!(
-            "#!/bin/sh\necho \"$*\" >> '{}'\ncase \"$*\" in *is-active*) exit 3;; esac\n",
-            log.display()
+            "#!/bin/sh\necho \"$*\" >> '{}'\ncase \"$*\" in *is-active*) [ -e '{}' ] || exit 3;; esac\n",
+            log.display(),
+            home.path("serve-active").display()
         ),
     )
     .unwrap();
@@ -617,4 +618,13 @@ fn sync_units_rewrites_the_installed_units_and_reloads_systemd() {
     assert!(run().status.success());
     let calls = std::fs::read_to_string(&log).unwrap();
     assert!(!calls.contains("daemon-reload"), "{calls}");
+
+    std::fs::remove_file(&log).unwrap();
+    std::fs::write(home.path("serve-active"), "").unwrap();
+    assert!(run().status.success());
+    let calls = std::fs::read_to_string(&log).unwrap();
+    assert!(
+        calls.contains("--user restart remuda-serve.service"),
+        "{calls}"
+    );
 }
