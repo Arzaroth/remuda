@@ -21,7 +21,7 @@ done.
       first whether Claude Code and Codex accept an OAuth login behind a custom
       base URL, and how each copes with a credential that has no refresh token.
 - [ ] Hub and satellites: pairing and per-satellite tokens, TLS on a plain LAN.
-- [ ] Banked resets: find the endpoints that list and spend them for Claude and
-      Codex, and whether TokenGauge should list them first.
+- [ ] Banked resets: check Codex's credit fields against a real answer, and
+      agree with TokenGauge on adding grants and credits to its snapshot.
 - [ ] Management page: pick the framework (vendored Preact+htm, built
       Svelte/Solid, or vanilla), and the config file format and location.

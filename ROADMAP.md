@@ -76,12 +76,54 @@ LAN with no tailnet, TLS or a warning that traffic is in clear.
 
 ## Banked resets
 
-List the resets each Claude and Codex login has banked, and use one from remuda
-(the CLI and the page). Where the figures come from is still open: TokenGauge's
-snapshot, or a call remuda makes itself. In the second case the endpoint gets
-read out of the CLI's binary like the OAuth constants, not guessed. Using a
-reset cannot be undone, so it asks for a second click on the page, and a
-confirmation (or a flag) in the CLI.
+List the limit resets each Claude and Codex login has banked, with their expiry,
+and spend one from remuda (the CLI and the page). Both providers expose them;
+the endpoints below were read out of Claude Code 2.1.289 and codex-cli 0.153.4,
+and get re-read from the binary when a release moves them.
+
+**Claude** calls them grants, under the `cedar_ember` program (`/limit-reset` in
+Claude Code, "Limit resets" in claude.ai's settings).
+
+- List: `GET /api/oauth/usage?cedar_ember=1&skip_spend=1` adds a `cedar_ember`
+  block to the usage answer: `eligible`, `ineligible_reason`, `at_limit`,
+  `exhausted`, `next_grant_id`, `weekly_resets_at`, `cooldown_until` and
+  `grants[]`. Each grant has `id`, `label`, `resets_total`, `resets_left`,
+  `starts_at`, `ends_at` (its expiry), `clears` (the windows it resets),
+  `paused`, `usable_now`, `use_requires_limit`, `percent_used` and `blocking`.
+- Spend: `POST /api/organizations/<organizationUuid>/reset_rate_limits` with
+  `{"program": "cedar_ember", "grant_id", "request_id"}`, where `request_id`
+  is a fresh id (`[A-Za-z0-9_-]{1,64}`) so a retried request is not spent
+  twice. It answers `result` (`reset`, `already_used`, `not_limited`,
+  `cooldown`, `ineligible`, `unavailable`), `reason`, `resets_left`, `cleared`,
+  `weekly_resets_at` and `cooldown_until`. The organization comes from the
+  sidecar's `oauthAccount`, and the token needs the `user:profile` scope.
+
+**Codex** calls them rate limit reset credits (`/usage` in Codex: "View account
+usage or redeem an earned reset"), under `https://chatgpt.com/backend-api`.
+
+- Count: `GET /wham/usage` carries `rate_limit_reset_credits.available_count`.
+- List: `GET /wham/rate-limit-reset-credits`. Each credit has a `credit_id`, a
+  `reset_type`, `granted_at` and `expires_at`, and a status (`available`,
+  `redeeming`, `cooldown_active`).
+- Spend: `POST /wham/rate-limit-reset-credits/consume` with `credit_id` and a
+  fresh `redeem_request_id`. The outcome is `reset`, `nothingToReset` or
+  `alreadyRedeemed`, along with the windows it reset.
+
+Codex's field names come from its type names and want checking against a real
+answer before they are relied on.
+
+Listing belongs with the rest of the usage figures. TokenGauge already calls
+both usage endpoints, so the cheapest route is TokenGauge adding
+`cedar_ember=1` and the reset credits to its snapshot (an ADR 0003 change), and
+remuda reading them from there. Spending is remuda's own call, made with the
+stored credential's access token. For the active login that is the live token,
+which remuda reads and never refreshes. An inactive login whose access token
+has expired is refreshed first, the usual way. A reset cannot be undone, and
+a grant marked `use_requires_limit` answers `not_limited` until a window is
+maxed, so the page asks for a second click and shows what the grant clears,
+and the CLI (`remuda reset <name>`) asks for confirmation unless given `--yes`.
+Auto mode can weigh banked resets too: a login with one about to expire is
+worth spending first.
 
 ## A management page
 
