@@ -16,7 +16,7 @@ running.
 | `provider.rs` | The `Provider` and `PendingLogin` traits |
 | `claude.rs`, `codex.rs` | The two providers, including their OAuth clients |
 | `store.rs` | The credential store: entries, sidecars, rename, remove, the lock |
-| `serve.rs`, `serve.html` | The local page and its JSON API |
+| `serve.rs`, `serve.html` | The local page and its JSON API; `serve.html` is built from `web/` |
 | `served.rs` | The files a running page announces itself in, and finding it again for `open` |
 | `units.rs` | The systemd units the binary carries, and rewriting installed ones after an update |
 | `http.rs` | The page's HTTP listener: bounded reads, checks before bodies, a connection limit, the event stream |

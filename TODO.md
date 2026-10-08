@@ -24,8 +24,7 @@ done.
 - [ ] Hub and satellites: pairing and per-satellite tokens, TLS on a plain LAN.
 - [ ] Banked resets: check Codex's credit fields against a real answer, and
       agree with TokenGauge on adding grants and credits to its snapshot.
-- [ ] Management page: pick the framework (vendored Preact+htm, built
-      Svelte/Solid, or vanilla), and the config file format and location.
+- [ ] Management page: the config file format and location.
 - [ ] More providers: which comes first (Kimi and Grok fit the file model
       as it is), and how each confirms its account and refreshes.
 - [ ] More providers: whether `cursor-agent` honours a config-dir override,

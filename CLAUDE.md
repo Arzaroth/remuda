@@ -48,7 +48,9 @@ credential file's bytes). Changing any of them changes that ADR too.
 - `CHANGELOG.md` `[Unreleased]` gets an entry with every user-facing change; it
   becomes the GitHub release notes.
 - Before finishing: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`,
-  `cargo test`. CI also shellchecks `scripts/install.sh` and
+  `cargo test`. After a change under `web/` (the page's source), also
+  `pnpm test` and `pnpm build` there: `src/serve.html` is the built page,
+  committed, and CI fails when it is stale. CI also shellchecks `scripts/install.sh` and
   `scripts/release.sh`.
 - `scripts/coverage.sh` ranks files by uncovered lines; `main.rs`'s process
   surface stays uncovered on purpose.
