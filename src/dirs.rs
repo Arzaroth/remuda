@@ -75,7 +75,7 @@ pub fn plan(recorded: Option<&Seen>, now: &Seen, doing: &str) -> Plan {
 /// never recorded. The units say so themselves: INVOCATION_ID is no sign of
 /// one, since a desktop that runs its terminal as a unit hands it to every
 /// shell.
-pub fn is_scheduled(flag: bool) -> bool {
+pub fn is_service(flag: bool) -> bool {
     flag || std::env::var_os("REMUDA_SERVICE").is_some_and(|v| !v.is_empty())
 }
 
