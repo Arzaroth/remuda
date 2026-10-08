@@ -1,4 +1,5 @@
 import { createSignal, For, Match, onMount, Show, Switch } from 'solid-js';
+import { brand } from '../brand';
 import { createConfirm } from '../confirm';
 import { date, DAY, HOUR, span, until, usedTone } from '../format';
 import { act, now, store } from '../state';
@@ -7,24 +8,28 @@ import { dropping, dropsLive, overwrite, providerUsage, taken, usageOf } from '.
 import { Icon } from './Icon';
 import { Meter } from './Meter';
 
-export function Group(props: { p: Provider }) {
+export function Group(props: { p: Provider; titled: boolean }) {
   const s = () => store.s!;
   const creds = () => s().credentials.filter((c) => c.provider === props.p.id);
   const live = () => s().live.find((l) => l.provider === props.p.id);
   const usage = () => providerUsage(s(), props.p.id);
   return (
     <section class="group">
-      <div class="group-head">
-        <h2>{props.p.name}</h2>
-        <span class="count">{creds().length}</span>
-      </div>
-      <For
-        each={creds()}
-        fallback={<div class="empty">No stored {props.p.name} logins. Import the one in use or add an account below.</div>}
-      >
-        {(c) => <Row c={c} usage={usage()} live={live()} />}
-      </For>
+      <Show when={props.titled}>
+        <div class="group-head">
+          <span class="brand-dot" style={{ background: brand(props.p.id) }} />
+          <h2>{props.p.name}</h2>
+        </div>
+      </Show>
       <Show when={live()}>{(l) => <LiveNote p={props.p} live={l()} />}</Show>
+      <div class="cards">
+        <For
+          each={creds()}
+          fallback={<div class="empty">No stored {props.p.name} logins. Import the one in use or add an account below.</div>}
+        >
+          {(c) => <Row c={c} usage={usage()} live={live()} />}
+        </For>
+      </div>
     </section>
   );
 }
@@ -39,17 +44,19 @@ function WindowCell(props: { w: Window }) {
   return (
     <div class="win">
       <div class="win-head">
-        <span title={props.w.title}>{props.w.title}</span>
+        <span class="what" title={props.w.title}>
+          {props.w.title}
+        </span>
         <b>{props.w.usedPercent}%</b>
+        <Show when={resets()} fallback={<span class="when">no reset</span>}>
+          {(at) => (
+            <span class="when" title={`Resets ${date(at())}`}>
+              {until(at(), now())}
+            </span>
+          )}
+        </Show>
       </div>
       <Meter fraction={props.w.usedPercent / 100} tone={usedTone(props.w.usedPercent)} />
-      <Show when={resets()} fallback={<div class="when">No reset pending</div>}>
-        {(at) => (
-          <div class="when" title={date(at())}>
-            Resets {until(at(), now())}
-          </div>
-        )}
-      </Show>
     </div>
   );
 }
@@ -105,9 +112,9 @@ function Lifetime(props: { title: string; at: number | null; horizon: number; wa
         const tone = () => (left() < 0 ? 'bad' : left() < props.warnBelow ? 'warn' : '');
         const cls = () => (left() < 0 ? 'late' : left() < props.warnBelow ? 'soon' : '');
         return (
-          <div title={date(props.at!)}>
+          <div class="win" title={date(props.at!)}>
             <div class="win-head">
-              <span>{props.title}</span>
+              <span class="what">{props.title}</span>
               <b class={cls()}>{left() < 0 ? 'expired' : span(left())}</b>
             </div>
             <Meter fraction={left() / props.horizon} tone={tone()} />
@@ -238,9 +245,9 @@ function Row(props: { c: Credential; usage: Shown | null; live: Live | undefined
   );
 
   return (
-    <div class="row" classList={{ active: c().active }}>
-      <div class="who">
-        <div>
+    <article class="card" classList={{ active: c().active }}>
+      <header class="who">
+        <div class="name-line">
           <Show when={editing()?.kind === 'rename'} fallback={<span class="spec">{c().name}</span>}>
             {editor('rename')}
           </Show>
@@ -265,7 +272,7 @@ function Row(props: { c: Credential; usage: Shown | null; live: Live | undefined
             </span>
           </Show>
         </div>
-      </div>
+      </header>
       <div class="usage">
         <Windows c={c()} usage={props.usage} />
       </div>
@@ -273,7 +280,7 @@ function Row(props: { c: Credential; usage: Shown | null; live: Live | undefined
         <Lifetime title="Access token" at={c().expiresAt} horizon={8 * HOUR} warnBelow={HOUR} />
         <Lifetime title="Sign-in lasts" at={c().refreshTokenExpiresAt} horizon={30 * DAY} warnBelow={3 * DAY} />
       </div>
-      <div class="actions">
+      <footer class="actions">
         <button
           class="btn go"
           classList={{ armed: !!confirms.use.text() }}
@@ -305,8 +312,8 @@ function Row(props: { c: Credential; usage: Shown | null; live: Live | undefined
         >
           {confirms.remove.text() ?? <Icon name="remove" />}
         </button>
-      </div>
-    </div>
+      </footer>
+    </article>
   );
 }
 
