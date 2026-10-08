@@ -26,3 +26,9 @@ done.
       agree with TokenGauge on adding grants and credits to its snapshot.
 - [ ] Management page: pick the framework (vendored Preact+htm, built
       Svelte/Solid, or vanilla), and the config file format and location.
+- [ ] More providers: which comes first (Kimi and Grok fit the file model
+      as it is), and how each confirms its account and refreshes.
+- [ ] More providers: whether `cursor-agent` honours a config-dir override,
+      which `remuda run` needs.
+- [ ] More providers: where API keys are stored (the store, as a credential
+      file of their own) and how TokenGauge reads them per name.
