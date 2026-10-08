@@ -8,6 +8,7 @@ mod fsx;
 mod gauge;
 mod grok;
 mod http;
+mod kimi;
 mod oauth;
 mod ops;
 mod paths;
@@ -28,6 +29,7 @@ use clap::{CommandFactory, Parser, Subcommand};
 use crate::claude::Claude;
 use crate::codex::Codex;
 use crate::grok::Grok;
+use crate::kimi::Kimi;
 use crate::project::REMUDA;
 use crate::provider::Provider;
 use crate::store::Store;
@@ -40,7 +42,7 @@ struct Cli {
     command: Cmd,
 }
 
-const PROVIDERS: [&str; 3] = ["claude", "codex", "grok"];
+const PROVIDERS: [&str; 4] = ["claude", "codex", "grok", "kimi"];
 
 #[derive(Subcommand)]
 enum Cmd {
@@ -256,7 +258,8 @@ fn main() -> Result<()> {
     let claude = Claude::from_env()?;
     let codex = Codex::from_env()?;
     let grok = Grok::from_env()?;
-    let providers: [&dyn Provider; 3] = [&claude, &codex, &grok];
+    let kimi = Kimi::from_env()?;
+    let providers: [&dyn Provider; 4] = [&claude, &codex, &grok, &kimi];
     let seen = dirs::now(&providers);
     if let Some(doing) = cli.command.needs_store()
         && !store.root().exists()
@@ -286,8 +289,12 @@ fn main() -> Result<()> {
                 bail!("not serving: the service would act on other logins than the shell's");
             }
         }
-        let providers: Vec<Box<dyn Provider>> =
-            vec![Box::new(claude), Box::new(codex), Box::new(grok)];
+        let providers: Vec<Box<dyn Provider>> = vec![
+            Box::new(claude),
+            Box::new(codex),
+            Box::new(grok),
+            Box::new(kimi),
+        ];
         let (listener, port) = http::bind(port)?;
         let token = pkce::random()?;
         let url = format!("http://127.0.0.1:{port}/#{token}");

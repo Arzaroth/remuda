@@ -45,6 +45,11 @@ pub fn grok_auth() -> PathBuf {
         .join("auth.json")
 }
 
+/// The Kimi Code CLI's home: `KIMI_CODE_HOME`, else `~/.kimi-code`.
+pub fn kimi_home() -> PathBuf {
+    var_dir("KIMI_CODE_HOME").unwrap_or_else(|| home().join(".kimi-code"))
+}
+
 /// Private per-user scratch space: `$XDG_RUNTIME_DIR/remuda`, else the store.
 pub fn runtime_dir() -> PathBuf {
     env::var_os("XDG_RUNTIME_DIR")
