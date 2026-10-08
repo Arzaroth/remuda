@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-08
+
 ### Fixed
 
 - On a desktop that runs its terminal as a systemd service (GNOME), commands
