@@ -362,6 +362,19 @@ fn only_import_and_login_start_a_missing_store() {
     }
     assert!(!home.path(".local/share/remuda").exists());
 
+    let fresh = home
+        .command(&["import", "work"])
+        .env("INVOCATION_ID", "abc")
+        .output()
+        .unwrap();
+    assert!(
+        fresh.status.success(),
+        "{}",
+        String::from_utf8_lossy(&fresh.stderr)
+    );
+    assert!(store.join(".dirs.json").exists());
+    std::fs::remove_dir_all(home.path(".local/share/remuda")).unwrap();
+
     let mut login = home.command(&["login", "perso", "--no-browser"]);
     login.stdin(std::process::Stdio::null());
     let _ = login.output().unwrap();
@@ -474,13 +487,15 @@ fn the_scheduled_refresh_stops_where_the_shell_looked_elsewhere() {
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(!last_run.exists());
 
-    let out = run(&["refresh"], &[("REMUDA_SERVICE", Path::new("1"))]);
-    assert!(!out.status.success(), "{}", stderr(&out));
-    assert!(
-        stderr(&out).contains("claude: not refreshing"),
-        "{}",
-        stderr(&out)
-    );
+    for marker in ["1", ""] {
+        let out = run(&["refresh"], &[("REMUDA_SERVICE", Path::new(marker))]);
+        assert!(!out.status.success(), "{}", stderr(&out));
+        assert!(
+            stderr(&out).contains("claude: not refreshing"),
+            "{}",
+            stderr(&out)
+        );
+    }
 
     // A desktop that runs its terminal as a unit hands INVOCATION_ID to every
     // shell, and a shell's command still records.

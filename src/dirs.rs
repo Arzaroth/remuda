@@ -121,6 +121,20 @@ mod tests {
     }
 
     #[test]
+    fn a_remuda_unit_is_known_by_its_cgroup() {
+        let app = "0::/user.slice/user-1000.slice/user@1000.service/app.slice";
+        assert!(in_remuda_unit(&format!("{app}/remuda-refresh.service\n")));
+        assert!(in_remuda_unit(&format!(
+            "12:pids:/user.slice\n1:name=systemd:{app}/remuda-serve.service\n0::{app}/remuda-serve.service"
+        )));
+        assert!(!in_remuda_unit(&format!(
+            "{app}/app-gnome-org.gnome.Terminal-4242.scope"
+        )));
+        assert!(!in_remuda_unit(&format!("{app}/run-p1-i2.service")));
+        assert!(!in_remuda_unit(""));
+    }
+
+    #[test]
     fn a_record_is_rewritten_only_when_it_changes_and_never_fails_a_command() {
         use std::os::unix::fs::MetadataExt;
         let tmp = tempfile::tempdir().unwrap();
