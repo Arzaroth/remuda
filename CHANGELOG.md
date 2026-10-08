@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-08
+
 ### Changed
 
 - The `serve` page is redesigned. Each login is a card with a row per usage
