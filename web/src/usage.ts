@@ -43,9 +43,28 @@ export type Combined = {
   of: number;
   pooled: number;
   parts: Part[];
+  widths: number[];
   leftOut: string[];
   resetsAt: number | null;
 };
+
+const MIN_SEGMENT = 0.1;
+
+export function segmentWidths(weights: number[]): number[] {
+  const n = weights.length;
+  if (MIN_SEGMENT * n >= 1) return weights.map(() => 1 / n);
+  const pinned = weights.map(() => false);
+  for (;;) {
+    const free = 1 - MIN_SEGMENT * pinned.filter(Boolean).length;
+    const weight = weights.reduce((sum, w, i) => (pinned[i] ? sum : sum + w), 0);
+    const widths = weights.map((w, i) => (pinned[i] ? MIN_SEGMENT : (w / weight) * free));
+    let moved = false;
+    widths.forEach((w, i) => {
+      if (!pinned[i] && w < MIN_SEGMENT) moved = pinned[i] = true;
+    });
+    if (!moved) return widths;
+  }
+}
 
 const shownBy = (creds: Credential[], usage: Shown | null) =>
   creds.map((c) => {
@@ -83,6 +102,7 @@ export function combine(creds: Credential[], usage: Shown | null, weighted: bool
         of: Math.round((total / largest) * 100),
         pooled: sum / total,
         parts,
+        widths: segmentWidths(parts.map((p) => p.weight)),
         leftOut,
         resetsAt: resets.length ? Math.min(...resets) : null,
       },
