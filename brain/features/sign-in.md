@@ -1,6 +1,6 @@
 # Sign-in
 
-`remuda login <name> [-p codex] [--force] [--no-browser]` adds an account
+`remuda login <name> [-p <cli>] [--force] [--no-browser]` adds an account
 without touching the CLI's live login. It checks the name first
 (`commands::begin_login`), prints the provider's authorize URL and opens it
 through a private redirect file, never as a command-line argument.
@@ -28,6 +28,16 @@ window avoids the account you are signed into.
   denied consent with this attempt's state ends it. The stored account is the
   seat the new tokens name.
 
+- **Grok and Kimi**: a device code ([device.rs](../../src/device.rs)). The
+  URL carries the code to approve, and remuda polls the token endpoint until
+  the user approves or refuses, the code expires, or the page cancels. Nothing
+  listens locally, so the browser can be anywhere. Grok's file is built the
+  way the CLI writes one; Kimi's account is whoever `/me` says.
+- **Cursor**: `cursor.com/loginDeepControl` with a PKCE challenge and a uuid;
+  remuda polls `api2.cursor.sh/auth/poll` with the verifier until the tokens
+  are there, backing off from 1 s to 10 s.
+- **GLM and opencode Go**: the key page opens and the pasted key is the login.
+
 Saving takes the store lock and re-checks: a name taken meanwhile, or an
 account already stored under another name, refuses the result.
 
@@ -39,3 +49,6 @@ The page offers the same flow in two calls; see [web-page.md](web-page.md).
 - [src/commands.rs](../../src/commands.rs) `login`, `save_login`
 - [src/claude.rs](../../src/claude.rs) `start_login`, `finish_login`
 - [src/codex.rs](../../src/codex.rs) `begin_login`, `CodexPending`
+- [src/device.rs](../../src/device.rs) `DeviceFlow`, `DevicePending`
+- [src/cursor.rs](../../src/cursor.rs) `CursorPending`
+- [src/apikey.rs](../../src/apikey.rs) `KeyPending`

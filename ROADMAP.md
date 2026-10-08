@@ -56,43 +56,13 @@ have rotated them.
 
 ## More providers, at parity with TokenGauge
 
-remuda keeps Claude and Codex logins only. TokenGauge also reads Kimi, Grok,
-GLM (z.ai), OpenRouter, opencode Go and Cursor, and every provider it reads
-should be one remuda can keep several logins for. They come in two kinds.
+remuda keeps every provider TokenGauge reads but OpenRouter, whose key is a
+management key as often as an inference one. What is left:
 
-**A CLI login in a file**, which fits remuda as it is: store the file, switch
-by writing the login's keys into it, sync it back before reading the store.
-
-| Provider | File | Override |
-| --- | --- | --- |
-| Kimi | `~/.kimi-code/credentials/kimi-code.json` (plus `device_id` beside it) | `KIMI_CODE_HOME` |
-| Grok | `~/.grok/auth.json`, an object keyed by OIDC scope URL | `GROK_HOME` |
-| Cursor | `~/.config/cursor/auth.json`, written by `cursor-agent` | unknown |
-
-Cursor's IDE keeps its own login in a SQLite database (`state.vscdb`) that
-remuda leaves alone; only `cursor-agent`'s file gets switched.
-
-**An API key in an environment variable**: GLM (`Z_AI_API_KEY`), OpenRouter,
-opencode Go (`OPENCODE_API_KEY`), and Kimi when `KIMI_CODE_API_KEY` is set.
-There is no file to switch, and remuda cannot change a running shell's
-environment. remuda stores the keys by name, `remuda run` hands the chosen one
-to the CLI in its environment, and `remuda env <name>` prints the line for a
-shell to `eval`. A key never refreshes and has no account to confirm beyond
-what the provider's API reports.
-
-Each new provider needs what Claude and Codex have:
-
-- `Provider::identify`, so tokens are only filed under an account the provider
-  confirmed;
-- its refresh flow, read out of the CLI's binary like the OAuth constants, and
-  the active login never refreshed (Kimi and Grok leave refresh to their CLIs);
-- import of the CLI's live login first; a sign-in from remuda can come later;
-- `remuda run` support through its override variable, so `remuda kimi work` and
-  `remuda grok work` work like `remuda claude work`.
-
-TokenGauge reads remuda's store for Claude and Codex only, so each provider
-added here is added there too: `<store>/<provider>/<name>.json` for the new
-providers is an ADR 0003 change.
+- `remuda run` support through each CLI's override variable, so `remuda kimi
+  work` and `remuda grok work` work like `remuda claude work`, and an API key
+  is handed to the CLI in its environment.
+- OpenRouter, once it is settled which of its two keys a stored credential is.
 
 ## Hub and satellites
 

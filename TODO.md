@@ -25,9 +25,11 @@ done.
 - [ ] Banked resets: check Codex's credit fields against a real answer, and
       agree with TokenGauge on adding grants and credits to its snapshot.
 - [ ] Management page: the config file format and location.
-- [ ] More providers: which comes first (Kimi and Grok fit the file model
-      as it is), and how each confirms its account and refreshes.
 - [ ] More providers: whether `cursor-agent` honours a config-dir override,
       which `remuda run` needs.
-- [ ] More providers: where API keys are stored (the store, as a credential
-      file of their own) and how TokenGauge reads them per name.
+- [ ] More providers: check Grok, Kimi and Cursor sign-in, refresh and
+      identity against real accounts. They are built from the CLIs' source
+      (Grok, Kimi) and from open-source clients (Cursor), and only the mocks
+      have run them.
+- [ ] The page asks for "the code the sign-in page shows" when a GLM or
+      opencode sign-in wants the API key; the CLI already says "the API key".

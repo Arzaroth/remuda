@@ -5,7 +5,7 @@ from a CLI. `creds` is always the store's shape for that CLI.
 
 | Method | Meaning |
 | --- | --- |
-| `id`, `name` | `claude` / "Claude Code", `codex` / "Codex" |
+| `id`, `name` | `claude` / "Claude Code", `codex` / "Codex", `grok`, `kimi`, `cursor`, `glm`, `opencode` |
 | `home` | The directory the CLI keeps its login in, as this process resolves it |
 | `access_token`, `refresh_token`, `expires_at`, `refresh_expires_at`, `plan` | Read from `creds` |
 | `live` | The login the CLI is signed into, in store shape, or none |
@@ -15,9 +15,11 @@ from a CLI. `creds` is always the store's shape for that CLI.
 | `install` | Make an entry the live login |
 | `lock_live` | A lock other writers of the live login share, held by a switch (none by default) |
 | `refresh` | Rotate the tokens in place; returns the account the endpoint answered for |
+| `renews` | False for an API key, which `refresh` skips (true by default) |
+| `env_line` | The `export` line `remuda env` prints, for a key read from the environment |
 | `begin_login` | Start a sign-in, returning a `PendingLogin` |
 
-A third CLI is one more implementation plus a line in `main.rs` (the
+Another CLI is one more implementation plus a line in `main.rs` (the
 `PROVIDERS` list for `-p` and the provider arrays) and in `serve`'s list. Token
 requests go through [oauth.rs](../../src/oauth.rs), which also turns a refused
 refresh token into "sign this credential in again".
@@ -76,11 +78,85 @@ refresh token into "sign this credential in again".
   state ends it, as a code or a refusal. It can be cancelled from another
   thread (the page's cancel button).
 
+## Grok
+
+- File: `auth.json` under `GROK_HOME`, else `~/.grok`, or `GROK_AUTH_PATH`
+  itself. An object keyed by `<issuer>::<client id>`; the login is the entry
+  whose key starts `https://auth.x.ai::` and has a `key`. The whole file is
+  stored. An entry under any other scope with a `key` and no OIDC entry is an
+  API key, reported by `foreign_login`.
+- Identity: the access token's own `sub`. Email from the entry. Expiry: the
+  token's `exp`.
+- `lock_live` takes `auth.json.lock`, the flock the CLI refreshes under.
+- OAuth (xai-org/grok-build, `xai-grok-login`): issuer `auth.x.ai`, client id
+  `b1a00492-073a-47ea-816f-4c329264a828`. Refresh is a form POST to
+  `/oauth2/token`; the refresh token rotates and is single use. Sign-in is a
+  device code (`/oauth2/device/code`), and the stored file is built the way
+  the CLI writes one.
+
+## Kimi Code
+
+- File: `credentials/kimi-code.json` under `KIMI_CODE_HOME`, else
+  `~/.kimi-code`, stored whole. A signed-out CLI keeps the file with its tokens
+  emptied, which reads as signed out. `expires_at` is epoch seconds, possibly
+  fractional.
+- Identity: the file names nobody, so `identify` asks
+  `api.kimi.com/coding/v1/me` and `live_identity` is always none.
+- OAuth (MoonshotAI/kimi-code, `packages/oauth`): host `auth.kimi.com`, client
+  id `17e5f671-d194-4dfb-9706-5516cb48c098`. Every call carries the CLI's
+  `X-Msh-*` device headers with the CLI's own `device_id`, never a new one.
+  Refresh is a form POST to `/api/oauth/token` and rotates; sign-in is a device
+  code (`/api/oauth/device_authorization`).
+- The CLI's refresh lock is a lock directory (`oauth/kimi-code.lock`), not a
+  flock, so `lock_live` takes nothing; the switch's compare-and-swap is what
+  guards it.
+
+## Cursor
+
+- File: `cursor-agent`'s `auth.json` under `CURSOR_CONFIG_DIR`, else
+  `$XDG_CONFIG_HOME/cursor`: `{accessToken, refreshToken, apiKey}`, stored
+  whole. A file with only an `apiKey` is a foreign login.
+- Identity: the user id after the `|` in the access token's `sub`.
+- cursor-agent is closed source. Refresh is a JSON POST to
+  `api2.cursor.sh/oauth/token` with client id `KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB`;
+  it usually returns only an access token, and a session Cursor will not renew
+  answers 200 with `shouldLogout`, which is a refused refresh. Sign-in opens
+  `cursor.com/loginDeepControl` with a PKCE challenge and a uuid and polls
+  `api2.cursor.sh/auth/poll` until it returns the tokens.
+
+## API keys: GLM and opencode Go
+
+`ApiKey` ([apikey.rs](../../src/apikey.rs)) is both. A credential is
+`{"key": ...}`, filed under `key-` and the first 16 hex digits of the key's
+SHA-256: there is no account to confirm, and the key itself never reaches a
+sidecar. `renews` is false, so `refresh` skips them. Sign-in opens the key
+page and takes the pasted key (`asks_for`: "the API key").
+
+- GLM reads `Z_AI_API_KEY` (legacy `ZAI_API_TOKEN`) and nothing else, so
+  `install` refuses and points at `remuda env`.
+- opencode Go reads `OPENCODE_API_KEY`, else the `opencode-go` entry of
+  `$XDG_DATA_HOME/opencode/auth.json`, which holds every provider opencode is
+  connected to. `install` rewrites that entry only, compared and swapped on the
+  key it replaces, and refuses when the variable is set, since it would win.
+
+## Sign-in by device code
+
+[device.rs](../../src/device.rs) is RFC 8628 for Grok and Kimi: ask for a
+device code, hand the verification URL to the browser, poll the token endpoint
+at the interval given (slower on `slow_down`) until it answers, the user
+refuses, the code expires, or the page cancels. Nothing listens locally, so
+the browser can be on another machine.
+
 ## Sources
 
 - [src/provider.rs](../../src/provider.rs)
 - [src/claude.rs](../../src/claude.rs)
 - [src/codex.rs](../../src/codex.rs)
+- [src/grok.rs](../../src/grok.rs)
+- [src/kimi.rs](../../src/kimi.rs)
+- [src/cursor.rs](../../src/cursor.rs)
+- [src/apikey.rs](../../src/apikey.rs)
+- [src/device.rs](../../src/device.rs)
 - [src/pkce.rs](../../src/pkce.rs)
 - [src/oauth.rs](../../src/oauth.rs)
 - [src/paths.rs](../../src/paths.rs)

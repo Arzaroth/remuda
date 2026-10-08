@@ -33,7 +33,9 @@ install left running is restarted, so it does not stay on the old binary. A `pro
 shipped or not installed.
 
 A systemd user service does not see what a shell exports, so the installer
-writes whichever of `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `REMUDA_STORE` are set
+writes whichever of `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME`,
+`GROK_AUTH_PATH`, `KIMI_CODE_HOME`, `CURSOR_CONFIG_DIR` and `REMUDA_STORE` are
+set
 to `~/.config/environment.d/60-remuda.conf` and into the running user manager.
 Without that, the timer would look at the default locations, miss the live
 login, and refresh the active credential.
@@ -61,7 +63,8 @@ stops it before anything is created.
   or a serve unit `install.sh` restarted without `--serve`. `INVOCATION_ID` is
   not taken as a sign of systemd: GNOME runs its terminal as a user service,
   so every shell it opens has it.
-- A relative `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `REMUDA_STORE` is made
+- A relative directory variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
+  `REMUDA_STORE` and the others above) is made
   absolute before use, so the same string from another directory is not taken
   for the same place.
 - A record that cannot be written is a warning, never a failed command.

@@ -1,6 +1,7 @@
 # remuda
 
-Keeps several Claude Code and Codex logins and switches the one each CLI uses.
+Keeps several Claude Code, Codex, Grok, Kimi and Cursor logins, and GLM and
+opencode Go API keys, and switches the one each CLI uses.
 Start with `brain/BRAIN.md` to find how anything works.
 
 ## The brain
@@ -31,8 +32,9 @@ follow, and each has tests:
 
 Tests never touch the developer's real files or the network: providers are
 built with `::at(dir, Api::local(url))`, and `tests/cli.rs` points the binary
-at a mock through `REMUDA_TEST_CLAUDE_API` / `REMUDA_TEST_OPENAI_API`, which
-exist in debug builds only. A release build has no way to redirect an OAuth
+at a mock through `REMUDA_TEST_CLAUDE_API`, `REMUDA_TEST_OPENAI_API`,
+`REMUDA_TEST_XAI_API`, `REMUDA_TEST_KIMI_API` and `REMUDA_TEST_CURSOR_API`,
+which exist in debug builds only. A release build has no way to redirect an OAuth
 endpoint; keep it that way. The suite must pass with no network and an empty
 `HOME`; `brain/architecture/testing.md` has the command. Manual smoke tests use
 `REMUDA_STORE` pointed at a scratch directory.
@@ -41,7 +43,9 @@ endpoint; keep it that way. The suite must pass with no network and an empty
 
 TokenGauge (ADR 0003) reads `<store>/<provider>/<name>.json` and the sidecar keys
 `accountId`, `email`, `label` and `credsDigest` (lowercase hex SHA-256 of the
-credential file's bytes). Changing any of them changes that ADR too.
+credential file's bytes), and how each provider's `accountId` is derived: an
+API key's is `key-` and 16 hex digits of its SHA-256, which TokenGauge
+computes for the live key too. Changing any of them changes that ADR too.
 
 ## Conventions
 
@@ -59,3 +63,6 @@ credential file's bytes). Changing any of them changes that ADR too.
 - The OAuth constants in `claude.rs` and `codex.rs` were read out of Claude Code
   2.1.282 and codex-cli 0.153.4. When a CLI release breaks sign-in or refresh,
   re-read them from the new binary (`strings` on it) rather than guessing.
+  Grok's and Kimi's come from their open-source CLIs (xai-org/grok-build,
+  MoonshotAI/kimi-code); Cursor's from the open-source clients that talk to
+  it, since cursor-agent is closed.
