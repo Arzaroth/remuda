@@ -74,6 +74,10 @@ describe('confirmation texts', () => {
 
   it('names what a switch would drop', () => {
     expect(dropsLive(live({ state: 'stored', name: 'work', confirmed: true }))).toBe(false);
+    expect(dropsLive(live({ state: 'stored', name: 'work', confirmed: false }))).toBe(true);
+    expect(dropsLive(live({ state: 'unstored' }))).toBe(true);
+    expect(dropsLive(live({ state: 'foreign' }))).toBe(true);
+    expect(dropsLive(live({ state: 'signed_out' }))).toBe(false);
     expect(dropping(live({ state: 'unstored', email: 'a@b.c' }))).toBe('Drop a@b.c unsaved?');
     expect(dropping(live({ state: 'foreign', what: 'an API key' }))).toBe('Drop the API key?');
     expect(dropping(live({ state: 'stored', name: 'work', confirmed: false }))).toBe("Lose work's newest tokens?");
@@ -159,6 +163,33 @@ describe('combine', () => {
     expect(weighable([cred('odd')], unweighed)).toBe(false);
     expect(combine([cred('odd')], unweighed, true)[0]).toMatchObject({ used: 50, of: 100, leftOut: [] });
   });
+
+  it('keeps a window only logins without a weight report, counted once', () => {
+    const extra = {
+      windows: [],
+      accounts: {
+        perso: weighed.accounts.perso,
+        odd: { windows: [{ title: 'Opus', usedPercent: 40, resetsAt: null }] },
+      },
+    };
+    const [session, opus] = combine([cred('perso', true), cred('odd')], extra, true);
+    expect(session).toMatchObject({ title: 'Session', weighted: true, used: 31, of: 100 });
+    expect(opus).toMatchObject({ title: 'Opus', weighted: false, used: 40, of: 100, leftOut: [] });
+  });
+
+  it('rounds a half to even, as TokenGauge prints it', () => {
+    const tie = {
+      windows: [],
+      accounts: {
+        max: { windows: [{ title: 'Session', usedPercent: 30, resetsAt: null }], planWeight: 20 },
+        pro: { windows: [{ title: 'Session', usedPercent: 10, resetsAt: null }], planWeight: 1 },
+      },
+    };
+    expect(combine([cred('max'), cred('pro')], tie, true)[0]).toMatchObject({ used: 30, of: 105 });
+    const max = { windows: [{ title: 'Session', usedPercent: 50, resetsAt: null }], planWeight: 20 };
+    const odd = { ...tie, accounts: { ...tie.accounts, max } };
+    expect(combine([cred('max'), cred('pro')], odd, true)[0]).toMatchObject({ used: 50 });
+  });
 });
 
 describe('segmentWidths', () => {
@@ -172,6 +203,8 @@ describe('segmentWidths', () => {
 
   it('shares the bar evenly when ten or more logins would each need a tenth', () => {
     close(segmentWidths(Array(12).fill(1)), Array(12).fill(1 / 12));
+    close(segmentWidths([20, ...Array(9).fill(1)]), Array(10).fill(0.1));
+    close(segmentWidths([5]), [1]);
     expect(segmentWidths([])).toEqual([]);
   });
 });
