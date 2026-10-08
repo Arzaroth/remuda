@@ -51,6 +51,14 @@ pub trait Provider: Send + Sync {
     fn renews(&self) -> bool {
         true
     }
+    /// The line a shell evaluates to use `entry`, for a CLI that reads its
+    /// login from the environment.
+    fn env_line(&self, _entry: &Entry) -> Result<String> {
+        anyhow::bail!(
+            "{} does not read its login from the environment",
+            self.name()
+        )
+    }
     fn plan(&self, creds: &Value) -> String;
     /// The login the CLI is signed into, or None when it is signed out.
     fn live(&self) -> Result<Option<Value>>;

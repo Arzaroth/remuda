@@ -1,3 +1,4 @@
+mod apikey;
 mod browser;
 mod claude;
 mod codex;
@@ -27,6 +28,7 @@ use std::io::{self, BufRead};
 use anyhow::{Result, bail};
 use clap::{CommandFactory, Parser, Subcommand};
 
+use crate::apikey::ApiKey;
 use crate::claude::Claude;
 use crate::codex::Codex;
 use crate::cursor::Cursor;
@@ -44,7 +46,9 @@ struct Cli {
     command: Cmd,
 }
 
-const PROVIDERS: [&str; 5] = ["claude", "codex", "cursor", "grok", "kimi"];
+const PROVIDERS: [&str; 7] = [
+    "claude", "codex", "cursor", "glm", "grok", "kimi", "opencode",
+];
 
 #[derive(Subcommand)]
 enum Cmd {
@@ -97,6 +101,9 @@ enum Cmd {
     },
     /// Set the label shown beside a credential, or clear it. NAME or PROVIDER/NAME.
     Label { name: String, text: Option<String> },
+    /// Print the shell line that makes a CLI reading its key from the
+    /// environment use a stored one: `eval "$(remuda env glm/work)"`.
+    Env { name: String },
     /// Rename a stored credential. NAME or PROVIDER/NAME.
     Rename { name: String, new_name: String },
     /// Delete a stored credential. NAME or PROVIDER/NAME.
@@ -137,6 +144,7 @@ impl Cmd {
             Cmd::List { .. } => Some("listing"),
             Cmd::Refresh { .. } => Some("refreshing"),
             Cmd::Label { .. } => Some("labelling"),
+            Cmd::Env { .. } => Some("printing a key"),
             Cmd::Rename { .. } => Some("renaming"),
             Cmd::Remove { .. } => Some("removing"),
             Cmd::Serve { .. } => Some("serving"),
@@ -262,7 +270,9 @@ fn main() -> Result<()> {
     let grok = Grok::from_env()?;
     let kimi = Kimi::from_env()?;
     let cursor = Cursor::from_env()?;
-    let providers: [&dyn Provider; 5] = [&claude, &codex, &cursor, &grok, &kimi];
+    let glm = ApiKey::glm();
+    let opencode = ApiKey::opencode();
+    let providers: [&dyn Provider; 7] = [&claude, &codex, &cursor, &glm, &grok, &kimi, &opencode];
     let seen = dirs::now(&providers);
     if let Some(doing) = cli.command.needs_store()
         && !store.root().exists()
@@ -296,8 +306,10 @@ fn main() -> Result<()> {
             Box::new(claude),
             Box::new(codex),
             Box::new(cursor),
+            Box::new(glm),
             Box::new(grok),
             Box::new(kimi),
+            Box::new(opencode),
         ];
         let (listener, port) = http::bind(port)?;
         let token = pkce::random()?;
@@ -437,6 +449,10 @@ fn main() -> Result<()> {
             let (p, name) = commands::resolve(&store, &providers, &name)?;
             let state = ops::sync_live(&store, p)?;
             commands::remove(&store, p, &state, &name, out)
+        }
+        Cmd::Env { name } => {
+            let (p, name) = commands::resolve(&store, &providers, &name)?;
+            commands::print_env(&store, p, &name, out)
         }
         Cmd::Label { name, text } => {
             let (p, name) = commands::resolve(&store, &providers, &name)?;
