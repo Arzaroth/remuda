@@ -327,6 +327,15 @@ pub fn begin_login(
     p.begin_login()
 }
 
+/// Prints the shell line that puts a stored key in the environment.
+pub fn print_env(store: &Store, p: &dyn Provider, name: &str, out: &mut dyn Write) -> Result<()> {
+    let entry = store
+        .get(p.id(), name)?
+        .with_context(|| format!("no credential {}/{name}", p.id()))?;
+    writeln!(out, "{}", p.env_line(&entry)?)?;
+    Ok(())
+}
+
 pub fn stored_message(p: &dyn Provider, entry: &Entry) -> String {
     format!(
         "stored {} ({}, {})",
