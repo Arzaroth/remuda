@@ -1,4 +1,4 @@
-import { createSignal, For, Show } from 'solid-js';
+import { createEffect, createSignal, For, on, Show } from 'solid-js';
 import { api } from '../api';
 import { createConfirm } from '../confirm';
 import { load, store, toast } from '../state';
@@ -6,8 +6,9 @@ import { overwrite, taken } from '../usage';
 
 type Login = { id: string; url: string; needsCode: boolean; opened: boolean; name: string };
 
-export function AddAccount() {
-  const [provider, setProvider] = createSignal(store.s!.providers[0]?.id ?? '');
+export function AddAccount(props: { provider?: string }) {
+  const [provider, setProvider] = createSignal(props.provider ?? store.s!.providers[0]?.id ?? '');
+  createEffect(on(() => props.provider, (p) => p && setProvider(p), { defer: true }));
   const [name, setName] = createSignal('');
   const [login, setLogin] = createSignal<Login | null>(null);
   const [code, setCode] = createSignal('');

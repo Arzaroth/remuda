@@ -6,6 +6,7 @@ import { remember, remembered } from '../storage';
 import type { Provider } from '../types';
 import { providerUsage, usageOf } from '../usage';
 import { Meter } from './Meter';
+import { brand } from '../brand';
 
 const [picks, setPicks] = createStore<Record<string, string>>(remembered('remuda-tiles') || {});
 
@@ -39,7 +40,7 @@ function Tile(props: { p: Provider }) {
     remember('remuda-tiles', { ...picks });
   };
   return (
-    <div class="tile">
+    <div class="tile" style={{ '--brand': brand(props.p.id) }}>
       <div class="tile-head">
         <b>{props.p.name}</b>
         <span>
