@@ -74,7 +74,7 @@ function Tile(props: { p: Provider }) {
             </div>
           </Show>
         </div>
-        <div class="big" title={weighted() ? ESTIMATE : undefined}>
+        <div class="big" title={shown().weighted ? ESTIMATE : undefined}>
           {shown().used}%<small>of {shown().of}%</small>
         </div>
         <div
@@ -90,7 +90,7 @@ function Tile(props: { p: Provider }) {
                 class="segment"
                 classList={{ active: p.active }}
                 style={{ 'flex-grow': shown().widths[i()] }}
-                title={`${p.name}${p.active ? ' (in use)' : ''}: ${p.window.usedPercent}%${weighted() ? ` × ${p.weight}` : ''}`}
+                title={`${p.name}${p.active ? ' (in use)' : ''}: ${p.window.usedPercent}%${shown().weighted ? ` × ${p.weight}` : ''}`}
               >
                 <Meter fraction={p.window.usedPercent / 100} tone={usedTone(p.window.usedPercent)} />
               </div>
