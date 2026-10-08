@@ -110,8 +110,12 @@ if $want_timer || $want_serve; then
     echo "Wrote $envdir/60-remuda.conf: ${envs[*]}"
   fi
   # The units act only where the last interactive command looked; this is
-  # that command, run from the installing shell.
-  "$bindir/remuda" ls >/dev/null 2>&1 || true
+  # that command, run from the installing shell. With no store yet it fails,
+  # and the first import or login records instead.
+  stored=false
+  if "$bindir/remuda" ls >/dev/null 2>&1; then
+    stored=true
+  fi
   if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
     if ((${#envs[@]} > 0)); then
       systemctl --user set-environment "${envs[@]}"
@@ -123,8 +127,12 @@ if $want_timer || $want_serve; then
     fi
     if $want_serve; then
       systemctl --user enable remuda-serve.service
-      systemctl --user restart remuda-serve.service
-      echo "Enabled remuda-serve.service; 'remuda open' opens its page"
+      if $stored; then
+        systemctl --user restart remuda-serve.service
+        echo "Enabled remuda-serve.service; 'remuda open' opens its page"
+      else
+        echo "Enabled remuda-serve.service; 'remuda open' starts it once 'remuda import' or 'remuda login' has made the store"
+      fi
     fi
   else
     echo "install: no systemd user session; run 'remuda refresh' yourself to keep stored logins fresh, and 'remuda serve' for the page" >&2
