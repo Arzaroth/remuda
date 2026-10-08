@@ -72,11 +72,19 @@ pub fn plan(recorded: Option<&Seen>, now: &Seen, doing: &str) -> Plan {
 }
 
 /// A unit run sees nothing of what the user's shell exports, so it is checked,
-/// never recorded. The units say so themselves: INVOCATION_ID is no sign of
-/// one, since a desktop that runs its terminal as a unit hands it to every
-/// shell.
+/// never recorded. The units say so themselves, and a unit installed before
+/// they did is known by its cgroup: INVOCATION_ID is no sign of one, since a
+/// desktop that runs its terminal as a unit hands it to every shell.
 pub fn is_service(flag: bool) -> bool {
-    flag || std::env::var_os("REMUDA_SERVICE").is_some_and(|v| !v.is_empty())
+    flag || std::env::var_os("REMUDA_SERVICE").is_some()
+        || in_remuda_unit(&std::fs::read_to_string("/proc/self/cgroup").unwrap_or_default())
+}
+
+fn in_remuda_unit(cgroup: &str) -> bool {
+    cgroup.lines().any(|line| {
+        let unit = line.rsplit('/').next().unwrap_or_default();
+        unit.starts_with("remuda-") && unit.ends_with(".service")
+    })
 }
 
 #[cfg(test)]
