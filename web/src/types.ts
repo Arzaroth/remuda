@@ -31,6 +31,7 @@ export type Usage = {
   staleReason?: string | null;
   error?: string | null;
   credentialState?: string | null;
+  planWeight?: number | null;
   windows: Window[];
   accounts?: Record<string, Usage>;
 };
