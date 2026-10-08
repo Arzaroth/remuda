@@ -71,10 +71,15 @@ h1 { font-size: 21px; font-weight: 750; letter-spacing: -0.02em; margin: 0; }
 .tile .under { color: var(--muted); font-size: 13px; margin-top: 10px; }
 .tile .under .spec { color: var(--ink); font-weight: 650; }
 .tile .under b { color: var(--ink); font-weight: 650; }
-.tile-window { margin-top: 14px; color: var(--muted); }
+.tile-window { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+  margin-top: 14px; color: var(--muted); }
 .tile-window + .big { margin-top: 4px; }
 .segments { display: flex; gap: 4px; }
-.segment { flex: 1; min-width: 0; }
+.segment { flex: 1 1 0; min-width: 6px; }
+.weighting { display: inline-flex; padding: 2px; gap: 2px; border-radius: 8px; background: var(--sunk); }
+.weighting button { border: 0; background: none; border-radius: 6px; height: 22px; padding: 0 8px; font-size: 12px; color: var(--muted); cursor: pointer; }
+.weighting button:hover { color: var(--ink); }
+.weighting button[aria-pressed='true'] { background: var(--card); color: var(--ink); font-weight: 600; box-shadow: 0 0 0 1px var(--rule); }
 .others { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--rule); display: grid; gap: 6px; }
 .other { display: flex; align-items: baseline; gap: 8px; color: var(--muted); }
 .other b { color: var(--ink); font-weight: 650; }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Credential, Live, State } from './types';
-import { behind, combine, dropping, dropsLive, overwrite, taken, usageOf } from './usage';
+import { behind, combine, dropping, dropsLive, overwrite, taken, usageOf, weighable } from './usage';
 
 const cred = (name: string, active = false): Credential => ({
   id: `claude/${name}`,
@@ -91,7 +91,7 @@ describe('combine', () => {
       },
     };
     const creds = [cred('work', true), cred('perso'), cred('spare'), cred('gone')];
-    const [weekly, hours] = combine(creds, usage);
+    const [weekly, hours] = combine(creds, usage, false);
     expect(weekly).toMatchObject({ title: 'Weekly', used: 127, of: 200, resetsAt: Date.parse('2026-10-10T00:00:00Z') });
     expect(weekly.parts.map((p) => [p.name, p.active])).toEqual([
       ['work', true],
@@ -106,6 +106,7 @@ describe('combine', () => {
     const [hours] = combine(
       names.map((n) => cred(n, n === 'c')),
       { windows: [], accounts },
+      false,
     );
     expect(hours).toMatchObject({ used: 200, of: 500 });
     expect(hours.parts.map((p) => `${p.name}:${p.window.usedPercent}`)).toEqual(['a:0', 'b:20', 'c:40', 'd:60', 'e:80']);
@@ -113,7 +114,37 @@ describe('combine', () => {
   });
 
   it('has nothing to combine without figures', () => {
-    expect(combine([cred('work', true)], null)).toEqual([]);
-    expect(combine([cred('work', true)], { behind: true, windows: [] })).toEqual([]);
+    expect(combine([cred('work', true)], null, true)).toEqual([]);
+    expect(combine([cred('work', true)], { behind: true, windows: [] }, true)).toEqual([]);
+  });
+
+  const weighed = {
+    windows: [],
+    accounts: {
+      perso: { windows: [{ title: 'Session', usedPercent: 31, resetsAt: null }], planWeight: 20 },
+      work: { windows: [{ title: 'Session', usedPercent: 100, resetsAt: null }], planWeight: 1 },
+      odd: { windows: [{ title: 'Session', usedPercent: 50, resetsAt: null }] },
+    },
+  };
+  const three = [cred('perso', true), cred('work'), cred('odd')];
+
+  it('weighs logins by plan in units of the largest, as TokenGauge does', () => {
+    const [session] = combine(three, weighed, true);
+    expect(session).toMatchObject({ used: 36, of: 105, leftOut: ['odd'] });
+    expect(session.pooled).toBeCloseTo((31 * 20 + 100) / 21);
+    expect(session.parts.map((p) => [p.name, p.weight])).toEqual([
+      ['perso', 20],
+      ['work', 1],
+    ]);
+    expect(weighable(three, weighed)).toBe(true);
+  });
+
+  it('counts every login once when absolute, or when no plan has a weight', () => {
+    const [session] = combine(three, weighed, false);
+    expect(session).toMatchObject({ used: 181, of: 300, leftOut: [] });
+    expect(session.parts.every((p) => p.weight === 1)).toBe(true);
+    const unweighed = { windows: [], accounts: { odd: weighed.accounts.odd } };
+    expect(weighable([cred('odd')], unweighed)).toBe(false);
+    expect(combine([cred('odd')], unweighed, true)[0]).toMatchObject({ used: 50, of: 100, leftOut: [] });
   });
 });

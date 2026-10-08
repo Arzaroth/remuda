@@ -36,27 +36,56 @@ export function overwrite(creds: Credential[], provider: string, name: string): 
 export const taken = (creds: Credential[], provider: string, name: string) =>
   creds.some((c) => c.provider === provider && c.name === name);
 
-export type Part = { name: string; active: boolean; window: Window };
-export type Combined = { title: string; used: number; of: number; parts: Part[]; resetsAt: number | null };
+export type Part = { name: string; active: boolean; window: Window; weight: number };
+export type Combined = {
+  title: string;
+  used: number;
+  of: number;
+  pooled: number;
+  parts: Part[];
+  leftOut: string[];
+  resetsAt: number | null;
+};
 
-export function combine(creds: Credential[], usage: Shown | null): Combined[] {
-  const shown = creds.map((c) => {
+const shownBy = (creds: Credential[], usage: Shown | null) =>
+  creds.map((c) => {
     const u = usageOf(c, usage);
-    return { c, windows: u && !u.error ? u.windows : [] };
+    return { c, windows: u && !u.error ? u.windows : [], weight: u?.planWeight ?? null };
   });
+
+export const weighable = (creds: Credential[], usage: Shown | null) =>
+  shownBy(creds, usage).some((s) => s.weight && s.windows.length);
+
+export function combine(creds: Credential[], usage: Shown | null, weighted: boolean): Combined[] {
+  const shown = shownBy(creds, usage);
+  const byWeight = weighted && shown.some((s) => s.weight && s.windows.length);
   const titles = [...new Set(shown.flatMap((s) => s.windows.map((w) => w.title)))];
-  return titles.map((title) => {
-    const parts = shown.flatMap(({ c, windows }) => {
+  return titles.flatMap((title) => {
+    const leftOut: string[] = [];
+    const parts = shown.flatMap(({ c, windows, weight }) => {
       const window = windows.find((w) => w.title === title);
-      return window ? [{ name: c.name, active: c.active, window }] : [];
+      if (!window) return [];
+      if (byWeight && !weight) {
+        leftOut.push(c.name);
+        return [];
+      }
+      return [{ name: c.name, active: c.active, window, weight: byWeight ? weight! : 1 }];
     });
+    if (!parts.length) return [];
+    const largest = Math.max(...parts.map((p) => p.weight));
+    const total = parts.reduce((sum, p) => sum + p.weight, 0);
+    const sum = parts.reduce((sum, p) => sum + p.window.usedPercent * p.weight, 0);
     const resets = parts.flatMap((p) => (p.window.resetsAt ? [Date.parse(p.window.resetsAt)] : []));
-    return {
-      title,
-      used: parts.reduce((sum, p) => sum + p.window.usedPercent, 0),
-      of: parts.length * 100,
-      parts,
-      resetsAt: resets.length ? Math.min(...resets) : null,
-    };
+    return [
+      {
+        title,
+        used: Math.round(sum / largest),
+        of: Math.round((total / largest) * 100),
+        pooled: sum / total,
+        parts,
+        leftOut,
+        resetsAt: resets.length ? Math.min(...resets) : null,
+      },
+    ];
   });
 }
