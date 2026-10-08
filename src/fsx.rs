@@ -14,7 +14,7 @@ pub fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-pub fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+fn create_private_dir(dir: &Path) -> std::io::Result<()> {
     DirBuilder::new().recursive(true).mode(0o700).create(dir)
 }
 

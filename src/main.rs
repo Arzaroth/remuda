@@ -20,7 +20,7 @@ mod units;
 
 use std::io::{self, BufRead};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use clap::{CommandFactory, Parser, Subcommand};
 
 use crate::claude::Claude;
@@ -120,6 +120,27 @@ enum Cmd {
     /// Run by `update` as the new binary: bring the installed units up to date.
     #[command(hide = true)]
     SyncUnits,
+}
+
+impl Cmd {
+    /// What the command was doing, for one that will not start a store.
+    fn needs_store(&self) -> Option<&'static str> {
+        match self {
+            Cmd::Use { .. } => Some("switching"),
+            Cmd::List { .. } => Some("listing"),
+            Cmd::Refresh { .. } => Some("refreshing"),
+            Cmd::Label { .. } => Some("labelling"),
+            Cmd::Rename { .. } => Some("renaming"),
+            Cmd::Remove { .. } => Some("removing"),
+            Cmd::Serve { .. } => Some("serving"),
+            Cmd::Import { .. }
+            | Cmd::Login { .. }
+            | Cmd::Open { .. }
+            | Cmd::Completions { .. }
+            | Cmd::Update { .. }
+            | Cmd::SyncUnits => None,
+        }
+    }
 }
 
 fn update(check_only: bool) -> Result<()> {
@@ -233,41 +254,26 @@ fn main() -> Result<()> {
     let codex = Codex::from_env()?;
     let providers: [&dyn Provider; 2] = [&claude, &codex];
     let seen = dirs::now(&providers);
-    if !store.root().exists() {
-        let doing = match cli.command {
-            Cmd::Import { .. } | Cmd::Login { .. } => None,
-            Cmd::Use { .. } => Some("switching"),
-            Cmd::List { .. } => Some("listing"),
-            Cmd::Refresh { .. } => Some("refreshing"),
-            Cmd::Label { .. } => Some("labelling"),
-            Cmd::Rename { .. } => Some("renaming"),
-            Cmd::Remove { .. } => Some("removing"),
-            Cmd::Serve { .. } => Some("serving"),
-            Cmd::Open { .. } | Cmd::Completions { .. } | Cmd::Update { .. } | Cmd::SyncUnits => {
-                unreachable!()
-            }
-        };
-        if let Some(doing) = doing {
-            bail!(
-                "not {doing}: there is no store at {}; `remuda import` or `remuda login` starts one, or set REMUDA_STORE in ~/.config/environment.d/60-remuda.conf if yours is elsewhere",
-                store.root().display()
-            );
-        }
-        fsx::create_private_dir(store.root())
-            .with_context(|| format!("failed to create {}", store.root().display()))?;
+    if let Some(doing) = cli.command.needs_store()
+        && !store.root().exists()
+    {
+        bail!(
+            "not {doing}: there is no store at {}; `remuda import` or `remuda login` starts one, or set REMUDA_STORE in ~/.config/environment.d/60-remuda.conf if yours is elsewhere",
+            store.root().display()
+        );
     }
-    let scheduled = dirs::is_scheduled(matches!(
+    let service = dirs::is_service(matches!(
         cli.command,
         Cmd::Refresh {
             scheduled: true,
             ..
         }
     ));
-    if !scheduled {
+    if !service {
         dirs::record(&store, &seen);
     }
     if let Cmd::Serve { port, no_browser } = cli.command {
-        if scheduled {
+        if service {
             let plan = dirs::plan(dirs::recorded(&store).as_ref(), &seen, "serving");
             for line in &plan.skipped {
                 eprintln!("{line}");
@@ -283,14 +289,14 @@ fn main() -> Result<()> {
         if let Err(e) = served::announce(&paths::runtime_dir(), port, &url) {
             eprintln!("warning: `remuda open` will not find this page: {e:#}");
         }
-        if scheduled {
+        if service {
             println!("remuda is serving http://127.0.0.1:{port}/; `remuda open` opens it");
         } else {
             println!(
                 "remuda is serving {url}\nThe link carries its access token; keep it to yourself. Ctrl-C stops it."
             );
         }
-        if !no_browser && !scheduled {
+        if !no_browser && !service {
             browser::open(&url);
         }
         let open: serve::Opener = if no_browser {
@@ -367,7 +373,7 @@ fn main() -> Result<()> {
             ..
         } => {
             let plan =
-                scheduled.then(|| dirs::plan(dirs::recorded(&store).as_ref(), &seen, "refreshing"));
+                service.then(|| dirs::plan(dirs::recorded(&store).as_ref(), &seen, "refreshing"));
             for line in plan.iter().flat_map(|p| &p.skipped) {
                 eprintln!("{line}");
             }
