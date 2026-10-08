@@ -16,7 +16,8 @@ done.
       rules are configured.
 - [ ] `remuda run`: flock or process check to mark a login in use, and how a
       stale mark from a crashed session gets cleared.
-- [ ] `remuda run`: whether Codex gets the same through `CODEX_HOME`.
+- [ ] `remuda run`: which files under `CODEX_HOME` Codex writes during a
+      session (sessions, history, logs) and whether symlinking them is safe.
 - [ ] Hub and satellites: hand over credentials or proxy the API. Check
       first whether Claude Code and Codex accept an OAuth login behind a custom
       base URL, and how each copes with a credential that has no refresh token.
