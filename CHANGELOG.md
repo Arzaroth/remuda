@@ -8,13 +8,13 @@
   typed in it were taken for systemd runs: they never recorded where the
   CLIs keep their logins, so `remuda-serve.service` would not start, and
   `import` refused a missing store. remuda now tells its own units by their
-  name, and `remuda update` installs units that also say so
-  (`REMUDA_SERVICE=1`).
+  name, and `remuda update` rewrites the units you installed so they also say
+  so (`REMUDA_SERVICE=1`).
 
 ### Changed
 
 - Only `import` and `login` create the store. `ls`, `use`, `serve` and the
-  other commands now refuse when there is none, naming what they were doing,
+  other commands that work on it now refuse when there is none, naming what they were doing,
   so an unset or mistyped `REMUDA_STORE` no longer starts an empty second
   store. On a fresh install, start with `remuda import` or `remuda login`;
   `install.sh --serve` leaves the page's service for `remuda open` to start
