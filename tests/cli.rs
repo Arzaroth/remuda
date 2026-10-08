@@ -338,6 +338,45 @@ fn codex_logins_live_beside_claude_ones() {
 }
 
 #[test]
+fn only_import_and_login_start_a_missing_store() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = Home::new();
+    let store = home.path(".local/share/remuda/credentials");
+    home.sign_in("a-work", "r-work", "u-work");
+
+    for (args, doing) in [
+        (&["ls"][..], "not listing"),
+        (&["use", "work"], "not switching"),
+        (&["refresh"], "not refreshing"),
+        (&["label", "work", "x"], "not labelling"),
+        (&["rename", "work", "job"], "not renaming"),
+        (&["rm", "work"], "not removing"),
+        (&["serve", "--no-browser", "--port", "0"], "not serving"),
+    ] {
+        let err = home.fails(args);
+        assert!(
+            err.contains(&format!("{doing}: there is no store")),
+            "{err}"
+        );
+        assert!(err.contains("`remuda import`"), "{err}");
+    }
+    assert!(!home.path(".local/share/remuda").exists());
+
+    let mut login = home.command(&["login", "perso", "--no-browser"]);
+    login.stdin(std::process::Stdio::null());
+    let _ = login.output().unwrap();
+    let mode = std::fs::metadata(&store).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o700);
+    std::fs::remove_dir_all(home.path(".local/share/remuda")).unwrap();
+
+    home.ok(&["import", "work"]);
+    let mode = std::fs::metadata(&store).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o700);
+    assert!(store.join("claude/work.json").exists());
+    assert!(store.join(".dirs.json").exists());
+}
+
+#[test]
 fn completions_cover_every_command() {
     let home = Home::new();
     let zsh = home.ok(&["completions", "zsh"]);
