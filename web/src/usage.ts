@@ -1,4 +1,4 @@
-import type { Credential, Live, Shown, State, Usage } from './types';
+import type { Credential, Live, Shown, State, Usage, Window } from './types';
 
 export function usageOf(c: Credential, usage: Shown | null): Shown | null {
   if (!usage) return null;
@@ -35,3 +35,28 @@ export function overwrite(creds: Credential[], provider: string, name: string): 
 
 export const taken = (creds: Credential[], provider: string, name: string) =>
   creds.some((c) => c.provider === provider && c.name === name);
+
+export type Part = { name: string; active: boolean; window: Window };
+export type Combined = { title: string; used: number; of: number; parts: Part[]; resetsAt: number | null };
+
+export function combine(creds: Credential[], usage: Shown | null): Combined[] {
+  const shown = creds.map((c) => {
+    const u = usageOf(c, usage);
+    return { c, windows: u && !u.error ? u.windows : [] };
+  });
+  const titles = [...new Set(shown.flatMap((s) => s.windows.map((w) => w.title)))];
+  return titles.map((title) => {
+    const parts = shown.flatMap(({ c, windows }) => {
+      const window = windows.find((w) => w.title === title);
+      return window ? [{ name: c.name, active: c.active, window }] : [];
+    });
+    const resets = parts.flatMap((p) => (p.window.resetsAt ? [Date.parse(p.window.resetsAt)] : []));
+    return {
+      title,
+      used: parts.reduce((sum, p) => sum + p.window.usedPercent, 0),
+      of: parts.length * 100,
+      parts,
+      resetsAt: resets.length ? Math.min(...resets) : null,
+    };
+  });
+}
