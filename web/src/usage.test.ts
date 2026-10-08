@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import type { Credential, Live, State } from './types';
-import { behind, combine, dropping, dropsLive, overwrite, taken, usageOf, weighable } from './usage';
+import {
+  behind,
+  combine,
+  dropping,
+  dropsLive,
+  overwrite,
+  segmentWidths,
+  taken,
+  usageOf,
+  weighable,
+} from './usage';
 
 const cred = (name: string, active = false): Credential => ({
   id: `claude/${name}`,
@@ -137,6 +147,8 @@ describe('combine', () => {
       ['work', 1],
     ]);
     expect(weighable(three, weighed)).toBe(true);
+    expect(session.widths[0]).toBeCloseTo(0.9);
+    expect(session.widths[1]).toBeCloseTo(0.1);
   });
 
   it('counts every login once when absolute, or when no plan has a weight', () => {
@@ -146,5 +158,20 @@ describe('combine', () => {
     const unweighed = { windows: [], accounts: { odd: weighed.accounts.odd } };
     expect(weighable([cred('odd')], unweighed)).toBe(false);
     expect(combine([cred('odd')], unweighed, true)[0]).toMatchObject({ used: 50, of: 100, leftOut: [] });
+  });
+});
+
+describe('segmentWidths', () => {
+  const close = (got: number[], want: number[]) => got.forEach((w, i) => expect(w).toBeCloseTo(want[i]));
+
+  it('keeps a small plan a tenth of the bar, as TokenGauge does', () => {
+    close(segmentWidths([20, 1, 1]), [0.8, 0.1, 0.1]);
+    close(segmentWidths([20, 5, 1]), [0.72, 0.18, 0.1]);
+    close(segmentWidths([20, 20, 20, 5, 5, 1]), [7 / 30, 7 / 30, 7 / 30, 0.1, 0.1, 0.1]);
+  });
+
+  it('shares the bar evenly when ten or more logins would each need a tenth', () => {
+    close(segmentWidths(Array(12).fill(1)), Array(12).fill(1 / 12));
+    expect(segmentWidths([])).toEqual([]);
   });
 });
