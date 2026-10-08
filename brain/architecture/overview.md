@@ -33,7 +33,9 @@ running.
 
 1. `main` builds `Claude` and `Codex` and resolves the name (`commands::resolve`)
    or the `-p` flag (`commands::find`) to one provider.
-2. It takes `<store>/.lock` (except `login`, which takes it only to save, and
+2. A missing store stops every command but `import` and `login`, which create
+   it (0700), so a wrong `REMUDA_STORE` does not start a second one. Then it
+   takes `<store>/.lock` (except `login`, which takes it only to save, and
    `completions`/`update`/`open`, which need no store).
 3. `ops::sync_live` copies the live login back into its credential, and reports
    the live state: signed out, stored (and whether that was confirmed), or

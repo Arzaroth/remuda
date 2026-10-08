@@ -19,7 +19,7 @@ A credential whose sidecar does not match it (`[unverified]` in `ls`) is not
 refreshed until it has been identified again.
 
 `remuda-refresh.timer`, installed by `install.sh`, runs `remuda refresh
---scheduled` every 30 minutes. `--scheduled`, or any run under systemd, first
+--scheduled` every 30 minutes. `--scheduled`, or any run with `REMUDA_SERVICE` set, first
 checks each CLI's directory against the store's record of where the last
 interactive command found it, and skips a CLI where they differ or there is
 no record; naming a credential of a skipped CLI says so (see

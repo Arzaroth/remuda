@@ -131,6 +131,11 @@ cannot stop the timer for the real one. `remuda-serve.service` has the same
 blind spot, so a `serve` under systemd is checked the same way and refuses to
 start.
 
+The units say they are one (`--scheduled`, `REMUDA_SERVICE=1`) rather than
+remuda guessing from `INVOCATION_ID`: GNOME runs its terminal as a systemd
+user service, so every shell it opens carries that variable, and its
+commands never recorded anything.
+
 ## A running page announces itself, its token apart
 
 A page that runs all the time is reached through `remuda open`, not a URL
