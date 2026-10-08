@@ -188,17 +188,8 @@ satellites.
 Settings mean remuda gets a config file it does not have today
 (`$XDG_CONFIG_HOME/remuda/config.toml`), shared by the CLI and the page.
 
-A framework is worth it once there are several sections and shared state, but
-the page is compiled into the binary and loads nothing from the network, and
-both have to stay true. Options:
-
-- Preact with htm, vendored as ES modules: components with no build step and no
-  Node in the toolchain.
-- Svelte or Solid with a Vite build whose output gets embedded with
-  `include_bytes!`: a nicer authoring experience, at the cost of Node in CI and
-  in the release, and a built bundle to keep in sync.
-- Vanilla, split into modules and web components: no new dependency, and more
-  code written by hand.
+The page is already written in Solid under `web/`, which Vite builds into the
+one file the binary compiles in, so sections grow there as components.
 
 The guards stay as they are (token, `Host`, `Origin`), and the page sends a
 Content-Security-Policy that allows no outside origin.

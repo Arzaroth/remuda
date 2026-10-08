@@ -137,7 +137,7 @@ with the default `$XDG_STATE_HOME/tokengauge/tokengauge-usage.json`. It is
 read only when it is a regular file, and at most 4 MiB of it. `usage` holds
 `updatedAt` and, per provider id, `stale`, `staleReason`, `error` (from the
 snapshot's top-level `errors`, where TokenGauge files a fetch that failed with
-nothing cached), `credentialState`, `windows` (`title`, `usedPercent`,
+nothing cached), `credentialState`, `planWeight` (TokenGauge's nominal plan multiplier, when it knows one), `windows` (`title`, `usedPercent`,
 `resetsAt`), placeholders dropped, and `accounts`: the same fields per stored
 credential name. TokenGauge 0.37 (snapshot schema 2) names the credential a
 payload or an error belongs to in its `credential` field; those go under
@@ -150,7 +150,15 @@ newer than its last switch. `App`
 takes both locations as `Places`, so tests point them at a temporary
 directory.
 
-The page is one self-contained file (`include_str!`), no external requests,
+The page is written in Solid and TypeScript under `web/`, and Vite with
+`vite-plugin-singlefile` builds it into `src/serve.html`: one self-contained
+file, scripts and styles inlined, which `serve.rs` compiles in
+(`include_str!`). The built file is committed, so building remuda needs no
+Node; after a change under `web/`, `pnpm build` there regenerates it, and CI
+fails when the two differ. `pnpm dev` serves the source with hot reload and
+passes `/api` to a running `remuda serve` on `$REMUDA_PORT` (7429 by
+default), dropping the `Origin` it would refuse; open
+`http://localhost:5173/serve.html#<token>`. The page makes no external requests,
 light and dark. It reads `/api/events` through `fetch` (an `EventSource`
 cannot send the token header). A browser allows only about 6 connections per
 host across all its tabs, so one tab follows the stream, holding the Web Lock
@@ -171,6 +179,6 @@ armed or the focus is in the list.
 - [src/serve.rs](../../src/serve.rs)
 - [src/served.rs](../../src/served.rs)
 - [src/http.rs](../../src/http.rs)
-- [src/serve.html](../../src/serve.html)
+- [web/](../../web/), built into [src/serve.html](../../src/serve.html)
 - [src/main.rs](../../src/main.rs) `Serve`, `open`
 - [systemd/remuda-serve.service](../../systemd/remuda-serve.service)

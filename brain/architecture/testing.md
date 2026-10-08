@@ -43,6 +43,12 @@ network or touches the developer's own logins.
   run with a fake `systemctl` first on `PATH` that logs its arguments, so no
   test reaches the real user manager.
 
+The page's own logic is tested with Vitest under `web/` (`pnpm test`): which
+figures each login shows, how the summary adds logins up (weighted and
+absolute), when a snapshot is behind a switch, what each
+confirmation names, and the two-click timing. Only the helpers are tested;
+the components are checked by hand against a scratch store.
+
 `scripts/coverage.sh` (cargo-llvm-cov) prints the summary and the files with the
 most uncovered lines. Uncovered on purpose: `main.rs`'s process surface
 (`update`, stdin in `login`, binding in `serve`, starting the service in
@@ -54,3 +60,4 @@ browser; which browser and flag it picks is tested through `launcher`.
 - [src/ops.rs](../../src/ops.rs) (`testing` module)
 - [tests/cli.rs](../../tests/cli.rs)
 - [scripts/coverage.sh](../../scripts/coverage.sh)
+- [web/src/](../../web/src/) (`*.test.ts`)

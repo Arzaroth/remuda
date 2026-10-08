@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The `serve` page is redesigned. Each login is a card with a row per usage
+  window, its token lifetimes and its actions, and tabs above the cards show
+  every CLI or one of them. Each CLI's summary adds up a usage window across
+  all its logins over a bar with a segment per login, with the other
+  windows listed under it. Logins count by their plan the way TokenGauge
+  weighs them (a Max 20x and a Pro make 105%, not 200%), or once each with
+  the Absolute switch.
+
 ## [0.7.0] - 2026-10-08
 
 ### Fixed
