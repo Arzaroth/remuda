@@ -158,8 +158,8 @@ Node; after a change under `web/`, `pnpm build` there regenerates it, and CI
 fails when the two differ. `pnpm dev` serves the source with hot reload and
 passes `/api` to a running `remuda serve` on `$REMUDA_PORT` (7429 by
 default), dropping the `Origin` it would refuse; open
-`http://localhost:5173/serve.html#<token>`. The page makes no external requests,
-light and dark. It reads `/api/events` through `fetch` (an `EventSource`
+`http://localhost:5173/serve.html#<token>`. The page makes no external
+requests and has a light and a dark theme. It reads `/api/events` through `fetch` (an `EventSource`
 cannot send the token header). A browser allows only about 6 connections per
 host across all its tabs, so one tab follows the stream, holding the Web Lock
 `remuda-events`, and passes each change to the others over the
@@ -172,7 +172,9 @@ Only the newest load is drawn, so a slow one never overwrites a later one. A dro
 doubling to 30 s; a 401 (the server restarted with another token) stops it
 and frees the lock for another tab.
 None of these reloads happens while an editor is open, a confirmation is
-armed or the focus is in the list.
+armed or an input in the list has the focus. A focused button does not hold
+them: Solid keeps the cards' buttons across a redraw, so a clicked one keeps
+the focus.
 
 ## Sources
 

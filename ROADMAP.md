@@ -178,12 +178,9 @@ worth spending first.
 
 `remuda serve` grows from one page into a small management app, along the lines
 of CLIProxyAPI's management center: a sidebar with sections (Dashboard, Quota,
-Accounts, Add an account, Settings, Logs), a quota view per provider with
-tabs and one card per provider (the summed or tightest window across its
-logins, with a bar per login), rows giving every window of each login with its
-reset, and a settings section for what remuda gains on the way: auto-switch and
-which logins are eligible, the refresh timer, the hub's bind address and
-satellites.
+Accounts, Add an account, Settings, Logs) and a settings section for what
+remuda gains on the way: auto-switch and which logins are eligible, the
+refresh timer, the hub's bind address and satellites.
 
 Settings mean remuda gets a config file it does not have today
 (`$XDG_CONFIG_HOME/remuda/config.toml`), shared by the CLI and the page.
