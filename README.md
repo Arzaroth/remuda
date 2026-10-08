@@ -144,6 +144,7 @@ change them.
 ## Development
 
 ```sh
+mise install             # the pinned Rust (with llvm-tools), cargo-llvm-cov, shellcheck
 cargo test               # unit tests, plus tests/cli.rs driving the built binary
 scripts/coverage.sh      # line coverage via cargo-llvm-cov, worst files first
 scripts/coverage.sh --html
