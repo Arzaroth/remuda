@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value, json};
 
-use crate::fsx::{Changed, now_ms, read_json, rfc3339, update_json};
+use crate::fsx::{Changed, lock_file, now_ms, read_json, rfc3339, update_json};
 use crate::oauth::{self, claims};
 use crate::paths;
 use crate::pkce;
@@ -222,20 +222,7 @@ impl Provider for Codex {
 
     /// TokenGauge refreshes the live auth.json in place under this lock.
     fn lock_live(&self) -> Result<Option<std::fs::File>> {
-        let path = self.auth_path.with_file_name("auth.json.lock");
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)
-                .with_context(|| format!("failed to create {}", dir.display()))?;
-        }
-        let file = std::fs::File::options()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(&path)
-            .with_context(|| format!("failed to open {}", path.display()))?;
-        file.lock()
-            .with_context(|| format!("failed to lock {}", path.display()))?;
-        Ok(Some(file))
+        lock_file(&self.auth_path.with_file_name("auth.json.lock")).map(Some)
     }
 
     fn refresh(&self, creds: &mut Value) -> Result<Option<String>> {
