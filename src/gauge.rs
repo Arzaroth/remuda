@@ -219,6 +219,24 @@ mod tests {
         assert_eq!(usage["providers"]["codex"]["error"], "timed out");
         assert_eq!(usage["providers"]["codex"]["accounts"], json!({}));
 
+        let odd: Vec<Value> = [json!(0), json!(-1), json!(20.5), json!("20")]
+            .into_iter()
+            .enumerate()
+            .map(|(i, weight)| {
+                json!({"provider": "claude", "credential": format!("odd{i}"), "planWeight": weight,
+                       "usage": {"primary": {"usedPercent": 1}}})
+            })
+            .collect();
+        let odd = json!({"meta": {"schemaVersion": 2, "updatedAtMs": 1}, "payloads": odd});
+        std::fs::write(&file, odd.to_string()).unwrap();
+        let weights = read(&file).unwrap();
+        for i in 0..4 {
+            assert_eq!(
+                weights["providers"]["claude"]["accounts"][format!("odd{i}")]["planWeight"],
+                Value::Null
+            );
+        }
+
         assert!(read(tmp.path()).is_none());
 
         std::fs::write(&file, "{ torn").unwrap();
