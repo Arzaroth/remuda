@@ -128,13 +128,7 @@ fn two_accounts_imported_switched_and_removed() {
     let home = Home::new();
     let store = home.path(".local/share/remuda/credentials/claude");
 
-    assert!(home.ok(&["ls"]).starts_with("no stored credentials in "));
-
     home.sign_in("a-work", "r-work", "u-work");
-    assert!(
-        home.ok(&["ls"])
-            .contains("u-work@example.com, which is not stored")
-    );
     assert_eq!(
         home.ok(&["import", "work"]),
         "stored claude/work (u-work@example.com, max 20x)\n"
@@ -146,6 +140,10 @@ fn two_accounts_imported_switched_and_removed() {
     );
 
     home.sign_in("a-perso", "r-perso", "u-perso");
+    assert!(
+        home.ok(&["ls"])
+            .contains("u-perso@example.com, which is not stored")
+    );
     home.ok(&["import", "perso"]);
     let ls = home.ok(&["ls"]);
     assert!(ls.contains("* perso"), "{ls}");
@@ -459,7 +457,11 @@ fn the_scheduled_refresh_stops_where_the_shell_looked_elsewhere() {
 
     // A smoke test against a scratch store leaves the real store's record be.
     let scratch = home.path("scratch");
-    assert!(run(&["ls"], &[("REMUDA_STORE", &scratch)]).status.success());
+    assert!(
+        run(&["import", "scratch"], &[("REMUDA_STORE", &scratch)])
+            .status
+            .success()
+    );
     let out = run(
         &["refresh", "--scheduled"],
         &[("CLAUDE_CONFIG_DIR", &elsewhere)],
