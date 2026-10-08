@@ -20,7 +20,7 @@ mod units;
 
 use std::io::{self, BufRead};
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use clap::{CommandFactory, Parser, Subcommand};
 
 use crate::claude::Claude;
@@ -233,6 +233,29 @@ fn main() -> Result<()> {
     let codex = Codex::from_env()?;
     let providers: [&dyn Provider; 2] = [&claude, &codex];
     let seen = dirs::now(&providers);
+    if !store.root().exists() {
+        let doing = match cli.command {
+            Cmd::Import { .. } | Cmd::Login { .. } => None,
+            Cmd::Use { .. } => Some("switching"),
+            Cmd::List { .. } => Some("listing"),
+            Cmd::Refresh { .. } => Some("refreshing"),
+            Cmd::Label { .. } => Some("labelling"),
+            Cmd::Rename { .. } => Some("renaming"),
+            Cmd::Remove { .. } => Some("removing"),
+            Cmd::Serve { .. } => Some("serving"),
+            Cmd::Open { .. } | Cmd::Completions { .. } | Cmd::Update { .. } | Cmd::SyncUnits => {
+                unreachable!()
+            }
+        };
+        if let Some(doing) = doing {
+            bail!(
+                "not {doing}: there is no store at {}; `remuda import` or `remuda login` starts one, or set REMUDA_STORE in ~/.config/environment.d/60-remuda.conf if yours is elsewhere",
+                store.root().display()
+            );
+        }
+        fsx::create_private_dir(store.root())
+            .with_context(|| format!("failed to create {}", store.root().display()))?;
+    }
     let scheduled = dirs::is_scheduled(matches!(
         cli.command,
         Cmd::Refresh {
@@ -317,12 +340,6 @@ fn main() -> Result<()> {
         return commands::login(&store, p, name, *force, prompt, out);
     }
 
-    if scheduled && !store.root().exists() {
-        bail!(
-            "not refreshing: there is no store at {}; set REMUDA_STORE in ~/.config/environment.d/60-remuda.conf if yours is elsewhere",
-            store.root().display()
-        );
-    }
     let _lock = store.lock()?;
     match cli.command {
         Cmd::Use { name, discard } => {
