@@ -19,7 +19,9 @@
   31% and a Pro at 100% make "36% of 105%"; each segment is as wide as its
   weight, but never under a tenth of the bar, so a few small plans beside a
   large one stay readable (TokenGauge's split bar does the same), and a
-  login with no known weight is left out and named.
+  login with no known weight is left out and named. A window no login with
+  a weight reports is counted once per login instead. The figures are
+  rounded half to even, as TokenGauge prints them.
   Absolute counts every login once ("131% of 200%"). The switch shows only
   where there are weights, and the choice is kept per CLI in
   `localStorage`. The tile shows the window with the highest share
