@@ -1,0 +1,4 @@
+[tools]
+rust = { version = "1.99.0", components = "clippy,rustfmt,llvm-tools" }
+"cargo:cargo-llvm-cov" = "0.9.1"
+shellcheck = "0.11.0"
