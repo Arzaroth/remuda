@@ -49,6 +49,11 @@ export type Combined = {
   resetsAt: number | null;
 };
 
+const roundEven = (x: number) => {
+  const r = Math.round(x);
+  return r - x === 0.5 && r % 2 ? r - 1 : r;
+};
+
 const MIN_SEGMENT = 0.1;
 
 export function segmentWidths(weights: number[]): number[] {
@@ -96,8 +101,8 @@ export function combine(creds: Credential[], usage: Shown | null, weighted: bool
     return {
       title,
       weighted: byWeight,
-      used: Math.round(sum / largest),
-      of: Math.round((total / largest) * 100),
+      used: roundEven(sum / largest),
+      of: roundEven((total / largest) * 100),
       pooled: sum / total,
       parts,
       widths: segmentWidths(parts.map((p) => p.weight)),
