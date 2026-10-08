@@ -112,8 +112,9 @@ if $want_timer || $want_serve; then
   # The units act only where the last interactive command looked; this is
   # that command, run from the installing shell. With no store yet it fails,
   # and the first import or login records instead.
+  "$bindir/remuda" ls >/dev/null 2>&1 || true
   stored=false
-  if "$bindir/remuda" ls >/dev/null 2>&1; then
+  if [[ -d ${REMUDA_STORE:-${XDG_DATA_HOME:-$HOME/.local/share}/remuda/credentials} ]]; then
     stored=true
   fi
   if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
