@@ -155,6 +155,7 @@ function Editor(props: {
         aria-label={props.label}
         onInput={(e) => props.onInput(e.currentTarget.value)}
         onKeyDown={(e) => {
+          if (e.isComposing) return;
           if (e.key === 'Enter') props.onSave();
           if (e.key === 'Escape') props.onLeave();
         }}
