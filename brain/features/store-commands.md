@@ -1,6 +1,6 @@
 # Import, list and remove
 
-## `remuda import <name> [-p codex] [--force]`
+## `remuda import <name> [-p <cli>] [--force]`
 
 With `login`, the only command that creates a missing store; every other one
 refuses it, naming what it was doing.
@@ -29,6 +29,12 @@ at all it prints the store path.
 `error`). A CLI whose files cannot be read is reported and the others are still
 listed. The page reads the same JSON.
 
+## `remuda env <name>`
+
+Prints `export VAR='key'` for a stored API key, for a shell to `eval`: GLM
+reads its key from the environment only, and opencode's variable wins over its
+file. Any other provider refuses.
+
 ## `remuda rm <name>`
 
 Deletes the credential and its sidecar. Refuses the active credential: switch
@@ -36,5 +42,5 @@ away first.
 
 ## Sources
 
-- [src/commands.rs](../../src/commands.rs) `import`, `list`, `list_json`, `remove`
+- [src/commands.rs](../../src/commands.rs) `import`, `list`, `list_json`, `print_env`, `remove`
 - [src/main.rs](../../src/main.rs)
