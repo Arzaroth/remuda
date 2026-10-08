@@ -85,11 +85,11 @@ function Tile(props: { p: Provider }) {
             .join(', ')}
         >
           <For each={shown().parts}>
-            {(p) => (
+            {(p, i) => (
               <div
                 class="segment"
                 classList={{ active: p.active }}
-                style={{ 'flex-grow': p.weight }}
+                style={{ 'flex-grow': shown().widths[i()] }}
                 title={`${p.name}${p.active ? ' (in use)' : ''}: ${p.window.usedPercent}%${weighted() ? ` × ${p.weight}` : ''}`}
               >
                 <Meter fraction={p.window.usedPercent / 100} tone={usedTone(p.window.usedPercent)} />
