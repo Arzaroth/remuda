@@ -35,6 +35,16 @@ pub fn codex_auth() -> PathBuf {
         .join("auth.json")
 }
 
+/// `GROK_AUTH_PATH` names the file itself; `GROK_HOME` its directory.
+pub fn grok_auth() -> PathBuf {
+    if let Some(file) = var_dir("GROK_AUTH_PATH") {
+        return file;
+    }
+    var_dir("GROK_HOME")
+        .unwrap_or_else(|| home().join(".grok"))
+        .join("auth.json")
+}
+
 /// Private per-user scratch space: `$XDG_RUNTIME_DIR/remuda`, else the store.
 pub fn runtime_dir() -> PathBuf {
     env::var_os("XDG_RUNTIME_DIR")
