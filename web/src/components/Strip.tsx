@@ -129,7 +129,7 @@ function Tile(props: { p: Provider }) {
               <div class="other">
                 <span>{w.title}</span>
                 <b>{w.used}%</b>
-                <span class="of">of {w.of}%</span>
+                <span>of {w.of}%</span>
                 <button class="linkish" aria-label={`Show ${w.title}`} onClick={() => pick(w.title)}>
                   Show
                 </button>

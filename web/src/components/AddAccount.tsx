@@ -80,7 +80,7 @@ export function AddAccount(props: { provider?: string }) {
           value={name()}
           onInput={(e) => setName(e.currentTarget.value)}
         />
-        <button class="btn go" classList={{ armed: !!confirm.text() }} type="submit">
+        <button class="btn go" data-armed={confirm.text() ? '1' : undefined} type="submit">
           {confirm.text() ?? 'Sign in'}
         </button>
       </form>
