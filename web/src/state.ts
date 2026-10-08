@@ -64,7 +64,7 @@ export async function act(path: string, body: unknown) {
 export function reload() {
   const busy =
     document.querySelector('#providers .edit') ||
-    document.activeElement?.closest?.('#providers') ||
+    document.querySelector('#providers input:focus') ||
     document.querySelector('#providers [data-armed]');
   if (!busy) load();
 }
