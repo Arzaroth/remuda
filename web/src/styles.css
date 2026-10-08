@@ -167,7 +167,7 @@ h2 { font-size: 15px; font-weight: 700; margin: 0; }
 .btn.icon[aria-pressed='true'] { border-color: var(--ink); background: var(--sunk); }
 .btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--rule)); }
 .btn.danger:hover:not(:disabled) { background: var(--bad); border-color: var(--bad); color: #fff; }
-.btn.armed { width: auto; padding: 0 10px; background: var(--bad); border-color: var(--bad); color: #fff; }
+.btn[data-armed] { width: auto; padding: 0 10px; background: var(--bad); border-color: var(--bad); color: #fff; }
 
 input, select { background: var(--card); border: 1px solid var(--rule-strong); border-radius: 8px; height: 34px; padding: 0 10px; min-width: 0; }
 .inline { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }

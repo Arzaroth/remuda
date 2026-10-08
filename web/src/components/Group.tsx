@@ -105,22 +105,17 @@ function Windows(props: { c: Credential; usage: Shown | null }) {
 }
 
 function Lifetime(props: { title: string; at: number | null; horizon: number; warnBelow: number }) {
+  const left = () => props.at! - now();
+  const tone = () => (left() < 0 ? 'bad' : left() < props.warnBelow ? 'warn' : '');
   return (
     <Show when={props.at != null}>
-      {(_) => {
-        const left = () => props.at! - now();
-        const tone = () => (left() < 0 ? 'bad' : left() < props.warnBelow ? 'warn' : '');
-        const cls = () => (left() < 0 ? 'late' : left() < props.warnBelow ? 'soon' : '');
-        return (
-          <div class="win" title={date(props.at!)}>
-            <div class="win-head">
-              <span class="what">{props.title}</span>
-              <b class={cls()}>{left() < 0 ? 'expired' : span(left())}</b>
-            </div>
-            <Meter fraction={left() / props.horizon} tone={tone()} />
-          </div>
-        );
-      }}
+      <div class="win" title={date(props.at!)}>
+        <div class="win-head">
+          <span class="what">{props.title}</span>
+          <b classList={{ late: tone() === 'bad', soon: tone() === 'warn' }}>{left() < 0 ? 'expired' : span(left())}</b>
+        </div>
+        <Meter fraction={left() / props.horizon} tone={tone()} />
+      </div>
     </Show>
   );
 }
@@ -233,7 +228,6 @@ function Row(props: { c: Credential; usage: Shown | null; live: Live | undefined
   const iconButton = (kind: 'label' | 'rename', title: string, disabled: boolean) => (
     <button
       class="btn icon"
-      classList={{ armed: !!confirms[kind].text() }}
       data-armed={confirms[kind].text() ? '1' : undefined}
       aria-label={`${title} ${c().name}`}
       aria-pressed={editing()?.kind === kind ? 'true' : undefined}
@@ -284,7 +278,6 @@ function Row(props: { c: Credential; usage: Shown | null; live: Live | undefined
       <footer class="actions">
         <button
           class="btn go"
-          classList={{ armed: !!confirms.use.text() }}
           data-armed={confirms.use.text() ? '1' : undefined}
           disabled={c().active || unverified()}
           onClick={use}
@@ -304,7 +297,6 @@ function Row(props: { c: Credential; usage: Shown | null; live: Live | undefined
         {iconButton('rename', 'Rename', false)}
         <button
           class="btn icon danger"
-          classList={{ armed: !!confirms.remove.text() }}
           data-armed={confirms.remove.text() ? '1' : undefined}
           aria-label={`Remove ${c().name}`}
           disabled={c().active}
@@ -372,7 +364,6 @@ function LiveNote(props: { p: Provider; live: Live }) {
             />
             <button
               class="btn go"
-              classList={{ armed: !!confirm.text() }}
               data-armed={confirm.text() ? '1' : undefined}
               onClick={doImport}
             >
