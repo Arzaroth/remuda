@@ -113,6 +113,16 @@ mod tests {
     }
 
     #[test]
+    fn every_service_says_it_runs_as_one() {
+        for (name, body) in UNITS.iter().filter(|(name, _)| name.ends_with(".service")) {
+            assert!(
+                body.contains("Environment=REMUDA_SERVICE=1") || body.contains("--scheduled"),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
     fn every_unit_the_release_ships_is_carried() {
         let mut shipped: Vec<String> =
             std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/systemd"))
