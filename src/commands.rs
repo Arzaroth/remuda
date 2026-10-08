@@ -297,7 +297,7 @@ pub fn login(
         pending.url()
     )?;
     let code = if pending.needs_code() {
-        write!(out, "Paste the code the page shows: ")?;
+        write!(out, "Paste {}: ", pending.asks_for())?;
         out.flush()?;
         Some((prompt.read_code)()?)
     } else {
@@ -415,6 +415,9 @@ pub fn refresh(
     for live in lives {
         let p = live.provider;
         if scope.only.is_some_and(|(only, _)| only.id() != p.id()) {
+            continue;
+        }
+        if !p.renews() {
             continue;
         }
         if let LiveState::Unreadable { error } = &live.state {
