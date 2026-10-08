@@ -1,6 +1,8 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde_json::Value;
 
 pub fn client() -> Result<reqwest::blocking::Client> {
@@ -42,4 +44,22 @@ pub fn text(answer: &Value, key: &str) -> Option<String> {
         .and_then(Value::as_str)
         .filter(|t| !t.is_empty())
         .map(str::to_owned)
+}
+
+/// A JWT's payload, unverified: what the token says about itself.
+pub fn claims(jwt: &str) -> Option<Value> {
+    let payload = jwt.split('.').nth(1)?;
+    let bytes = URL_SAFE_NO_PAD.decode(payload.trim_end_matches('=')).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+/// An unsigned JWT carrying `claims`, for tests.
+#[cfg(test)]
+pub fn fake_jwt(claims: Value) -> String {
+    let enc = |v: &Value| URL_SAFE_NO_PAD.encode(v.to_string());
+    format!(
+        "{}.{}.sig",
+        enc(&serde_json::json!({"alg": "none"})),
+        enc(&claims)
+    )
 }

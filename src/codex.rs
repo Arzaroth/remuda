@@ -6,12 +6,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
-use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde_json::{Map, Value, json};
 
 use crate::fsx::{Changed, now_ms, read_json, rfc3339, update_json};
-use crate::oauth;
+use crate::oauth::{self, claims};
 use crate::paths;
 use crate::pkce;
 use crate::provider::{Identity, Login, PendingLogin, Provider};
@@ -57,12 +55,6 @@ impl Api {
     fn token_url(&self) -> String {
         format!("{}/oauth/token", self.issuer)
     }
-}
-
-fn claims(jwt: &str) -> Option<Value> {
-    let payload = jwt.split('.').nth(1)?;
-    let bytes = URL_SAFE_NO_PAD.decode(payload.trim_end_matches('=')).ok()?;
-    serde_json::from_slice(&bytes).ok()
 }
 
 fn tokens(creds: &Value) -> Option<&Map<String, Value>> {
@@ -512,10 +504,7 @@ mod tests {
     use crate::store::Store;
     use mockito::Matcher;
 
-    fn jwt(claims: Value) -> String {
-        let enc = |v: &Value| URL_SAFE_NO_PAD.encode(v.to_string());
-        format!("{}.{}.sig", enc(&json!({"alg": "none"})), enc(&claims))
-    }
+    use crate::oauth::fake_jwt as jwt;
 
     const WORKSPACE: &str = "ws-1";
 
