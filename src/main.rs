@@ -2,6 +2,7 @@ mod browser;
 mod claude;
 mod codex;
 mod commands;
+mod cursor;
 mod device;
 mod dirs;
 mod fsx;
@@ -28,6 +29,7 @@ use clap::{CommandFactory, Parser, Subcommand};
 
 use crate::claude::Claude;
 use crate::codex::Codex;
+use crate::cursor::Cursor;
 use crate::grok::Grok;
 use crate::kimi::Kimi;
 use crate::project::REMUDA;
@@ -42,7 +44,7 @@ struct Cli {
     command: Cmd,
 }
 
-const PROVIDERS: [&str; 4] = ["claude", "codex", "grok", "kimi"];
+const PROVIDERS: [&str; 5] = ["claude", "codex", "cursor", "grok", "kimi"];
 
 #[derive(Subcommand)]
 enum Cmd {
@@ -259,7 +261,8 @@ fn main() -> Result<()> {
     let codex = Codex::from_env()?;
     let grok = Grok::from_env()?;
     let kimi = Kimi::from_env()?;
-    let providers: [&dyn Provider; 4] = [&claude, &codex, &grok, &kimi];
+    let cursor = Cursor::from_env()?;
+    let providers: [&dyn Provider; 5] = [&claude, &codex, &cursor, &grok, &kimi];
     let seen = dirs::now(&providers);
     if let Some(doing) = cli.command.needs_store()
         && !store.root().exists()
@@ -292,6 +295,7 @@ fn main() -> Result<()> {
         let providers: Vec<Box<dyn Provider>> = vec![
             Box::new(claude),
             Box::new(codex),
+            Box::new(cursor),
             Box::new(grok),
             Box::new(kimi),
         ];
