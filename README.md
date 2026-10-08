@@ -144,10 +144,20 @@ change them.
 ## Development
 
 ```sh
-mise install             # the pinned Rust (with llvm-tools), cargo-llvm-cov, shellcheck
+mise install             # the pinned Rust (with llvm-tools), cargo-llvm-cov, shellcheck, Node, pnpm
 cargo test               # unit tests, plus tests/cli.rs driving the built binary
 scripts/coverage.sh      # line coverage via cargo-llvm-cov, worst files first
 scripts/coverage.sh --html
+```
+
+The `serve` page is a Solid app under `web/`, built into `src/serve.html`,
+which is committed so a Rust build needs no Node. After changing `web/`:
+
+```sh
+cd web && pnpm install
+pnpm test                # Vitest
+pnpm build               # rewrites src/serve.html; commit it with the change
+pnpm dev                 # live reload against a running `remuda serve`
 ```
 
 Nothing in the test suite reaches the network or a real CLI install. The OAuth
