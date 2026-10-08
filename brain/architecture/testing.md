@@ -39,7 +39,7 @@ network or touches the developer's own logins.
   stream: a change to the store or the snapshot, the keepalive, and its slot
   limit. `tests/cli.rs`
   starts the real `serve` on port 0 to check that `open` reaches it, and runs
-  it with `INVOCATION_ID` set to check the systemd behaviour. `sync-units` is
+  it with `REMUDA_SERVICE` set to check the systemd behaviour. `sync-units` is
   run with a fake `systemctl` first on `PATH` that logs its arguments, so no
   test reaches the real user manager.
 

@@ -35,7 +35,7 @@ a redirect file like everything else (or prints it). When nothing serves and
 ## Under systemd
 
 `systemd/remuda-serve.service` runs `remuda serve` (`Restart=on-abnormal`, so
-a refusal is not retried). `INVOCATION_ID` is set, and `serve` then:
+a refusal is not retried) with `REMUDA_SERVICE=1`, and `serve` then:
 
 - checks the directories record like the scheduled refresh
   ([distribution.md](distribution.md)), printing one line per CLI it would not

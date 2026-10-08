@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- On a desktop that runs its terminal as a systemd service (GNOME), commands
+  typed in it were taken for systemd runs: they never recorded where the
+  CLIs keep their logins, so `remuda-serve.service` would not start, and
+  `import` refused a missing store. The units now say they are a service
+  (`REMUDA_SERVICE=1`); `remuda update` installs them.
+- `import` and `login` create the store when it does not exist. Every other
+  command still refuses a missing store, and now names what it was doing
+  rather than always saying "not refreshing".
+
 ## [0.6.0] - 2026-10-03
 
 ### Changed

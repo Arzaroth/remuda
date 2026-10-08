@@ -2,6 +2,9 @@
 
 ## `remuda import <name> [-p codex] [--force]`
 
+With `login`, the only command that creates a missing store; every other one
+refuses it, naming what it was doing.
+
 Stores the login the CLI is signed into now, under the account the provider
 says the tokens belong to (`Provider::identify`), keeping the CLI's own account
 block when it agrees. Offline, it trusts the CLI's files only while the store
