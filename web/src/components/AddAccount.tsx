@@ -20,8 +20,10 @@ export function AddAccount(props: { provider?: string }) {
     try {
       const r = await api('/api/login/finish', { id: l.id, code });
       toast(r.message);
-      setLogin(null);
-      setName('');
+      if (openLogin === l.id) {
+        setLogin(null);
+        setName('');
+      }
     } catch (e) {
       if (openLogin === l.id) toast((e as Error).message, true);
     }
