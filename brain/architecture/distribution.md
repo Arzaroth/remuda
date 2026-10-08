@@ -45,19 +45,22 @@ found each CLI's login in `<store>/.dirs.json`, and the timer runs
 matches the record. Any other CLI is skipped with a line naming what to set,
 and the run exits non-zero so the journal shows it. With no record at all, the
 timer refreshes nothing (the installer runs `remuda ls` once so there is one;
-on a fresh install, the first `import` or `login` writes it), and a store that
-does not exist stops it before anything is created.
+on a fresh install, the first `import` or `login` writes it, and `--serve`
+enables the service without starting it), and a store that does not exist
+stops it before anything is created.
 
 - The record lives in its store, so each store keeps its own and a smoke test
   against a scratch `REMUDA_STORE` touches only that one. The price is that a
   timer looking at another store than the shell cannot tell; the installer's
   `environment.d` entry is what keeps them the same.
-- A run with `REMUDA_SERVICE` set (`remuda-serve.service` sets it) is checked
-  like `--scheduled` and never records. `INVOCATION_ID` is not taken as a
-  sign of systemd: GNOME runs its terminal as a user service, so every shell
-  it opens has it. An installed unit older than the binary is rewritten by
-  the `sync-units` that `remuda update` runs, so a binary that reads the
-  marker never runs under a unit that lacks it.
+- A run with `REMUDA_SERVICE` set to anything (`remuda-serve.service` sets
+  it), or whose cgroup is a `remuda-*.service` unit, is checked like
+  `--scheduled` and never records. The cgroup covers units written before the
+  marker that are still installed: a 0.1.0 timer running plain
+  `remuda refresh` that only `remuda update`s older than 0.6.0 ever followed,
+  or a serve unit `install.sh` restarted without `--serve`. `INVOCATION_ID` is
+  not taken as a sign of systemd: GNOME runs its terminal as a user service,
+  so every shell it opens has it.
 - A relative `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `REMUDA_STORE` is made
   absolute before use, so the same string from another directory is not taken
   for the same place.

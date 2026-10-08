@@ -134,7 +134,10 @@ start.
 The units say they are one (`--scheduled`, `REMUDA_SERVICE=1`) rather than
 remuda guessing from `INVOCATION_ID`: GNOME runs its terminal as a systemd
 user service, so every shell it opens carries that variable, and its
-commands never recorded anything.
+commands never recorded anything. Units from before the marker are known by
+their cgroup (`remuda-*.service`), since nothing guarantees an update
+rewrote them, and one taken for a shell would refresh the shell's active
+login.
 
 ## A running page announces itself, its token apart
 
