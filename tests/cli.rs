@@ -437,14 +437,24 @@ fn the_scheduled_refresh_stops_where_the_shell_looked_elsewhere() {
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(!last_run.exists());
 
-    // A unit from 0.1.0 runs plain `refresh`: under systemd it is checked the
-    // same way and records nothing.
-    let out = run(&["refresh"], &[("INVOCATION_ID", Path::new("abc"))]);
+    let out = run(&["refresh"], &[("REMUDA_SERVICE", Path::new("1"))]);
     assert!(!out.status.success(), "{}", stderr(&out));
     assert!(
         stderr(&out).contains("claude: not refreshing"),
         "{}",
         stderr(&out)
+    );
+
+    // A desktop that runs its terminal as a unit hands INVOCATION_ID to every
+    // shell, and a shell's command still records.
+    let out = run(&["ls"], &[("INVOCATION_ID", Path::new("abc"))]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let out = run(&["refresh", "--scheduled"], &[]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(
+        run(&["ls"], &[("CLAUDE_CONFIG_DIR", &elsewhere)])
+            .status
+            .success()
     );
 
     // A smoke test against a scratch store leaves the real store's record be.
@@ -539,7 +549,7 @@ fn a_serve_run_by_systemd_checks_the_directories_and_prints_no_token() {
     home.ok(&["import", "work"]);
     let unit = |envs: &[(&str, &Path)]| {
         let mut cmd = home.command(&["serve", "--port", "0"]);
-        cmd.env("INVOCATION_ID", "abc")
+        cmd.env("REMUDA_SERVICE", "1")
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
         for (k, v) in envs {

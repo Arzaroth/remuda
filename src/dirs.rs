@@ -71,11 +71,12 @@ pub fn plan(recorded: Option<&Seen>, now: &Seen, doing: &str) -> Plan {
     plan
 }
 
-/// Under systemd (which sets INVOCATION_ID for every unit it runs) nothing
-/// knows what the user's shell sees: such a run is checked, never recorded.
-/// That covers a unit installed by 0.1.0, which runs plain `refresh`.
+/// A unit run sees nothing of what the user's shell exports, so it is checked,
+/// never recorded. The units say so themselves: INVOCATION_ID is no sign of
+/// one, since a desktop that runs its terminal as a unit hands it to every
+/// shell.
 pub fn is_scheduled(flag: bool) -> bool {
-    flag || std::env::var_os("INVOCATION_ID").is_some()
+    flag || std::env::var_os("REMUDA_SERVICE").is_some_and(|v| !v.is_empty())
 }
 
 #[cfg(test)]
