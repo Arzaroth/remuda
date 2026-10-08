@@ -14,9 +14,9 @@
 ### Changed
 
 - Only `import` and `login` create the store. `ls`, `use`, `serve` and the
-  other commands that work on it now refuse when there is none, naming what they were doing,
-  so an unset or mistyped `REMUDA_STORE` no longer starts an empty second
-  store. On a fresh install, start with `remuda import` or `remuda login`;
+  other commands that work on it now refuse when there is none, naming what
+  they were doing, so an unset or mistyped `REMUDA_STORE` no longer starts an
+  empty second store. On a fresh install, start with `remuda import` or `remuda login`;
   `install.sh --serve` leaves the page's service for `remuda open` to start
   after that.
 
