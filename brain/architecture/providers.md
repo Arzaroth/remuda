@@ -83,7 +83,8 @@ refresh token into "sign this credential in again".
 - File: `auth.json` under `GROK_HOME`, else `~/.grok`, or `GROK_AUTH_PATH`
   itself. An object keyed by `<issuer>::<client id>`; the login is the entry
   whose key starts `https://auth.x.ai::` and has a `key`. The whole file is
-  stored. An entry under any other scope with a `key` and no OIDC entry is an
+  stored; `install` replaces only the `auth.x.ai::` entries, compared and
+  swapped on them, so an API key under another scope survives a switch. An entry under any other scope with a `key` and no OIDC entry is an
   API key, reported by `foreign_login`.
 - Identity: the access token's own `sub`. Email from the entry. Expiry: the
   token's `exp`.
@@ -101,7 +102,11 @@ refresh token into "sign this credential in again".
   emptied, which reads as signed out. `expires_at` is epoch seconds, possibly
   fractional.
 - Identity: the file names nobody, so `identify` asks
-  `api.kimi.com/coding/v1/me` and `live_identity` is always none.
+  `api.kimi.com/coding/v1/me` and `live_identity` is always none. A live login
+  whose tokens match no stored one and that `/me` cannot name may be any of
+  them, so `sync_live` fails for it, which reads as unreadable: `refresh` and
+  `rm` skip the CLI rather than treat its own login as inactive. `refresh`
+  names the account through `/me` too.
 - OAuth (MoonshotAI/kimi-code, `packages/oauth`): host `auth.kimi.com`, client
   id `17e5f671-d194-4dfb-9706-5516cb48c098`. Every call carries the CLI's
   `X-Msh-*` device headers with the CLI's own `device_id`, never a new one.
