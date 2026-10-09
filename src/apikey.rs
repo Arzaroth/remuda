@@ -99,12 +99,12 @@ impl ApiKey {
         self
     }
 
-    fn env_key(&self) -> Option<String> {
-        self.envs
-            .iter()
-            .find_map(|name| (self.env)(name))
-            .map(|k| k.trim().to_owned())
-            .filter(|k| !k.is_empty())
+    /// The first variable that holds a key, and the key.
+    fn env_key(&self) -> Option<(&'static str, String)> {
+        self.envs.iter().find_map(|name| {
+            let key = (self.env)(name)?.trim().to_owned();
+            (!key.is_empty()).then_some((*name, key))
+        })
     }
 
     fn file_key(&self) -> Result<Option<String>> {
@@ -160,10 +160,31 @@ impl Provider for ApiKey {
     /// The environment wins, as it does for the CLI.
     fn live(&self) -> Result<Option<Value>> {
         let key = match self.env_key() {
-            Some(key) => Some(key),
+            Some((_, key)) => Some(key),
             None => self.file_key()?,
         };
         Ok(key.map(|key| json!({ "key": key })))
+    }
+
+    /// A login in the key's slot that is not a key, which a switch would
+    /// replace.
+    fn foreign_login(&self) -> Result<Option<String>> {
+        if self.env_key().is_some() {
+            return Ok(None);
+        }
+        let Some(file) = &self.file else {
+            return Ok(None);
+        };
+        let Some(json) = read_json(&file.path)? else {
+            return Ok(None);
+        };
+        Ok(json
+            .get(file.entry)
+            .filter(|e| key_of(e).is_none())
+            .map(|e| match e.get("type").and_then(Value::as_str) {
+                Some(kind) => format!("a login of type {kind}"),
+                None => "a login that is not a key".to_owned(),
+            }))
     }
 
     fn live_identity(&self, creds: &Value) -> Result<Option<Identity>> {
@@ -190,7 +211,7 @@ impl Provider for ApiKey {
     fn install(&self, entry: &Entry, outgoing: Option<&Value>) -> Result<()> {
         let key = key_of(&entry.creds).context("stored credential holds no key")?;
         let qualified = entry.qualified();
-        if let Some(var) = self.envs.iter().find(|v| (self.env)(v).is_some()) {
+        if let Some((var, _)) = self.env_key() {
             bail!(
                 "{} reads its key from {var}, which remuda cannot change in a running shell: run `eval \"$(remuda env {qualified})\"`",
                 self.name
@@ -211,7 +232,12 @@ impl Provider for ApiKey {
             if outgoing.is_some_and(|o| key_of(o).map(str::trim) != current) {
                 return Err(Changed.into());
             }
-            json[file.entry] = json!({ "type": "api", "key": key.trim() });
+            match json.get_mut(file.entry).and_then(Value::as_object_mut) {
+                Some(slot) if slot.get("type").and_then(Value::as_str) == Some("api") => {
+                    slot.insert("key".into(), json!(key.trim()));
+                }
+                _ => json[file.entry] = json!({ "type": "api", "key": key.trim() }),
+            }
             Ok(())
         })
     }
@@ -356,6 +382,64 @@ mod tests {
             "{err:#}"
         );
         assert!(!tmp.path().join("auth.json").exists());
+    }
+
+    #[test]
+    fn a_login_in_the_keys_slot_that_is_not_a_key_is_not_replaced_silently() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = opencode(tmp.path(), None);
+        write_json(
+            &tmp.path().join("auth.json"),
+            &json!({"opencode-go": {"type": "oauth", "access": "t"}}),
+        )
+        .unwrap();
+        save(&store, &p, "work", "go-work");
+        let err = ops::switch(&store, &p, "work", false).unwrap_err();
+        assert!(err.to_string().contains("a login of type oauth"), "{err}");
+        ops::switch(&store, &p, "work", true).unwrap();
+        let file = read_json(&tmp.path().join("auth.json")).unwrap().unwrap();
+        assert_eq!(
+            file["opencode-go"],
+            json!({"type": "api", "key": "go-work"})
+        );
+    }
+
+    #[test]
+    fn a_switch_edits_the_key_and_keeps_the_entrys_other_fields() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = opencode(tmp.path(), None);
+        write_json(
+            &tmp.path().join("auth.json"),
+            &json!({"opencode-go": {"type": "api", "key": "go-work", "note": "x"}}),
+        )
+        .unwrap();
+        save(&store, &p, "work", "go-work");
+        save(&store, &p, "perso", "go-perso");
+        ops::switch(&store, &p, "perso", false).unwrap();
+        let file = read_json(&tmp.path().join("auth.json")).unwrap().unwrap();
+        assert_eq!(
+            file["opencode-go"],
+            json!({"type": "api", "key": "go-perso", "note": "x"})
+        );
+    }
+
+    #[test]
+    fn an_empty_variable_is_no_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = ApiKey::opencode().with(
+            Some(KeyFile {
+                path: tmp.path().join("auth.json"),
+                entry: "opencode-go",
+            }),
+            |name| match name {
+                "OPENCODE_API_KEY" => Some(" ".into()),
+                "OPENCODE_GO_API_KEY" => Some("k1".into()),
+                _ => None,
+            },
+        );
+        assert_eq!(p.live().unwrap(), Some(json!({"key": "k1"})));
     }
 
     #[test]
