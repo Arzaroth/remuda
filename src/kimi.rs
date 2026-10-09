@@ -219,7 +219,8 @@ impl Provider for Kimi {
             ]),
         ))?;
         apply_tokens(creds, &answer)?;
-        Ok(None)
+        let access = text(creds, "access_token").unwrap_or_default();
+        Ok(self.me(access).ok().map(|id| id.account_id))
     }
 
     fn begin_login(&self) -> Result<Box<dyn PendingLogin>> {
@@ -308,6 +309,74 @@ mod tests {
         assert_eq!(id.email, "u-1@example.com");
         assert_eq!(k.live_identity(&creds).unwrap(), None);
         assert_eq!(k.expires_at(&creds), Some(1_900_000_000_500));
+    }
+
+    /// With no identity offline and kimi.com unreachable, the live login may
+    /// be any stored one: which is active is unknown, so nothing may treat a
+    /// stored one as inactive.
+    #[test]
+    fn an_unconfirmed_live_login_leaves_which_is_active_unknown() {
+        let mut server = mockito::Server::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let k = Kimi::at(tmp.path(), Api::local(&server.url()));
+        me_mock(&mut server, "a-work", "u-1");
+        let stored = file("a-work", "r-work");
+        let identity = k.identify(&stored).unwrap();
+        store
+            .save(&Entry::new("kimi", "work", stored, identity, 1))
+            .unwrap();
+        server.mock("GET", "/me").with_status(503).create();
+        write_json(
+            &tmp.path().join("credentials/kimi-code.json"),
+            &file("a-rotated", "r-rotated"),
+        )
+        .unwrap();
+        let err = ops::sync_live(&store, &k).unwrap_err();
+        assert!(
+            err.to_string().contains("which stored Kimi login is live"),
+            "{err}"
+        );
+    }
+
+    /// A refresh names the account through /me, and one that cannot be named
+    /// is not filed under the account its sidecar only claims.
+    #[test]
+    fn a_healed_login_that_cannot_be_named_is_set_aside() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/api/oauth/token")
+            .with_body(
+                json!({"access_token": "a2", "refresh_token": "r2", "expires_in": 900}).to_string(),
+            )
+            .create();
+        server.mock("GET", "/me").with_status(503).create();
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let k = Kimi::at(tmp.path(), Api::local(&server.url()));
+        let id = Identity {
+            account_id: "u-1".into(),
+            email: String::new(),
+            oauth_account: None,
+        };
+        store
+            .save(&Entry::new("kimi", "work", file("a1", "r1"), id, 1))
+            .unwrap();
+        let path = tmp.path().join("store/kimi/work.json");
+        let mut tampered = read_json(&path).unwrap().unwrap();
+        tampered["access_token"] = json!("a-other");
+        write_json(&path, &tampered).unwrap();
+        assert!(!store.get("kimi", "work").unwrap().unwrap().verified);
+
+        ops::heal(&store, &k, None).unwrap();
+
+        assert!(!store.get("kimi", "work").unwrap().unwrap().verified);
+        let kept: Vec<_> = std::fs::read_dir(tmp.path().join("store/kimi"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with(".set-aside-"))
+            .collect();
+        assert_eq!(kept.len(), 1);
     }
 
     #[test]
