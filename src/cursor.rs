@@ -59,10 +59,11 @@ fn text<'a>(creds: &'a Value, key: &str) -> Option<&'a str> {
     creds.get(key)?.as_str().filter(|t| !t.is_empty())
 }
 
-/// The user id in the token's `sub`, which reads `<provider>|<user id>`.
+/// The user id in the token's `sub`, which reads `<provider>|<user id>`,
+/// read the way TokenGauge reads it to build cursor.com's session cookie.
 fn user_of(access_token: &str) -> Option<String> {
     let sub = claims(access_token)?.get("sub")?.as_str()?.to_owned();
-    let user = sub.rsplit('|').next()?.trim();
+    let user = sub.split('|').nth(1)?.trim();
     (!user.is_empty()).then(|| user.to_owned())
 }
 
@@ -276,13 +277,19 @@ impl CursorPending {
                     delay = delay.mul_f64(1.2).min(POLL_MAX);
                 }
                 Ok(r) if r.status().is_success() => {
-                    return r.json().context("malformed sign-in answer");
+                    return r
+                        .json()
+                        .map_err(reqwest::Error::without_url)
+                        .context("malformed sign-in answer");
                 }
                 Ok(r) => bail!("cursor.com answered the sign-in with {}", r.status()),
+                // The URL carries the verifier, which with the uuid collects
+                // the tokens: no error may quote it.
                 Err(e) => {
                     errors += 1;
                     if errors >= 3 {
-                        return Err(e).context("cursor.com stopped answering the sign-in");
+                        return Err(e.without_url())
+                            .context("cursor.com stopped answering the sign-in");
                     }
                 }
             }
