@@ -100,12 +100,13 @@ impl DevicePending {
     }
 
     fn poll(&mut self) -> Result<Value> {
+        let mut errors = 0;
         loop {
             self.wait(self.interval)?;
             if Instant::now() >= self.deadline {
                 bail!("the sign-in was not approved in time");
             }
-            let resp = self
+            let sent = self
                 .flow
                 .post(
                     &self.flow.token_url,
@@ -115,8 +116,22 @@ impl DevicePending {
                         ("client_id", &self.flow.client_id),
                     ],
                 )
-                .send()
-                .context("token request failed")?;
+                .send();
+            // The user may already have approved the code: one blip must not
+            // throw that away.
+            let resp = match sent {
+                Ok(resp) => {
+                    errors = 0;
+                    resp
+                }
+                Err(e) => {
+                    errors += 1;
+                    if errors >= 3 {
+                        return Err(e).context("token request failed");
+                    }
+                    continue;
+                }
+            };
             let status = resp.status();
             let body = resp.text().unwrap_or_default();
             let answer: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
@@ -230,6 +245,27 @@ mod tests {
             .create();
         let done = finished.join().unwrap().unwrap();
         assert_eq!(done.creds["refresh_token"], "rt");
+    }
+
+    /// A token endpoint that cannot be reached is asked three times before
+    /// the sign-in gives up, since the user may already have approved it.
+    #[test]
+    fn an_unreachable_token_endpoint_ends_the_sign_in_on_the_third_try() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/device")
+            .with_body(json!({"device_code": "dc", "verification_uri_complete": "https://x", "interval": 1}).to_string())
+            .create();
+        let mut f = flow(&server.url());
+        f.token_url = format!("{}/token", crate::ops::testing::OFFLINE.as_str());
+        let login = f.begin().unwrap();
+        let started = Instant::now();
+        let err = login.finish(None).err().unwrap();
+        assert!(err.to_string().contains("token request failed"), "{err}");
+        assert!(
+            started.elapsed() >= Duration::from_secs(3),
+            "gave up before the third try"
+        );
     }
 
     #[test]
