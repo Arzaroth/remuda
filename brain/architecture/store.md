@@ -62,8 +62,9 @@ sidecar with no digest (written by 0.1.0), which would pass for anything: it
 is replaced first. `Store::get` marks a mismatched entry unverified, and
 `ops::heal` runs at the start of every sync, the CLI signed in or not: it asks
 the provider whose tokens the entry holds, refreshing them first if the access
-token has expired (the rotated tokens are saved either way), and rewrites the
-sidecar. It never refreshes an entry holding the CLI's live login, which would
+token has expired, and rewrites the sidecar. When the refresh names no account
+and the provider still cannot say whose the new tokens are, they are kept in a
+`.set-aside-...` file and the entry stays unverified. It never refreshes an entry holding the CLI's live login, which would
 sign the CLI out. Until an entry is identified it is not refreshed, switched
 to, labelled or matched by account, `ls` marks it `[unverified]` and the page
 disables it; if it holds the live login, that login is reported as the

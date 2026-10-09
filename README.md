@@ -118,8 +118,12 @@ one ChatGPT Team workspace are two accounts.
 For Grok (`~/.grok/auth.json`, honouring `GROK_HOME` and `GROK_AUTH_PATH`),
 Kimi (`~/.kimi-code/credentials/kimi-code.json`, honouring `KIMI_CODE_HOME`)
 and Cursor (`cursor-agent`'s `~/.config/cursor/auth.json`, honouring
-`CURSOR_CONFIG_DIR`), the whole file is the login, as for Codex. Cursor's IDE
-keeps its own login elsewhere, which remuda leaves alone.
+`CURSOR_CONFIG_DIR`), the whole file is stored, as for Codex. A Grok switch
+replaces the x.ai sign-in and keeps any API key the file holds beside it.
+Cursor's IDE keeps its own login elsewhere, which remuda leaves alone. Kimi's
+file names nobody, so remuda asks kimi.com whose login it is; offline, it
+cannot tell which stored Kimi login is live, and `refresh` and `rm` leave Kimi
+alone until it can.
 
 An API key has no account behind it and never expires. opencode Go's lives in
 `~/.local/share/opencode/auth.json` beside every other provider opencode is
