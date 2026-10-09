@@ -4,7 +4,7 @@ import { createConfirm } from '../confirm';
 import { load, store, toast } from '../state';
 import { overwrite, taken } from '../usage';
 
-type Login = { id: string; url: string; needsCode: boolean; opened: boolean; name: string };
+type Login = { id: string; url: string; needsCode: boolean; asksFor: string; opened: boolean; name: string };
 
 export function AddAccount(props: { provider?: string }) {
   const [provider, setProvider] = createSignal(props.provider ?? store.s!.providers[0]?.id ?? '');
@@ -128,7 +128,7 @@ export function AddAccount(props: { provider?: string }) {
                 <div class="inline">
                   <input
                     ref={codeInput}
-                    placeholder="Paste the code the sign-in page shows"
+                    placeholder={`Paste ${l().asksFor}`}
                     value={code()}
                     onInput={(e) => setCode(e.currentTarget.value)}
                     onKeyDown={(e) => {

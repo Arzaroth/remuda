@@ -31,5 +31,3 @@ done.
       identity against real accounts. They are built from the CLIs' source
       (Grok, Kimi) and from open-source clients (Cursor), and only the mocks
       have run them.
-- [ ] The page asks for "the code the sign-in page shows" when a GLM or
-      opencode sign-in wants the API key; the CLI already says "the API key".
