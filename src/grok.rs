@@ -210,13 +210,19 @@ impl Provider for Grok {
         identity_of(creds).context("the token does not name its x.ai account")
     }
 
+    /// Replaces the x.ai sign-in and nothing else: an API key or session the
+    /// file holds under another scope stays.
     fn install(&self, entry: &Entry, outgoing: Option<&Value>) -> Result<()> {
-        let replacement = entry.creds.clone();
+        let (scope, login) = oidc_scope(&entry.creds)
+            .and_then(|s| Some((s.to_owned(), entry.creds.get(s)?.clone())))
+            .context("stored credential has no x.ai sign-in")?;
         update_json(&self.auth_path, |file| {
-            if outgoing.is_some_and(|o| file != o) {
+            if outgoing.is_some_and(|o| oidc(file) != oidc(o)) {
                 return Err(Changed.into());
             }
-            *file = replacement.clone();
+            let map = file.as_object_mut().context("auth.json is not an object")?;
+            map.retain(|k, _| !k.starts_with(OIDC_SCOPE));
+            map.insert(scope.clone(), login.clone());
             Ok(())
         })
     }
@@ -358,6 +364,29 @@ mod tests {
         assert_eq!(said, "switched Grok to perso (u-2@example.com)");
         let live = read_json(&tmp.path().join("auth.json")).unwrap().unwrap();
         assert_eq!(live, store.get("grok", "perso").unwrap().unwrap().creds);
+    }
+
+    #[test]
+    fn a_switch_leaves_the_files_other_scopes_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let g = grok(tmp.path(), &OFFLINE);
+        let creds = auth("u-2", "b", "r-b", 1_900_000_000);
+        let identity = g.identify(&creds).unwrap();
+        store
+            .save(&Entry::new("grok", "perso", creds, identity, 1))
+            .unwrap();
+        let mut live = auth("u-1", "a", "r-a", 1_900_000_000);
+        live["https://accounts.x.ai/sign-in"] = json!({"key": "xai-key"});
+        write_json(&tmp.path().join("auth.json"), &live).unwrap();
+
+        let perso = store.get("grok", "perso").unwrap().unwrap();
+        g.install(&perso, Some(&live)).unwrap();
+
+        let file = read_json(&tmp.path().join("auth.json")).unwrap().unwrap();
+        assert_eq!(file["https://accounts.x.ai/sign-in"]["key"], "xai-key");
+        assert!(file.get(format!("{OIDC_SCOPE}u-1")).is_none());
+        assert_eq!(g.identify(&file).unwrap().account_id, "u-2");
     }
 
     #[test]
