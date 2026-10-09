@@ -54,12 +54,25 @@ pub fn heal(store: &Store, p: &dyn Provider, live: Option<&Value>) -> Result<()>
             // An expired access token cannot be identified, so it is refreshed
             // and the new one asked instead. The old refresh token is spent
             // either way, so the result is saved whoever it belongs to.
+            // A refresh that names nobody, asked about by an identify that
+            // still fails, proves nothing: the new tokens are set aside rather
+            // than filed under the account the sidecar only claims.
             Err(_) => match p.refresh(&mut entry.creds) {
-                Ok(answered) => Ok(p.identify(&entry.creds).unwrap_or_else(|_| Identity {
-                    account_id: answered.unwrap_or_else(|| entry.meta.account_id.clone()),
-                    email: String::new(),
-                    oauth_account: None,
-                })),
+                Ok(answered) => match (p.identify(&entry.creds), answered) {
+                    (Ok(id), _) => Ok(id),
+                    (Err(_), Some(account_id)) => Ok(Identity {
+                        account_id,
+                        email: String::new(),
+                        oauth_account: None,
+                    }),
+                    (Err(err), None) => {
+                        let kept = store.set_aside(p.id(), &entry.meta.account_id, &entry.creds)?;
+                        Err(err.context(format!(
+                            "its tokens were refreshed and are kept in {}",
+                            kept.display()
+                        )))
+                    }
+                },
                 Err(err) => Err(err),
             },
         };
@@ -147,6 +160,15 @@ pub fn sync_live(store: &Store, p: &dyn Provider) -> Result<LiveState> {
                         });
                     }
                 }
+            }
+            // Nothing offline says whose login this is either, so it may be
+            // any stored one: calling it unstored would let a refresh spend
+            // the CLI's own tokens and a removal drop the active credential.
+            Err(err) if identity.is_none() => {
+                bail!(
+                    "could not tell which stored {} login is live: {err:#}",
+                    p.name()
+                );
             }
             Err(err) => {
                 let by_account = identity

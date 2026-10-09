@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Added
+
+- Grok, Kimi Code and Cursor (`cursor-agent`) logins: import, sign in, switch
+  and keep fresh, like Claude Code and Codex. Each CLI's whole credential file
+  is the login. Grok and Kimi sign in with a device code, approved in the
+  browser with nothing listening locally; Cursor polls cursor.com the way
+  `cursor-agent login` does.
+- GLM and opencode Go API keys, stored by name. `remuda login -p glm <name>`
+  opens the key page and asks for the key. A key never expires, so `refresh`
+  leaves it alone. opencode is switched by rewriting the `opencode-go` entry of
+  its `auth.json`; GLM reads its key from the environment, so
+  `eval "$(remuda env glm/<name>)"` selects one in a shell.
+- `remuda env <name>` prints the `export` line for a CLI that reads its login
+  from the environment.
+
 ## [0.8.0] - 2026-10-08
 
 ### Changed

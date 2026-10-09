@@ -6,12 +6,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
-use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde_json::{Map, Value, json};
 
-use crate::fsx::{Changed, now_ms, read_json, rfc3339, update_json};
-use crate::oauth;
+use crate::fsx::{Changed, lock_file, now_ms, read_json, rfc3339, update_json};
+use crate::oauth::{self, claims};
 use crate::paths;
 use crate::pkce;
 use crate::provider::{Identity, Login, PendingLogin, Provider};
@@ -57,12 +55,6 @@ impl Api {
     fn token_url(&self) -> String {
         format!("{}/oauth/token", self.issuer)
     }
-}
-
-fn claims(jwt: &str) -> Option<Value> {
-    let payload = jwt.split('.').nth(1)?;
-    let bytes = URL_SAFE_NO_PAD.decode(payload.trim_end_matches('=')).ok()?;
-    serde_json::from_slice(&bytes).ok()
 }
 
 fn tokens(creds: &Value) -> Option<&Map<String, Value>> {
@@ -230,20 +222,7 @@ impl Provider for Codex {
 
     /// TokenGauge refreshes the live auth.json in place under this lock.
     fn lock_live(&self) -> Result<Option<std::fs::File>> {
-        let path = self.auth_path.with_file_name("auth.json.lock");
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)
-                .with_context(|| format!("failed to create {}", dir.display()))?;
-        }
-        let file = std::fs::File::options()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(&path)
-            .with_context(|| format!("failed to open {}", path.display()))?;
-        file.lock()
-            .with_context(|| format!("failed to lock {}", path.display()))?;
-        Ok(Some(file))
+        lock_file(&self.auth_path.with_file_name("auth.json.lock")).map(Some)
     }
 
     fn refresh(&self, creds: &mut Value) -> Result<Option<String>> {
@@ -512,10 +491,7 @@ mod tests {
     use crate::store::Store;
     use mockito::Matcher;
 
-    fn jwt(claims: Value) -> String {
-        let enc = |v: &Value| URL_SAFE_NO_PAD.encode(v.to_string());
-        format!("{}.{}.sig", enc(&json!({"alg": "none"})), enc(&claims))
-    }
+    use crate::oauth::fake_jwt as jwt;
 
     const WORKSPACE: &str = "ws-1";
 

@@ -3,7 +3,8 @@
 # remuda
 
 A remuda is the herd of spare horses a rider picks a fresh mount from each day,
-while the rest recover. This one holds Claude Code and Codex logins.
+while the rest recover. This one holds Claude Code, Codex, Grok, Kimi Code and
+Cursor logins, and GLM and opencode Go API keys.
 
 Keep several accounts per CLI and switch the one it uses, without logging out
 and back in and without a separate `CLAUDE_CONFIG_DIR` or `CODEX_HOME`.
@@ -50,14 +51,16 @@ place, saying what to set in that file (`journalctl --user -u remuda-refresh`).
 ## Commands
 
 A credential is addressed by its name when only one CLI has that name, and as
-`claude/<name>` or `codex/<name>` otherwise. Commands that create one take
-`-p codex` for Codex; Claude Code is the default.
+`<cli>/<name>` (`claude/work`, `grok/perso`) otherwise. Commands that create one
+take `-p <cli>`: `claude` (the default), `codex`, `cursor`, `glm`, `grok`,
+`kimi` or `opencode`.
 
 | Command | Does |
 | --- | --- |
-| `remuda import <name> [-p codex]` | Store the login the CLI is signed into right now |
-| `remuda login <name> [-p codex] [--no-browser]` | Sign another account in through the browser and store it, without touching the CLI |
+| `remuda import <name> [-p <cli>]` | Store the login the CLI is signed into right now |
+| `remuda login <name> [-p <cli>] [--no-browser]` | Sign another account in through the browser and store it, without touching the CLI |
 | `remuda use <name>` | Make a stored credential the one its CLI uses |
+| `remuda env <name>` | Print the `export` line that selects a stored API key in a shell |
 | `remuda ls [--json]` | List stored credentials, marking the active ones |
 | `remuda refresh [name] [--force] [--within MIN]` | Refresh the inactive credentials expiring within `MIN` minutes (default 60) |
 | `remuda label <name> [text]` | Set the label shown beside a credential, or clear it |
@@ -74,7 +77,10 @@ their Snap or Flatpak packages), so the account you are signed into there stays
 put; with another browser, open it in a private window yourself. Sign in with the account to add. Claude
 then shows a `code#state` string to paste back; Codex calls back to
 `localhost:1455` on its own, so run it on the machine whose browser you use,
-and not while `codex login` is running.
+and not while `codex login` is running. Grok and Kimi show a code to approve
+and Cursor a confirmation, and remuda waits for the provider to say it is
+done, from any machine's browser. GLM and opencode Go open their key page and
+ask for the key.
 
 ## The page
 
@@ -109,6 +115,24 @@ key or personal access token has no account to switch between, and `use` asks
 for `--discard` before replacing one. A Codex account is a seat: two people in
 one ChatGPT Team workspace are two accounts.
 
+For Grok (`~/.grok/auth.json`, honouring `GROK_HOME` and `GROK_AUTH_PATH`),
+Kimi (`~/.kimi-code/credentials/kimi-code.json`, honouring `KIMI_CODE_HOME`)
+and Cursor (`cursor-agent`'s `~/.config/cursor/auth.json`, honouring
+`CURSOR_CONFIG_DIR`), the whole file is stored, as for Codex. A Grok switch
+replaces the x.ai sign-in and keeps any API key the file holds beside it.
+Cursor's IDE keeps its own login elsewhere, which remuda leaves alone. Kimi's
+file names nobody, so remuda asks kimi.com whose login it is; offline, it
+cannot tell which stored Kimi login is live, and `refresh` and `rm` leave Kimi
+alone until it can.
+
+An API key has no account behind it and never expires. opencode Go's lives in
+`~/.local/share/opencode/auth.json` beside every other provider opencode is
+connected to, so a switch rewrites its `opencode-go` entry and nothing else.
+GLM reads `Z_AI_API_KEY` and nothing else, and a program cannot change a
+running shell's environment, so `use` says to run
+`eval "$(remuda env glm/<name>)"` instead. The same goes for opencode when
+`OPENCODE_API_KEY` is set, since it wins over the file.
+
 Each CLI rotates the refresh token of the account it is signed into, so before
 every command remuda copies the live login back into the credential it belongs
 to. It matches on the tokens first and falls back to the account id. Claude's
@@ -125,6 +149,11 @@ and it never refreshes an active credential: the CLI owns that one.
 ```
 claude/<name>.json        same shape as .credentials.json, claudeAiOauth only
 codex/<name>.json         same shape as auth.json
+grok/<name>.json          same shape as auth.json
+kimi/<name>.json          same shape as kimi-code.json
+cursor/<name>.json        same shape as cursor-agent's auth.json
+glm/<name>.json           {"key": ...}
+opencode/<name>.json      {"key": ...}
 <cli>/<name>.meta.json    accountId, email, capturedAt, label, the
                           credential's credsDigest, and Claude's
                           oauthAccount block
@@ -137,9 +166,11 @@ shows a meter per stored credential (its ADR 0003 describes the contract).
 
 ## Caveats
 
-remuda talks to the same OAuth endpoints and clients as Claude Code 2.1.282 and
-codex-cli 0.153.4. They are not a public API, and a release of either can
-change them.
+remuda talks to the same OAuth endpoints and clients as Claude Code 2.1.282,
+codex-cli 0.153.4, xAI's grok-build and MoonshotAI's kimi-code. They are not a
+public API, and a release of any of them can change them. cursor-agent is
+closed source: its refresh endpoint and sign-in are the ones the open-source
+Cursor clients agree on, and the first to break.
 
 ## Development
 
