@@ -536,6 +536,12 @@ pub fn remove(
             p.id()
         );
     }
+    if let LiveState::Unreadable { error } = state {
+        bail!(
+            "not removing {}/{name}: which one is active is unknown: {error}",
+            p.id()
+        );
+    }
     store.remove(p.id(), name)?;
     writeln!(out, "removed {}/{name}", p.id())?;
     Ok(())
