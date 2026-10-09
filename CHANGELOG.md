@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-09
+
 ### Added
 
 - Grok, Kimi Code and Cursor (`cursor-agent`) logins: import, sign in, switch
