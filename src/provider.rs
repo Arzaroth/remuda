@@ -23,6 +23,10 @@ pub trait PendingLogin: Send {
     fn url(&self) -> &str;
     fn needs_code(&self) -> bool;
     fn finish(self: Box<Self>, code: Option<&str>) -> Result<Login>;
+    /// What `finish` takes, when `needs_code`.
+    fn asks_for(&self) -> &'static str {
+        "the code the page shows"
+    }
     /// Stops a `finish` that is still waiting, from another thread.
     fn canceller(&self) -> Box<dyn Fn() + Send + Sync> {
         Box::new(|| {})
@@ -42,6 +46,18 @@ pub trait Provider: Send + Sync {
     fn expires_at(&self, creds: &Value) -> Option<i64>;
     fn refresh_expires_at(&self, _creds: &Value) -> Option<i64> {
         None
+    }
+    /// False for a credential that never expires and has nothing to refresh.
+    fn renews(&self) -> bool {
+        true
+    }
+    /// The line a shell evaluates to use `entry`, for a CLI that reads its
+    /// login from the environment.
+    fn env_line(&self, _entry: &Entry) -> Result<String> {
+        anyhow::bail!(
+            "{} does not read its login from the environment",
+            self.name()
+        )
     }
     fn plan(&self, creds: &Value) -> String;
     /// The login the CLI is signed into, or None when it is signed out.

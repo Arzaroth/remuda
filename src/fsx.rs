@@ -188,6 +188,23 @@ fn write_private_if(path: &Path, body: &str, still: impl Fn() -> bool) -> Result
     result.with_context(|| format!("failed to write {}", path.display()))
 }
 
+/// Takes an exclusive `flock` on `path`, creating it (and its directory) if
+/// needed: a lock file another tool shares, held until the file is dropped.
+pub fn lock_file(path: &Path) -> Result<File> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).with_context(|| format!("failed to create {}", dir.display()))?;
+    }
+    let file = File::options()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(path)
+        .with_context(|| format!("failed to open {}", path.display()))?;
+    file.lock()
+        .with_context(|| format!("failed to lock {}", path.display()))?;
+    Ok(file)
+}
+
 pub fn lock(dir: &Path) -> Result<File> {
     create_private_dir(dir).with_context(|| format!("failed to create {}", dir.display()))?;
     let file = OpenOptions::new()

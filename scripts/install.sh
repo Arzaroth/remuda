@@ -99,7 +99,7 @@ if $want_timer || $want_serve; then
   # the active login for an inactive one and refreshes it.
   envdir="${XDG_CONFIG_HOME:-$HOME/.config}/environment.d"
   envs=()
-  for var in CLAUDE_CONFIG_DIR CODEX_HOME REMUDA_STORE; do
+  for var in CLAUDE_CONFIG_DIR CODEX_HOME GROK_HOME GROK_AUTH_PATH KIMI_CODE_HOME CURSOR_CONFIG_DIR REMUDA_STORE; do
     if [[ -n ${!var:-} ]]; then
       envs+=("$var=${!var}")
     fi

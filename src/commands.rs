@@ -297,7 +297,7 @@ pub fn login(
         pending.url()
     )?;
     let code = if pending.needs_code() {
-        write!(out, "Paste the code the page shows: ")?;
+        write!(out, "Paste {}: ", pending.asks_for())?;
         out.flush()?;
         Some((prompt.read_code)()?)
     } else {
@@ -325,6 +325,15 @@ pub fn begin_login(
         );
     }
     p.begin_login()
+}
+
+/// Prints the shell line that puts a stored key in the environment.
+pub fn print_env(store: &Store, p: &dyn Provider, name: &str, out: &mut dyn Write) -> Result<()> {
+    let entry = store
+        .get(p.id(), name)?
+        .with_context(|| format!("no credential {}/{name}", p.id()))?;
+    writeln!(out, "{}", p.env_line(&entry)?)?;
+    Ok(())
 }
 
 pub fn stored_message(p: &dyn Provider, entry: &Entry) -> String {
@@ -415,6 +424,9 @@ pub fn refresh(
     for live in lives {
         let p = live.provider;
         if scope.only.is_some_and(|(only, _)| only.id() != p.id()) {
+            continue;
+        }
+        if !p.renews() {
             continue;
         }
         if let LiveState::Unreadable { error } = &live.state {
@@ -521,6 +533,12 @@ pub fn remove(
     if state.active_name() == Some(name) {
         bail!(
             "{}/{name} is active; switch to another credential first",
+            p.id()
+        );
+    }
+    if let LiveState::Unreadable { error } = state {
+        bail!(
+            "not removing {}/{name}: which one is active is unknown: {error}",
             p.id()
         );
     }

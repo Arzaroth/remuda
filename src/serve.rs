@@ -335,6 +335,7 @@ impl App {
                 let id = pkce::random()?;
                 let url = login.url().to_owned();
                 let needs_code = login.needs_code();
+                let asks_for = login.asks_for();
                 pending.insert(
                     id.clone(),
                     Pending {
@@ -347,7 +348,9 @@ impl App {
                 );
                 drop(pending);
                 let opened = (self.open)(&url);
-                Ok(json!({"id": id, "url": url, "needsCode": needs_code, "opened": opened}))
+                Ok(
+                    json!({"id": id, "url": url, "needsCode": needs_code, "asksFor": asks_for, "opened": opened}),
+                )
             }
             ("POST", "/api/login/finish") => {
                 let id = text("id").context("id is required")?;

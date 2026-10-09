@@ -1,11 +1,16 @@
+mod apikey;
 mod browser;
 mod claude;
 mod codex;
 mod commands;
+mod cursor;
+mod device;
 mod dirs;
 mod fsx;
 mod gauge;
+mod grok;
 mod http;
+mod kimi;
 mod oauth;
 mod ops;
 mod paths;
@@ -23,8 +28,12 @@ use std::io::{self, BufRead};
 use anyhow::{Result, bail};
 use clap::{CommandFactory, Parser, Subcommand};
 
+use crate::apikey::ApiKey;
 use crate::claude::Claude;
 use crate::codex::Codex;
+use crate::cursor::Cursor;
+use crate::grok::Grok;
+use crate::kimi::Kimi;
 use crate::project::REMUDA;
 use crate::provider::Provider;
 use crate::store::Store;
@@ -37,7 +46,9 @@ struct Cli {
     command: Cmd,
 }
 
-const PROVIDERS: [&str; 2] = ["claude", "codex"];
+const PROVIDERS: [&str; 7] = [
+    "claude", "codex", "cursor", "glm", "grok", "kimi", "opencode",
+];
 
 #[derive(Subcommand)]
 enum Cmd {
@@ -90,6 +101,9 @@ enum Cmd {
     },
     /// Set the label shown beside a credential, or clear it. NAME or PROVIDER/NAME.
     Label { name: String, text: Option<String> },
+    /// Print the shell line that makes a CLI reading its key from the
+    /// environment use a stored one: `eval "$(remuda env glm/work)"`.
+    Env { name: String },
     /// Rename a stored credential. NAME or PROVIDER/NAME.
     Rename { name: String, new_name: String },
     /// Delete a stored credential. NAME or PROVIDER/NAME.
@@ -130,6 +144,7 @@ impl Cmd {
             Cmd::List { .. } => Some("listing"),
             Cmd::Refresh { .. } => Some("refreshing"),
             Cmd::Label { .. } => Some("labelling"),
+            Cmd::Env { .. } => Some("printing a key"),
             Cmd::Rename { .. } => Some("renaming"),
             Cmd::Remove { .. } => Some("removing"),
             Cmd::Serve { .. } => Some("serving"),
@@ -252,7 +267,12 @@ fn main() -> Result<()> {
     let store = Store::open(&paths::store_root());
     let claude = Claude::from_env()?;
     let codex = Codex::from_env()?;
-    let providers: [&dyn Provider; 2] = [&claude, &codex];
+    let grok = Grok::from_env()?;
+    let kimi = Kimi::from_env()?;
+    let cursor = Cursor::from_env()?;
+    let glm = ApiKey::glm();
+    let opencode = ApiKey::opencode();
+    let providers: [&dyn Provider; 7] = [&claude, &codex, &cursor, &glm, &grok, &kimi, &opencode];
     let seen = dirs::now(&providers);
     if let Some(doing) = cli.command.needs_store()
         && !store.root().exists()
@@ -282,7 +302,15 @@ fn main() -> Result<()> {
                 bail!("not serving: the service would act on other logins than the shell's");
             }
         }
-        let providers: Vec<Box<dyn Provider>> = vec![Box::new(claude), Box::new(codex)];
+        let providers: Vec<Box<dyn Provider>> = vec![
+            Box::new(claude),
+            Box::new(codex),
+            Box::new(cursor),
+            Box::new(glm),
+            Box::new(grok),
+            Box::new(kimi),
+            Box::new(opencode),
+        ];
         let (listener, port) = http::bind(port)?;
         let token = pkce::random()?;
         let url = format!("http://127.0.0.1:{port}/#{token}");
@@ -421,6 +449,10 @@ fn main() -> Result<()> {
             let (p, name) = commands::resolve(&store, &providers, &name)?;
             let state = ops::sync_live(&store, p)?;
             commands::remove(&store, p, &state, &name, out)
+        }
+        Cmd::Env { name } => {
+            let (p, name) = commands::resolve(&store, &providers, &name)?;
+            commands::print_env(&store, p, &name, out)
         }
         Cmd::Label { name, text } => {
             let (p, name) = commands::resolve(&store, &providers, &name)?;
