@@ -48,6 +48,14 @@ describe('inUse', () => {
     expect(inUse(s).map((p) => p.id)).toEqual(['claude', 'grok']);
   });
 
+  it('keeps a CLI with a stored login while it is signed out', () => {
+    const s = state([cred('perso')], [
+      { provider: 'claude', state: 'signed_out' },
+      { provider: 'grok', state: 'signed_out' },
+    ]);
+    expect(inUse(s).map((p) => p.id)).toEqual(['claude']);
+  });
+
   it('shows every CLI before any is in use', () => {
     const s = state([], [{ provider: 'claude', state: 'signed_out' }]);
     expect(inUse(s).map((p) => p.id)).toEqual(['claude', 'grok', 'glm']);
