@@ -5,7 +5,7 @@ import { date, plural, until, usedTone } from '../format';
 import { now, store } from '../state';
 import { remember, remembered } from '../storage';
 import type { Provider } from '../types';
-import { combine, providerUsage, weighable } from '../usage';
+import { combine, inUse, providerUsage, weighable } from '../usage';
 import { Meter } from './Meter';
 
 const [picks, setPicks] = createStore<Record<string, string>>(remembered('remuda-tiles') || {});
@@ -17,7 +17,7 @@ const ESTIMATE =
 export function Strip() {
   return (
     <div class="strip">
-      <For each={store.s!.providers}>{(p) => <Tile p={p} />}</For>
+      <For each={inUse(store.s!)}>{(p) => <Tile p={p} />}</For>
     </div>
   );
 }
