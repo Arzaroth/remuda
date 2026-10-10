@@ -21,7 +21,9 @@
   large one stay readable (TokenGauge's split bar does the same), and a
   login with no known weight is left out and named. A window no login with
   a weight reports is counted once per login instead. The figures are
-  rounded half to even, as TokenGauge prints them.
+  rounded half to even, as TokenGauge prints them: the server adds them up
+  with `selvedge::plans`, TokenGauge's own code, and sends both sums
+  (`shown` in the state), so the switch needs no round trip.
   Absolute counts every login once ("131% of 200%"). The switch shows only
   where there are weights, and the choice is kept per CLI in
   `localStorage`. The tile shows the window with the highest share
