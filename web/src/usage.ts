@@ -1,4 +1,17 @@
-import type { Credential, Live, Shown, State, Usage, Window } from './types';
+import type { Credential, Live, Provider, Shown, State, Usage, Window } from './types';
+
+// The CLIs worth a card and a tab: one with a stored login, or signed into
+// one (an unstored login is there to import). The rest are noise until an
+// account is added, which the add form still offers for every CLI. With
+// none of either, all of them, or the page would be empty.
+export function inUse(s: State): Provider[] {
+  const used = s.providers.filter(
+    (p) =>
+      s.credentials.some((c) => c.provider === p.id) ||
+      s.live.some((l) => l.provider === p.id && l.state !== 'signed_out'),
+  );
+  return used.length ? used : s.providers;
+}
 
 export function usageOf(c: Credential, usage: Shown | null): Shown | null {
   if (!usage) return null;
