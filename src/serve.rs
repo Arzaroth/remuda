@@ -14,6 +14,7 @@ use crate::paths;
 use crate::pkce;
 use crate::provider::{PendingLogin, Provider};
 use crate::runs;
+use crate::shown;
 use crate::store::Store;
 
 const PAGE: &str = include_str!("serve.html");
@@ -260,6 +261,7 @@ impl App {
                     .collect();
                 state["health"] = self.health();
                 state["usage"] = gauge::read(&self.places.snapshot).unwrap_or(Value::Null);
+                state["shown"] = shown::shown(&state);
                 Ok(state)
             }
             ("POST", "/api/use") => {
@@ -563,6 +565,13 @@ mod tests {
             state["usage"]["providers"]["claude"]["windows"][0]["usedPercent"],
             40
         );
+        // With no stored login there is nothing to add up, but the CLI's own
+        // figures still reach the page through `shown`.
+        assert_eq!(
+            state["shown"]["claude"]["usage"]["windows"][0]["usedPercent"],
+            40
+        );
+        assert_eq!(state["shown"]["claude"]["weighted"], json!([]));
 
         let timer = || call(&app, "GET", "/api/state", Value::Null).1["health"]["timer"].clone();
         std::fs::remove_file(units.join("remuda-refresh.timer")).unwrap();
