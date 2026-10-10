@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The page counts a plan whose weight is not a whole number. TokenGauge now
+  weighs a Claude Team seat as the 1.25x (Standard) or 6.25x (Premium) of a Pro
+  it is sold as, and remuda read only whole weights, so a Team seat would have
+  dropped out of the weighted total.
+
 ## [0.9.0] - 2026-10-09
 
 ### Added
