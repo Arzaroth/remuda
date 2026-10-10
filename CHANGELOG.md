@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-10
+
 ### Changed
 
 - The page leaves out a CLI with no stored login that is signed out: no
