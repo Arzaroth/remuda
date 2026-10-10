@@ -45,6 +45,28 @@ export type Health = {
   switchedAt: Record<string, number>;
 };
 
+export type Part = { name: string; active: boolean; window: Window; weight: number };
+
+// A window added up across a CLI's logins, as the server sends it.
+export type Combined = {
+  title: string;
+  weighted: boolean;
+  used: number;
+  of: number;
+  pooled: number;
+  parts: Part[];
+  widths: number[];
+  leftOut: string[];
+};
+
+export type ProviderShown = {
+  usage: Shown | null;
+  accounts: Record<string, Shown>;
+  weighable: boolean;
+  weighted: Combined[];
+  absolute: Combined[];
+};
+
 export type State = {
   store: string;
   providers: Provider[];
@@ -52,4 +74,5 @@ export type State = {
   live: Live[];
   health: Health;
   usage: { updatedAt: number | null; providers: Record<string, Usage> } | null;
+  shown: Record<string, ProviderShown>;
 };
