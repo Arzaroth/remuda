@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The page leaves out a CLI with no stored login that is signed out: no
+  summary tile, tab or section for it. "Add an account" still lists every CLI,
+  and a CLI signed into a login remuda has not stored still shows, to import
+  it.
+
 ### Fixed
 
 - The page counts a plan whose weight is not a whole number. TokenGauge now

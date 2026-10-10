@@ -5,6 +5,7 @@ import {
   combine,
   dropping,
   dropsLive,
+  inUse,
   overwrite,
   segmentWidths,
   taken,
@@ -25,6 +26,33 @@ const cred = (name: string, active = false): Credential => ({
   verified: true,
 });
 const win = (usedPercent: number) => [{ title: '5 hours', usedPercent, resetsAt: null }];
+
+describe('inUse', () => {
+  const state = (credentials: Credential[], live: Partial<Live>[]) =>
+    ({
+      providers: [
+        { id: 'claude', name: 'Claude Code' },
+        { id: 'grok', name: 'Grok' },
+        { id: 'glm', name: 'GLM' },
+      ],
+      credentials,
+      live: live as Live[],
+    }) as unknown as State;
+
+  it('drops a CLI with no stored login that is signed out', () => {
+    const s = state([cred('perso', true)], [
+      { provider: 'claude', state: 'stored' },
+      { provider: 'grok', state: 'unstored' },
+      { provider: 'glm', state: 'signed_out' },
+    ]);
+    expect(inUse(s).map((p) => p.id)).toEqual(['claude', 'grok']);
+  });
+
+  it('shows every CLI before any is in use', () => {
+    const s = state([], [{ provider: 'claude', state: 'signed_out' }]);
+    expect(inUse(s).map((p) => p.id)).toEqual(['claude', 'grok', 'glm']);
+  });
+});
 
 describe('usageOf', () => {
   it('takes a login its own figures when TokenGauge names it', () => {
