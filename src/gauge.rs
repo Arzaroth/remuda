@@ -91,7 +91,10 @@ fn provider(p: &Value) -> Value {
         "staleReason": p.get("staleReason").and_then(Value::as_str),
         "error": p.pointer("/error/message").and_then(Value::as_str),
         "credentialState": p.get("credentialState").and_then(Value::as_str),
-        "planWeight": p.get("planWeight").and_then(Value::as_u64).filter(|w| *w > 0),
+        // Claude's Team seats are sold as 1.25x and 6.25x a Pro.
+        "planWeight": p
+            .get("planWeight")
+            .filter(|w| w.as_f64().is_some_and(|w| w.is_finite() && w > 0.0)),
         "windows": fixed.chain(extra).collect::<Vec<_>>(),
     })
 }
@@ -219,7 +222,7 @@ mod tests {
         assert_eq!(usage["providers"]["codex"]["error"], "timed out");
         assert_eq!(usage["providers"]["codex"]["accounts"], json!({}));
 
-        let odd: Vec<Value> = [json!(0), json!(-1), json!(20.5), json!("20")]
+        let odd: Vec<Value> = [json!(0), json!(-1), json!("20")]
             .into_iter()
             .enumerate()
             .map(|(i, weight)| {
@@ -230,12 +233,24 @@ mod tests {
         let odd = json!({"meta": {"schemaVersion": 2, "updatedAtMs": 1}, "payloads": odd});
         std::fs::write(&file, odd.to_string()).unwrap();
         let weights = read(&file).unwrap();
-        for i in 0..4 {
+        for i in 0..3 {
             assert_eq!(
                 weights["providers"]["claude"]["accounts"][format!("odd{i}")]["planWeight"],
                 Value::Null
             );
         }
+
+        let seats = json!({"meta": {"schemaVersion": 2, "updatedAtMs": 1}, "payloads": [
+            {"provider": "claude", "credential": "standard", "planWeight": 1.25,
+             "usage": {"primary": {"usedPercent": 1}}},
+            {"provider": "claude", "credential": "premium", "planWeight": 6.25,
+             "usage": {"primary": {"usedPercent": 1}}},
+        ]});
+        std::fs::write(&file, seats.to_string()).unwrap();
+        let seats = read(&file).unwrap();
+        let accounts = &seats["providers"]["claude"]["accounts"];
+        assert_eq!(accounts["standard"]["planWeight"], 1.25);
+        assert_eq!(accounts["premium"]["planWeight"], 6.25);
 
         assert!(read(tmp.path()).is_none());
 

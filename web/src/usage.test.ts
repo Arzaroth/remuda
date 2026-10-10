@@ -192,6 +192,19 @@ describe('combine', () => {
   });
 });
 
+describe('fractional weights', () => {
+  it('weighs a Team seat as the 1.25x of a Pro it is sold as', () => {
+    const usage = {
+      windows: [],
+      accounts: {
+        max: { windows: [{ title: 'Session', usedPercent: 100, resetsAt: null }], planWeight: 20 },
+        team: { windows: [{ title: 'Session', usedPercent: 100, resetsAt: null }], planWeight: 1.25 },
+      },
+    };
+    expect(combine([cred('max'), cred('team')], usage, true)[0]).toMatchObject({ used: 106, of: 106 });
+  });
+});
+
 describe('segmentWidths', () => {
   const close = (got: number[], want: number[]) => got.forEach((w, i) => expect(w).toBeCloseTo(want[i]));
 
