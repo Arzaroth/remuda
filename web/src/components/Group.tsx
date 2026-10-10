@@ -3,8 +3,8 @@ import { brand } from '../brand';
 import { createConfirm } from '../confirm';
 import { date, DAY, HOUR, span, until, usedTone } from '../format';
 import { act, now, store } from '../state';
-import type { Credential, Live, Provider, Shown, Window } from '../types';
-import { dropping, dropsLive, overwrite, providerUsage, taken, usageOf } from '../usage';
+import type { Credential, Live, Provider, Window } from '../types';
+import { dropping, dropsLive, overwrite, shownFor, taken } from '../usage';
 import { Icon } from './Icon';
 import { Meter } from './Meter';
 
@@ -12,7 +12,6 @@ export function Group(props: { p: Provider; titled: boolean }) {
   const s = () => store.s!;
   const creds = () => s().credentials.filter((c) => c.provider === props.p.id);
   const live = () => s().live.find((l) => l.provider === props.p.id);
-  const usage = () => providerUsage(s(), props.p.id);
   return (
     <section class="group">
       <Show when={props.titled}>
@@ -27,7 +26,7 @@ export function Group(props: { p: Provider; titled: boolean }) {
           each={creds()}
           fallback={<div class="empty">No stored {props.p.name} logins. Import the one in use or add an account below.</div>}
         >
-          {(c) => <Row c={c} usage={usage()} live={live()} />}
+          {(c) => <Row c={c} live={live()} />}
         </For>
       </div>
     </section>
@@ -61,8 +60,8 @@ function WindowCell(props: { w: Window }) {
   );
 }
 
-function Windows(props: { c: Credential; usage: Shown | null }) {
-  const u = () => usageOf(props.c, props.usage);
+function Windows(props: { c: Credential }) {
+  const u = () => shownFor(store.s!, props.c);
   return (
     <Show when={store.s!.health.tokengauge}>
       <Switch>
@@ -162,7 +161,7 @@ function Editor(props: {
   );
 }
 
-function Row(props: { c: Credential; usage: Shown | null; live: Live | undefined }) {
+function Row(props: { c: Credential; live: Live | undefined }) {
   const c = () => props.c;
   const unverified = () => c().verified === false;
   const spec = () => `${c().provider}/${c().name}`;
@@ -269,7 +268,7 @@ function Row(props: { c: Credential; usage: Shown | null; live: Live | undefined
         </div>
       </header>
       <div class="usage">
-        <Windows c={c()} usage={props.usage} />
+        <Windows c={c()} />
       </div>
       <div class="tokens">
         <Lifetime title="Access token" at={c().expiresAt} horizon={8 * HOUR} warnBelow={HOUR} />

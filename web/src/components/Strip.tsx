@@ -5,7 +5,7 @@ import { date, plural, until, usedTone } from '../format';
 import { now, store } from '../state';
 import { remember, remembered } from '../storage';
 import type { Provider } from '../types';
-import { combine, inUse, providerUsage, weighable } from '../usage';
+import { inUse, providerUsage, resetsAt } from '../usage';
 import { Meter } from './Meter';
 
 const [picks, setPicks] = createStore<Record<string, string>>(remembered('remuda-tiles') || {});
@@ -28,13 +28,13 @@ function Tile(props: { p: Provider }) {
   const active = () => creds().find((c) => c.active);
   const live = () => s().live.find((l) => l.provider === props.p.id);
   const usage = () => providerUsage(s(), props.p.id);
-  const canWeigh = () => weighable(creds(), usage());
+  const canWeigh = () => s().shown?.[props.p.id]?.weighable ?? false;
   const weighted = () => canWeigh() && modes[props.p.id] !== 'absolute';
   const setMode = (mode: 'weighted' | 'absolute') => {
     setModes(props.p.id, mode);
     remember('remuda-weighting', { ...modes });
   };
-  const combined = createMemo(() => combine(creds(), usage(), weighted()));
+  const combined = createMemo(() => s().shown?.[props.p.id]?.[weighted() ? 'weighted' : 'absolute'] ?? []);
   const shown = () =>
     combined().find((w) => w.title === picks[props.p.id]) ||
     combined().reduce((a, b) => (b.pooled > a.pooled ? b : a));
@@ -100,7 +100,7 @@ function Tile(props: { p: Provider }) {
         <Show when={shown().leftOut.length}>
           <div class="under">Not in the total, no known plan weight: {shown().leftOut.join(', ')}</div>
         </Show>
-        <Show when={shown().resetsAt}>
+        <Show when={resetsAt(shown())}>
           {(at) => (
             <div class="under">
               Next reset <b>{until(at(), now())}</b>, {date(at())}

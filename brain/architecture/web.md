@@ -146,7 +146,18 @@ payload or an error belongs to in its `credential` field; those go under
 to the provider-level figures, which are then the live login's. When
 `accounts` is empty the snapshot names no credential, so the provider-level
 figures belong to the active login and are shown only when the snapshot is
-newer than its last switch. `App`
+newer than its last switch.
+
+`shown` is the page's figures, worked out from the rest by
+[shown.rs](../../src/shown.rs) so the page only draws: per CLI, `usage` (the
+provider-level figures, or `{behind: true}` while the snapshot is older than
+the last switch), `accounts` (what each stored login's card shows, by the
+lookup above, `{passive}` or `{missing}` when TokenGauge has nothing for it),
+`weighable`, and `weighted` and `absolute`: every window added up across the
+logins that report it, each with `title`, `weighted`, `used`, `of`, `pooled`,
+`parts` (`name`, `active`, `window`, `weight`), `widths` and `leftOut`. The sum
+is `selvedge::plans`, the same code TokenGauge's ALL PLANS header runs, so the
+two cannot disagree. `App`
 takes both locations as `Places`, so tests point them at a temporary
 directory.
 
