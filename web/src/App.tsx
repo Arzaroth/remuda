@@ -1,5 +1,6 @@
 import { createSignal, For, Show } from 'solid-js';
 import { act, store } from './state';
+import { inUse } from './usage';
 import { remember, remembered } from './storage';
 import { AddAccount } from './components/AddAccount';
 import { Group } from './components/Group';
@@ -16,7 +17,7 @@ export function App() {
     remember('remuda-tab', id);
   };
   const shown = () => {
-    const providers = store.s!.providers;
+    const providers = inUse(store.s!);
     const only = providers.filter((p) => p.id === tab());
     return only.length ? only : providers;
   };

@@ -5,6 +5,7 @@ import {
   combine,
   dropping,
   dropsLive,
+  inUse,
   overwrite,
   segmentWidths,
   taken,
@@ -25,6 +26,41 @@ const cred = (name: string, active = false): Credential => ({
   verified: true,
 });
 const win = (usedPercent: number) => [{ title: '5 hours', usedPercent, resetsAt: null }];
+
+describe('inUse', () => {
+  const state = (credentials: Credential[], live: Partial<Live>[]) =>
+    ({
+      providers: [
+        { id: 'claude', name: 'Claude Code' },
+        { id: 'grok', name: 'Grok' },
+        { id: 'glm', name: 'GLM' },
+      ],
+      credentials,
+      live: live as Live[],
+    }) as unknown as State;
+
+  it('drops a CLI with no stored login that is signed out', () => {
+    const s = state([cred('perso', true)], [
+      { provider: 'claude', state: 'stored' },
+      { provider: 'grok', state: 'unstored' },
+      { provider: 'glm', state: 'signed_out' },
+    ]);
+    expect(inUse(s).map((p) => p.id)).toEqual(['claude', 'grok']);
+  });
+
+  it('keeps a CLI with a stored login while it is signed out', () => {
+    const s = state([cred('perso')], [
+      { provider: 'claude', state: 'signed_out' },
+      { provider: 'grok', state: 'signed_out' },
+    ]);
+    expect(inUse(s).map((p) => p.id)).toEqual(['claude']);
+  });
+
+  it('shows every CLI before any is in use', () => {
+    const s = state([], [{ provider: 'claude', state: 'signed_out' }]);
+    expect(inUse(s).map((p) => p.id)).toEqual(['claude', 'grok', 'glm']);
+  });
+});
 
 describe('usageOf', () => {
   it('takes a login its own figures when TokenGauge names it', () => {
@@ -189,6 +225,19 @@ describe('combine', () => {
     const max = { windows: [{ title: 'Session', usedPercent: 50, resetsAt: null }], planWeight: 20 };
     const odd = { ...tie, accounts: { ...tie.accounts, max } };
     expect(combine([cred('max'), cred('pro')], odd, true)[0]).toMatchObject({ used: 50 });
+  });
+});
+
+describe('fractional weights', () => {
+  it('weighs a Team seat as the 1.25x of a Pro it is sold as', () => {
+    const usage = {
+      windows: [],
+      accounts: {
+        max: { windows: [{ title: 'Session', usedPercent: 100, resetsAt: null }], planWeight: 20 },
+        team: { windows: [{ title: 'Session', usedPercent: 100, resetsAt: null }], planWeight: 1.25 },
+      },
+    };
+    expect(combine([cred('max'), cred('team')], usage, true)[0]).toMatchObject({ used: 106, of: 106 });
   });
 });
 

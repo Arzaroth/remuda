@@ -137,7 +137,7 @@ with the default `$XDG_STATE_HOME/tokengauge/tokengauge-usage.json`. It is
 read only when it is a regular file, and at most 4 MiB of it. `usage` holds
 `updatedAt` and, per provider id, `stale`, `staleReason`, `error` (from the
 snapshot's top-level `errors`, where TokenGauge files a fetch that failed with
-nothing cached), `credentialState`, `planWeight` (TokenGauge's nominal plan multiplier, when it knows one), `windows` (`title`, `usedPercent`,
+nothing cached), `credentialState`, `planWeight` (TokenGauge's nominal plan multiplier, when it knows one: any positive number, since a Claude Team seat is 1.25 or 6.25), `windows` (`title`, `usedPercent`,
 `resetsAt`), placeholders dropped, and `accounts`: the same fields per stored
 credential name. TokenGauge 0.37 (snapshot schema 2) names the credential a
 payload or an error belongs to in its `credential` field; those go under

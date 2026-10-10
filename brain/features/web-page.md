@@ -31,6 +31,10 @@
 - Tabs: All, then one per CLI, each with its number of stored logins. A tab
   shows only that CLI's cards and picks it under "Add an account"; the
   choice is kept in `localStorage`.
+- A CLI with no stored login whose own login is signed out gets no summary
+  tile, tab or section (`usage.ts` `inUse`); "Add an account" still offers
+  it. One signed into a login remuda has not stored stays, to import it. With
+  no CLI in use at all, every one is shown.
 - One card per stored credential, in a grid under its CLI: name, label,
   email, plan and state pills, a row per usage window (its title, percentage
   and reset over a bar), how long its access token and its sign-in (refresh
