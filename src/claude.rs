@@ -490,6 +490,53 @@ impl PendingLogin for ClaudePending {
     }
 }
 
+/// The seats a Team plan sells, as the name a user types and the `seatTier`
+/// Anthropic's profile reports for it.
+const SEATS: [(&str, &str); 2] = [("standard", "team_standard"), ("premium", "team_premium")];
+
+/// Whether a stored login holds a Team seat: its tokens say `team`, or its
+/// profile reported a Team seat tier.
+pub fn on_team(e: &Entry) -> bool {
+    let sub = Claude::oauth(&e.creds)
+        .and_then(|o| o.get("subscriptionType"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    sub.to_ascii_lowercase().contains("team")
+        || reported_seat(e).is_some_and(|t| t.starts_with("team_"))
+}
+
+/// The seat tier the profile reported when the login was captured.
+pub fn reported_seat(e: &Entry) -> Option<&str> {
+    e.meta
+        .oauth_account
+        .as_ref()?
+        .get("seatTier")?
+        .as_str()
+        .filter(|t| !t.trim().is_empty())
+}
+
+/// The seat tier a typed choice names: `None` for `auto`, which follows the
+/// profile.
+pub fn chosen_seat(choice: &str) -> Result<Option<&'static str>> {
+    let choice = choice.trim().to_ascii_lowercase();
+    if choice == "auto" {
+        return Ok(None);
+    }
+    SEATS
+        .iter()
+        .find(|(name, tier)| choice == *name || choice == *tier)
+        .map(|(_, tier)| Some(*tier))
+        .with_context(|| format!("{choice:?} is not a seat: standard, premium or auto"))
+}
+
+/// A seat tier as the user reads it: `team_premium` is `premium`.
+pub fn seat_name(tier: &str) -> &str {
+    SEATS
+        .iter()
+        .find(|(_, t)| *t == tier)
+        .map_or(tier, |(name, _)| name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
