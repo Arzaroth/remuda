@@ -593,6 +593,9 @@ mod tests {
             .create();
         let e = env(&server.url());
         e.stored("work", "u-work", HOUR);
+        let mut seated = e.store.get("claude", "work").unwrap().unwrap();
+        seated.meta.seat_tier = Some("team_premium".into());
+        e.store.save(&seated).unwrap();
         tear(&e, "work", "a-torn");
 
         heal(&e.store, &e.claude, None).unwrap();
@@ -600,6 +603,7 @@ mod tests {
         let work = e.store.get("claude", "work").unwrap().unwrap();
         assert!(work.verified);
         assert_eq!(work.meta.account_id, "u-other");
+        assert_eq!(work.meta.seat_tier, None, "u-work's seat is not u-other's");
         assert_eq!(work.meta.email, "u-other@example.com");
         assert_eq!(e.stored_refresh_token("work").as_deref(), Some("r-new"));
     }

@@ -297,6 +297,33 @@ mod tests {
     }
 
     #[test]
+    fn a_seat_tier_that_is_not_text_is_ignored() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(tmp.path());
+        let mut work = entry("work", "u-1");
+        work.meta.seat_tier = Some("team_premium".into());
+        store.save(&work).unwrap();
+        assert_eq!(
+            store
+                .get("claude", "work")
+                .unwrap()
+                .unwrap()
+                .meta
+                .seat_tier
+                .as_deref(),
+            Some("team_premium")
+        );
+        let path = tmp.path().join("claude/work.meta.json");
+        let mut meta: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        meta["seatTier"] = json!(5);
+        fs::write(&path, meta.to_string()).unwrap();
+        assert_eq!(
+            store.get("claude", "work").unwrap().unwrap().meta.seat_tier,
+            None
+        );
+    }
+
+    #[test]
     fn a_sidecar_without_a_config_block_leaves_it_out() {
         let tmp = tempfile::tempdir().unwrap();
         let store = Store::open(tmp.path());

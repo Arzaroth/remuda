@@ -805,6 +805,47 @@ mod tests {
     }
 
     #[test]
+    fn a_login_stored_again_keeps_its_seat_only_for_the_same_account() {
+        let seated = |e: &Env| {
+            let mut entry = e.store.get("claude", "work").unwrap().unwrap();
+            entry.meta.seat_tier = Some("team_premium".into());
+            e.store.save(&entry).unwrap();
+        };
+        let again = |e: &Env| {
+            let unstored = LiveState::Unstored { email: None };
+            import(
+                &e.store,
+                &e.claude,
+                &unstored,
+                "work",
+                true,
+                &mut Vec::new(),
+            )
+            .unwrap();
+            e.store
+                .get("claude", "work")
+                .unwrap()
+                .unwrap()
+                .meta
+                .seat_tier
+        };
+
+        let server = profile_server("u-work");
+        let e = env(&server.url());
+        e.stored("work", "u-work", HOUR);
+        seated(&e);
+        e.sign_in(oauth("new", "new", HOUR), account("u-work"));
+        assert_eq!(again(&e).as_deref(), Some("team_premium"));
+
+        let server = profile_server("u-other");
+        let e = env(&server.url());
+        e.stored("work", "u-work", HOUR);
+        seated(&e);
+        e.sign_in(oauth("new", "new", HOUR), account("u-other"));
+        assert_eq!(again(&e), None);
+    }
+
+    #[test]
     fn import_needs_a_signed_in_cli_that_says_who_it_is() {
         let e = env(&OFFLINE);
         let run = |state: LiveState| {
@@ -1336,6 +1377,30 @@ mod tests {
         list(&e.store, &live(&e, active("work")), false, &mut out).unwrap();
         let listed = text(out);
         assert!(listed.contains(" standard "), "{listed}");
+
+        // A login that left its Team plan can still be set back to auto.
+        seat(&e.store, &e.claude, "work", "premium", &mut Vec::new()).unwrap();
+        let mut moved = e.store.get("claude", "work").unwrap().unwrap();
+        moved.creds[OAUTH_KEY]["subscriptionType"] = json!("max");
+        moved.meta.oauth_account = Some(json!({"accountUuid": "u-work"}));
+        e.store.save(&moved).unwrap();
+        let err = seat(&e.store, &e.claude, "work", "standard", &mut Vec::new()).unwrap_err();
+        assert!(err.to_string().contains("not on a Team plan"), "{err}");
+        let mut out = Vec::new();
+        seat(&e.store, &e.claude, "work", "auto", &mut out).unwrap();
+        assert_eq!(
+            text(out),
+            "claude/work follows the seat its profile reports, which named none\n"
+        );
+        assert_eq!(
+            e.store
+                .get("claude", "work")
+                .unwrap()
+                .unwrap()
+                .meta
+                .seat_tier,
+            None
+        );
 
         let err = seat(&e.store, &e.claude, "work", "gold", &mut Vec::new()).unwrap_err();
         assert!(err.to_string().contains("is not a seat"), "{err}");
