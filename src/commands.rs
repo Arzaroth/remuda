@@ -260,8 +260,9 @@ pub fn import(
             )));
         }
     };
-    let entry = Entry::new(p.id(), name, creds, identity, now_ms());
+    let mut entry = Entry::new(p.id(), name, creds, identity, now_ms());
     ensure_new_account(store, &entry)?;
+    keep_seat(store, &mut entry);
     store.save(&entry)?;
     writeln!(out, "{}", stored_message(p, &entry))?;
     Ok(())
@@ -348,6 +349,17 @@ pub fn stored_message(p: &dyn Provider, entry: &Entry) -> String {
     )
 }
 
+/// A login stored again under its own name keeps the seat chosen for it, while
+/// it is still the same account.
+fn keep_seat(store: &Store, entry: &mut Entry) {
+    if let Ok(Some(old)) = store.get(&entry.provider, &entry.name)
+        && old.verified
+        && old.meta.account_id == entry.meta.account_id
+    {
+        entry.meta.seat_tier = old.meta.seat_tier;
+    }
+}
+
 fn ensure_new_account(store: &Store, entry: &Entry) -> Result<()> {
     if let Some(other) = store
         .list(&entry.provider)?
@@ -372,7 +384,7 @@ pub fn save_login(
     force: bool,
     done: crate::provider::Login,
 ) -> Result<Entry> {
-    let entry = Entry::new(p.id(), name, done.creds, done.identity, now_ms());
+    let mut entry = Entry::new(p.id(), name, done.creds, done.identity, now_ms());
     let _lock = store.lock()?;
     if !force && store.get(p.id(), name)?.is_some() {
         bail!(
@@ -381,6 +393,7 @@ pub fn save_login(
         );
     }
     ensure_new_account(store, &entry)?;
+    keep_seat(store, &mut entry);
     store.save(&entry)?;
     Ok(entry)
 }
