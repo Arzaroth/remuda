@@ -4,7 +4,7 @@ import { createConfirm } from '../confirm';
 import { date, DAY, HOUR, span, until, usedTone } from '../format';
 import { act, now, store } from '../state';
 import type { Credential, Live, Provider, Window } from '../types';
-import { dropping, dropsLive, overwrite, shownFor, taken } from '../usage';
+import { dropping, dropsLive, overwrite, seatChoice, seatChoices, shownFor, taken } from '../usage';
 import { Icon } from './Icon';
 import { Meter } from './Meter';
 
@@ -253,6 +253,25 @@ function Row(props: { c: Credential; live: Live | undefined }) {
         <div class="pills">
           <Show when={c().plan}>
             <span class="pill">{c().plan}</span>
+          </Show>
+          <Show when={c().team || c().seat}>
+            <select
+              class="pill seat"
+              aria-label={`Seat for ${spec()}`}
+              title="Which Team seat this login holds, for TokenGauge's plan weights"
+              disabled={unverified()}
+              onChange={async (e) => {
+                const picker = e.currentTarget;
+                await act('/api/seat', { name: spec(), seat: picker.value });
+                picker.value = seatChoice(c());
+              }}
+            >
+              <For each={seatChoices(c())}>{(o) => (
+                  <option value={o.value} selected={o.value === seatChoice(c())}>
+                    {o.text}
+                  </option>
+                )}</For>
+            </select>
           </Show>
           <Show when={c().active}>
             <span class="pill on">In use</span>

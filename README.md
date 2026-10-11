@@ -64,6 +64,7 @@ take `-p <cli>`: `claude` (the default), `codex`, `cursor`, `glm`, `grok`,
 | `remuda ls [--json]` | List stored credentials, marking the active ones |
 | `remuda refresh [name] [--force] [--within MIN]` | Refresh the inactive credentials expiring within `MIN` minutes (default 60) |
 | `remuda label <name> [text]` | Set the label shown beside a credential, or clear it |
+| `remuda seat <name> standard\|premium\|auto` | Say which Team seat a Claude login holds, for TokenGauge's weights |
 | `remuda rename <name> <new>` | Rename a stored credential |
 | `remuda rm <name>` | Delete a stored credential |
 | `remuda serve [--port N] [--no-browser]` | Do all of the above from a page in the browser |

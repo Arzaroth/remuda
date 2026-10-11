@@ -48,3 +48,22 @@ export function overwrite(creds: Credential[], provider: string, name: string): 
 export const taken = (creds: Credential[], provider: string, name: string) =>
   creds.some((c) => c.provider === provider && c.name === name);
 
+
+const SEAT_NAMES: Record<string, string> = { team_standard: 'Standard', team_premium: 'Premium' };
+
+/** The choices a Team login's seat picker offers: the value `/api/seat` takes, and what it reads as. */
+export function seatChoices(c: Credential): { value: string; text: string }[] {
+  const reported = c.reportedSeat ? (SEAT_NAMES[c.reportedSeat] ?? c.reportedSeat) : 'not reported';
+  return [
+    { value: 'auto', text: `Seat: auto (${reported})` },
+    { value: 'standard', text: 'Seat: Standard' },
+    { value: 'premium', text: 'Seat: Premium' },
+  ];
+}
+
+/** The picker's current value. */
+export function seatChoice(c: Credential): string {
+  if (c.seat === 'team_standard') return 'standard';
+  if (c.seat === 'team_premium') return 'premium';
+  return 'auto';
+}
