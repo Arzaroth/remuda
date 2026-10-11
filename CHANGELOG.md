@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-11
+
 ### Added
 
 - `remuda seat <name> standard|premium|auto`, and a seat picker on a Claude
