@@ -535,7 +535,9 @@ pub fn seat(
             entry.qualified()
         );
     }
-    if !crate::claude::on_team(&entry) {
+    // Setting a seat back to auto is always allowed: a login that has left
+    // its Team plan must not keep a seat it can no longer clear.
+    if tier.is_some() && !crate::claude::on_team(&entry) {
         bail!("{} is not on a Team plan", entry.qualified());
     }
     entry.meta.seat_tier = tier.map(str::to_owned);
