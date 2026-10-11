@@ -42,8 +42,9 @@ endpoint; keep it that way. The suite must pass with no network and an empty
 ## The store is a contract
 
 TokenGauge (ADR 0003) reads `<store>/<provider>/<name>.json` and the sidecar keys
-`accountId`, `email`, `label` and `credsDigest` (lowercase hex SHA-256 of the
-credential file's bytes), and how each provider's `accountId` is derived: an
+`accountId`, `email`, `label`, `credsDigest` (lowercase hex SHA-256 of the
+credential file's bytes), the Team seat the user chose as top-level `seatTier`
+and the one the profile reported as `oauthAccount.seatTier`, and how each provider's `accountId` is derived: an
 API key's is `key-` and 16 hex digits of its SHA-256, which TokenGauge
 computes for the live key too. Changing any of them changes that ADR too.
 
