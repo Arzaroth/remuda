@@ -1270,6 +1270,64 @@ mod tests {
     }
 
     #[test]
+    fn a_team_login_holds_the_seat_it_is_given_until_it_is_set_back_to_auto() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let err = seat(&e.store, &e.claude, "work", "premium", &mut Vec::new()).unwrap_err();
+        assert!(err.to_string().contains("not on a Team plan"), "{err}");
+
+        let mut entry = e.store.get("claude", "work").unwrap().unwrap();
+        entry.creds[OAUTH_KEY]["subscriptionType"] = json!("team");
+        entry.meta.oauth_account =
+            Some(json!({"accountUuid": "u-work", "seatTier": "team_standard"}));
+        e.store.save(&entry).unwrap();
+
+        let mut out = Vec::new();
+        seat(&e.store, &e.claude, "work", "Premium", &mut out).unwrap();
+        assert_eq!(text(out), "claude/work holds a premium seat\n");
+        let saved = e.store.get("claude", "work").unwrap().unwrap();
+        assert_eq!(saved.meta.seat_tier.as_deref(), Some("team_premium"));
+        assert_eq!(
+            saved.meta.oauth_account.unwrap()["seatTier"],
+            "team_standard",
+            "what the profile reported is left as it was"
+        );
+
+        let mut out = Vec::new();
+        list(&e.store, &live(&e, active("work")), false, &mut out).unwrap();
+        assert!(text(out).contains(" premium (set)"));
+        let mut out = Vec::new();
+        list(&e.store, &live(&e, active("work")), true, &mut out).unwrap();
+        let v: Value = serde_json::from_slice(&out).unwrap();
+        let row = &v["credentials"][0];
+        assert_eq!(
+            (&row["team"], &row["seat"], &row["reportedSeat"]),
+            (
+                &json!(true),
+                &json!("team_premium"),
+                &json!("team_standard")
+            )
+        );
+
+        let mut out = Vec::new();
+        seat(&e.store, &e.claude, "work", "auto", &mut out).unwrap();
+        assert_eq!(
+            text(out),
+            "claude/work follows the seat its profile reports: standard\n"
+        );
+        let saved = e.store.get("claude", "work").unwrap().unwrap();
+        assert_eq!(saved.meta.seat_tier, None);
+        let mut out = Vec::new();
+        list(&e.store, &live(&e, active("work")), false, &mut out).unwrap();
+        let listed = text(out);
+        assert!(listed.contains(" standard "), "{listed}");
+
+        let err = seat(&e.store, &e.claude, "work", "gold", &mut Vec::new()).unwrap_err();
+        assert!(err.to_string().contains("is not a seat"), "{err}");
+        assert!(seat(&e.store, &e.claude, "nope", "auto", &mut Vec::new()).is_err());
+    }
+
+    #[test]
     fn a_label_shows_beside_the_name_until_it_is_cleared() {
         let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);
