@@ -177,7 +177,9 @@ pub fn list(store: &Store, lives: &[Live], as_json: bool, out: &mut dyn Write) -
             .map(|e| e.meta.email.len())
             .max()
             .unwrap_or(0);
-        for (e, shown) in entries.iter().zip(&shown) {
+        let plans: Vec<String> = entries.iter().map(|e| plan_shown(p, e)).collect();
+        let wp = plans.iter().map(String::len).max().unwrap_or(0).max(8);
+        for ((e, shown), plan) in entries.iter().zip(&shown).zip(&plans) {
             let mark = if live.state.active_name() == Some(e.name.as_str()) {
                 "*"
             } else {
@@ -193,10 +195,8 @@ pub fn list(store: &Store, lives: &[Live], as_json: bool, out: &mut dyn Write) -
                 .unwrap_or_default();
             writeln!(
                 out,
-                "{mark} {:w$}  {:we$}  {:8}  token {access}{refresh}",
-                shown,
-                e.meta.email,
-                plan_shown(p, e)
+                "{mark} {:w$}  {:we$}  {:wp$}  token {access}{refresh}",
+                shown, e.meta.email, plan
             )?;
         }
         match &live.state {
