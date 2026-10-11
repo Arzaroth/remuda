@@ -29,7 +29,8 @@ the CLI's file parses the stored one unchanged. Claude's holds only
 
 The sidecar (`store::Meta`, camelCase): `accountId`, `email`, `capturedAt`
 (ms), optional `label`, `credsDigest`, and for Claude `oauthAccount`, the block restored into
-`.claude.json` on a switch. `accountId` is Claude's `accountUuid`, and for
+`.claude.json` on a switch, and an optional `seatTier` the user chose
+([team seats](../features/team-seats.md)). `accountId` is Claude's `accountUuid`, and for
 Codex the seat (`chatgpt_account_user_id`), not the workspace id in
 `auth.json`. For Grok it is the access token's `sub`, for Kimi the `user_id`
 kimi.com's `/me` answers, for Cursor the user id in the token's `sub`, and for
@@ -88,8 +89,8 @@ process exits, so a crashed command never leaves the store locked.
 
 TokenGauge's ADR 0003 reads this store to draw one meter per credential and
 never writes it. What it relies on: the paths above, the file shapes, and the
-sidecar keys `accountId`, `email`, `label` and `credsDigest` (how it is
-computed included). A change to any of those is a
+sidecar keys `accountId`, `email`, `label`, `credsDigest` (how it is
+computed included), `seatTier` and `oauthAccount.seatTier`. A change to any of those is a
 change to that ADR as well.
 
 ## Sources
