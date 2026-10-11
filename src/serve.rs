@@ -280,6 +280,11 @@ impl App {
                 let (p, name) = commands::resolve(store, &providers, spec()?)?;
                 capture(|out| commands::label(store, p, &name, text("text"), out))
             }
+            ("POST", "/api/seat") => {
+                let (p, name) = commands::resolve(store, &providers, spec()?)?;
+                let seat = text("seat").context("seat is required")?;
+                capture(|out| commands::seat(store, p, &name, seat, out))
+            }
             ("POST", "/api/rename") => {
                 let (p, name) = commands::resolve(store, &providers, spec()?)?;
                 let to = text("to").context("to is required")?;

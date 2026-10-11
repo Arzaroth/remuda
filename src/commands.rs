@@ -138,6 +138,9 @@ pub fn list_json(store: &Store, lives: &[Live]) -> Result<Value> {
                 "expiresAt": p.expires_at(&e.creds),
                 "refreshTokenExpiresAt": p.refresh_expires_at(&e.creds),
                 "verified": e.verified,
+                "team": p.id() == "claude" && crate::claude::on_team(&e),
+                "seat": e.meta.seat_tier,
+                "reportedSeat": crate::claude::reported_seat(&e),
             }));
         }
     }
@@ -193,7 +196,7 @@ pub fn list(store: &Store, lives: &[Live], as_json: bool, out: &mut dyn Write) -
                 "{mark} {:w$}  {:we$}  {:8}  token {access}{refresh}",
                 shown,
                 e.meta.email,
-                p.plan(&e.creds)
+                plan_shown(p, e)
             )?;
         }
         match &live.state {
@@ -509,6 +512,70 @@ pub fn label(
         None => writeln!(out, "cleared the label of {}", entry.qualified())?,
     }
     Ok(())
+}
+
+/// Say which Team seat a Claude login holds, or let its profile say.
+pub fn seat(
+    store: &Store,
+    p: &dyn Provider,
+    name: &str,
+    choice: &str,
+    out: &mut dyn Write,
+) -> Result<()> {
+    if p.id() != "claude" {
+        bail!("only a Claude Team login has a seat");
+    }
+    let tier = crate::claude::chosen_seat(choice)?;
+    let mut entry = store
+        .get(p.id(), name)?
+        .with_context(|| format!("no credential named {}/{name}", p.id()))?;
+    if !entry.verified {
+        bail!(
+            "{} does not match its sidecar; `remuda ls` online identifies it first",
+            entry.qualified()
+        );
+    }
+    if !crate::claude::on_team(&entry) {
+        bail!("{} is not on a Team plan", entry.qualified());
+    }
+    entry.meta.seat_tier = tier.map(str::to_owned);
+    store.save(&entry)?;
+    match tier {
+        Some(tier) => writeln!(
+            out,
+            "{} holds a {} seat",
+            entry.qualified(),
+            crate::claude::seat_name(tier)
+        )?,
+        None => match crate::claude::reported_seat(&entry) {
+            Some(reported) => writeln!(
+                out,
+                "{} follows the seat its profile reports: {}",
+                entry.qualified(),
+                crate::claude::seat_name(reported)
+            )?,
+            None => writeln!(
+                out,
+                "{} follows the seat its profile reports, which named none",
+                entry.qualified()
+            )?,
+        },
+    }
+    Ok(())
+}
+
+/// The plan as listed: a Team login says which seat, and `(set)` when the
+/// user chose it.
+fn plan_shown(p: &dyn Provider, e: &Entry) -> String {
+    let plan = p.plan(&e.creds);
+    if p.id() != "claude" || !crate::claude::on_team(e) {
+        return plan;
+    }
+    match (&e.meta.seat_tier, crate::claude::reported_seat(e)) {
+        (Some(chosen), _) => format!("{plan} {} (set)", crate::claude::seat_name(chosen)),
+        (None, Some(reported)) => format!("{plan} {}", crate::claude::seat_name(reported)),
+        (None, None) => plan,
+    }
 }
 
 pub fn rename(
