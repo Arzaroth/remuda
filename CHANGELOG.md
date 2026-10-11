@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- `remuda seat <name> standard|premium|auto`, and a seat picker on a Claude
+  Team login's card, say which Team seat a login holds when the one Anthropic's
+  profile reports is wrong. TokenGauge 0.44.0 and later weigh the login by it.
+
 ## [0.10.0] - 2026-10-10
 
 ### Changed
