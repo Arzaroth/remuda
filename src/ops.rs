@@ -90,6 +90,7 @@ pub fn heal(store: &Store, p: &dyn Provider, live: Option<&Value>) -> Result<()>
                     );
                     entry.meta.email = String::new();
                     entry.meta.oauth_account = None;
+                    entry.meta.seat_tier = None;
                 }
                 entry.meta.account_id = id.account_id;
                 if !id.email.is_empty() {
