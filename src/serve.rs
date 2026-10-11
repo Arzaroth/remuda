@@ -616,6 +616,16 @@ mod tests {
             json!({"name": "work", "text": "Job"}),
         );
         assert_eq!(r["message"], "labelled claude/work \"Job\"");
+        let (status, r) = call(
+            &app,
+            "POST",
+            "/api/seat",
+            json!({"name": "work", "seat": "premium"}),
+        );
+        assert_eq!(
+            (status, r["error"].as_str().unwrap()),
+            (400, "claude/work is not on a Team plan")
+        );
         let (_, r) = call(
             &app,
             "POST",
