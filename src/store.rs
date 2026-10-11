@@ -21,13 +21,26 @@ pub struct Meta {
     /// The Team seat the user says this login holds (`team_standard`,
     /// `team_premium`), over the `seatTier` its profile reports. Kept out of
     /// `oauthAccount`, which a switch restores into Claude Code's own file.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "text_or_nothing"
+    )]
     pub seat_tier: Option<String>,
     /// SHA-256 of the credential file this sidecar was written with. The two
     /// files are two renames; a sidecar that names other tokens than the ones
     /// beside it is caught by this.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub creds_digest: Option<String>,
+}
+
+/// A key a hand edit may have filled with something other than text: dropped
+/// rather than failing the whole sidecar, as TokenGauge reads it.
+fn text_or_nothing<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    Ok(match Value::deserialize(d)? {
+        Value::String(s) if !s.trim().is_empty() => Some(s),
+        _ => None,
+    })
 }
 
 #[derive(Debug, Clone)]
