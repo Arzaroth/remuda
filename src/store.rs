@@ -18,6 +18,11 @@ pub struct Meta {
     pub captured_at: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oauth_account: Option<Value>,
+    /// The Team seat the user says this login holds (`team_standard`,
+    /// `team_premium`), over the `seatTier` its profile reports. Kept out of
+    /// `oauthAccount`, which a switch restores into Claude Code's own file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seat_tier: Option<String>,
     /// SHA-256 of the credential file this sidecar was written with. The two
     /// files are two renames; a sidecar that names other tokens than the ones
     /// beside it is caught by this.
@@ -54,6 +59,7 @@ impl Entry {
                 email: identity.email,
                 captured_at,
                 oauth_account: identity.oauth_account,
+                seat_tier: None,
                 creds_digest: None,
             },
             verified: true,
