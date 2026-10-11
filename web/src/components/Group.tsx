@@ -254,7 +254,7 @@ function Row(props: { c: Credential; live: Live | undefined }) {
           <Show when={c().plan}>
             <span class="pill">{c().plan}</span>
           </Show>
-          <Show when={c().team}>
+          <Show when={c().team || c().seat}>
             <select
               class="pill seat"
               aria-label={`Seat for ${spec()}`}
