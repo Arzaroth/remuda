@@ -260,7 +260,11 @@ function Row(props: { c: Credential; live: Live | undefined }) {
               aria-label={`Seat for ${spec()}`}
               title="Which Team seat this login holds, for TokenGauge's plan weights"
               disabled={unverified()}
-              onChange={(e) => act('/api/seat', { name: spec(), seat: e.currentTarget.value })}
+              onChange={async (e) => {
+                const picker = e.currentTarget;
+                await act('/api/seat', { name: spec(), seat: picker.value });
+                picker.value = seatChoice(c());
+              }}
             >
               <For each={seatChoices(c())}>{(o) => (
                   <option value={o.value} selected={o.value === seatChoice(c())}>
