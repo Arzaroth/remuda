@@ -106,7 +106,10 @@ enum Cmd {
     /// weights: standard, premium, or auto to follow what its profile reports.
     Seat {
         name: String,
-        #[arg(value_parser = ["standard", "premium", "auto"])]
+        #[arg(
+            ignore_case = true,
+            value_parser = ["standard", "premium", "auto", "team_standard", "team_premium"]
+        )]
         seat: String,
     },
     /// Print the shell line that makes a CLI reading its key from the
