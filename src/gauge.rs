@@ -198,10 +198,10 @@ mod tests {
             "meta": {"schemaVersion": 2, "updatedAtMs": 1},
             "payloads": [
                 {"provider": "claude", "credential": "perso", "active": true, "planWeight": 20,
-                 "usage": {"primary": {"usedPercent": 42, "windowMinutes": 300}}},
+                 "usage": {"primary": {"usedPercent": 42, "windowMinutes": 300}, "loginMethod": " Max "}},
                 {"provider": "claude", "usage": {"primary": {"usedPercent": 7, "windowMinutes": 300}}},
                 {"provider": "claude", "credential": "work", "active": false,
-                 "usage": {"primary": {"usedPercent": 0, "windowMinutes": 300}}},
+                 "usage": {"primary": {"usedPercent": 0, "windowMinutes": 300}, "loginMethod": ""}},
                 {"provider": "claude", "credential": "old", "active": false,
                  "credentialState": "expired", "usage": null},
             ],
@@ -219,6 +219,8 @@ mod tests {
         assert_eq!(accounts["perso"]["windows"][0]["usedPercent"], 42);
         assert_eq!(accounts["perso"]["planWeight"], 20);
         assert_eq!(accounts["work"]["planWeight"], Value::Null);
+        assert_eq!(accounts["perso"]["plan"], "Max");
+        assert_eq!(accounts["work"]["plan"], Value::Null);
         assert_eq!(accounts["work"]["windows"][0]["usedPercent"], 0);
         assert_eq!(accounts["old"]["credentialState"], "expired");
         assert_eq!(accounts["old"]["windows"], json!([]));

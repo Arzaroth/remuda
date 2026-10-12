@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Combined, Credential, Live, State } from './types';
-import { dropping, dropsLive, inUse, overwrite, resetsAt, seatChoice, seatChoices, shownFor, taken } from './usage';
+import { dropping, dropsLive, inUse, overwrite, planFor, resetsAt, seatChoice, seatChoices, shownFor, taken } from './usage';
 
 const cred = (name: string, active = false): Credential => ({
   id: `claude/${name}`,
@@ -83,6 +83,17 @@ describe('shownFor', () => {
 
   it('does not take a name inherited from Object', () => {
     expect(shownFor(state, cred('toString'))).toBeNull();
+  });
+});
+
+describe('planFor', () => {
+  const state = { shown: { claude: { accounts: { work: { windows: [], plan: 'Free' } } } } } as unknown as State;
+
+  it("keeps the store's plan and falls back to TokenGauge's", () => {
+    expect(planFor(state, cred('work'))).toBe('max');
+    expect(planFor(state, { ...cred('work'), plan: '-' })).toBe('Free');
+    expect(planFor(state, { ...cred('perso'), plan: '-' })).toBe('-');
+    expect(planFor(state, { ...cred('work'), plan: null })).toBe('Free');
   });
 });
 
