@@ -1259,6 +1259,18 @@ mod tests {
             "a seat tier nothing explains is not shown"
         );
 
+        let mut bare = e.store.get("claude", "work").unwrap().unwrap();
+        bare.creds[OAUTH_KEY]
+            .as_object_mut()
+            .unwrap()
+            .remove("subscriptionType");
+        bare.meta.oauth_account = Some(json!({"seatTier": "team_standard"}));
+        assert_eq!(
+            plan_shown(&e.claude, &bare),
+            "team standard",
+            "a token that names no plan, on a Team seat its profile reports"
+        );
+
         let mut max = e.store.get("claude", "work").unwrap().unwrap();
         max.creds[OAUTH_KEY]["rateLimitTier"] = json!("default_claude_max_20x");
         assert_eq!(plan_shown(&e.claude, &max), "max 20x");
