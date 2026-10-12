@@ -91,6 +91,11 @@ fn provider(p: &Value) -> Value {
         "staleReason": p.get("staleReason").and_then(Value::as_str),
         "error": p.pointer("/error/message").and_then(Value::as_str),
         "credentialState": p.get("credentialState").and_then(Value::as_str),
+        "plan": usage
+            .get("loginMethod")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|m| !m.is_empty()),
         // Claude's Team seats are sold as 1.25x and 6.25x a Pro.
         "planWeight": p
             .get("planWeight")
