@@ -9,14 +9,15 @@ away is its own allowance, a rate-limit tier naming a multiplier
 (`default_claude_max_5x`).
 
 So `claude::seat` reads a login on a Team plan (`on_team`: its tokens'
-`subscriptionType` says `team`, or its profile reported a `team_` seat tier)
-through `selvedge::plans::team_seat`, the rule TokenGauge uses for its
+`subscriptionType` says `team`, or says nothing and its profile reported a
+`team_` seat tier; a token naming another plan has left Team) through `selvedge::plans::team_seat`, the rule TokenGauge uses for its
 weights:
 
 1. Premium when a rate-limit tier the login carries names a multiplier (or
    says `premium`): `oauthAccount.userRateLimitTier`, which Claude Code writes
-   into `.claude.json`, or the token's `rateLimitTier`, which remuda's own
-   sign-in fills from the profile's `organization.rate_limit_tier`.
+   into `.claude.json`, or the token's `rateLimitTier` when the token says
+   `team`, which remuda's own sign-in fills from the profile's
+   `organization.rate_limit_tier`. A token that says nothing may be a Max.
 2. Otherwise `oauthAccount.seatTier`: `team_premium` or `team_standard`.
 3. Otherwise no seat. A tier nothing explains is not shown, rather than
    printed raw.
