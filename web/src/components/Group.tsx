@@ -4,7 +4,7 @@ import { createConfirm } from '../confirm';
 import { date, DAY, HOUR, span, until, usedTone } from '../format';
 import { act, now, store } from '../state';
 import type { Credential, Live, Provider, Window } from '../types';
-import { dropping, dropsLive, overwrite, seatChoice, seatChoices, shownFor, taken } from '../usage';
+import { dropping, dropsLive, overwrite, planFor, seatChoice, seatChoices, shownFor, taken } from '../usage';
 import { Icon } from './Icon';
 import { Meter } from './Meter';
 
@@ -251,8 +251,8 @@ function Row(props: { c: Credential; live: Live | undefined }) {
         </div>
         <div class="mail">{c().email}</div>
         <div class="pills">
-          <Show when={c().plan}>
-            <span class="pill">{c().plan}</span>
+          <Show when={planFor(store.s!, c())}>
+            {(plan) => <span class="pill">{plan()}</span>}
           </Show>
           <Show when={c().team || c().seat}>
             <select

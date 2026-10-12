@@ -22,6 +22,13 @@ export function shownFor(s: State, c: Credential): Shown | null {
   return Object.hasOwn(accounts, c.name) ? accounts[c.name] : null;
 }
 
+// The plan a card names: the store's, or TokenGauge's when the credential
+// file does not say (Grok's tier, an API key's plan).
+export function planFor(s: State, c: Credential): string | null {
+  if (c.plan && c.plan !== '-') return c.plan;
+  return shownFor(s, c)?.plan || c.plan;
+}
+
 // TokenGauge's figures for a CLI, or what stands in for them.
 export const providerUsage = (s: State, id: string): Shown | null => s.shown?.[id]?.usage ?? null;
 

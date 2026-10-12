@@ -35,6 +35,7 @@ export type Usage = {
   error?: string | null;
   credentialState?: string | null;
   planWeight?: number | null;
+  plan?: string | null;
   windows: Window[];
   accounts?: Record<string, Usage>;
 };
