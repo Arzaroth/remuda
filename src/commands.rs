@@ -521,9 +521,13 @@ fn seat_shown(p: &dyn Provider, e: &Entry) -> Option<&'static str> {
         .map(crate::claude::seat_word)
 }
 
-/// The plan as listed: a Team login says which seat.
+/// The plan as listed: a Team login says which seat, and says Team when only
+/// its profile does.
 fn plan_shown(p: &dyn Provider, e: &Entry) -> String {
-    let plan = p.plan(&e.creds);
+    let mut plan = p.plan(&e.creds);
+    if plan == "-" && p.id() == "claude" && crate::claude::on_team(e) {
+        plan = "team".to_owned();
+    }
     match seat_shown(p, e) {
         Some(seat) => format!("{plan} {seat}"),
         None => plan,
