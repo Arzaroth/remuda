@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- A premium Claude Team seat is recognised. Anthropic reports its seat tier
+  as `team_tier_1`, so `ls` printed `team team_tier_1`; the seat is now read
+  off the rate-limit tiers the login carries, as TokenGauge reads it, and
+  lists as `team premium` (or `team standard`). A Team plan no longer lists as
+  `team 5x`.
+- Re-identifying a credential whose sidecar was torn keeps the parts of
+  Claude Code's account block a profile does not carry, including the tier
+  that marks a premium seat.
+
+### Removed
+
+- `remuda seat`, the page's seat picker and `POST /api/seat`: the seat is
+  detected now. A seat chosen with them is ignored and dropped from the
+  sidecar the next time it is saved. `ls --json` loses `reportedSeat`; its
+  `seat` is the detected seat (`standard` or `premium`), and its `plan` is the
+  plan as `ls` prints it.
+
 ## [0.12.0] - 2026-10-12
 
 ### Changed
