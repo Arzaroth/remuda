@@ -103,7 +103,7 @@ access to anything, and it ends when they stop.
 | `GET /api/events` | A server-sent event stream: `data: changed` when the page should reload the state |
 | `POST /api/use` `{name, discard?}` | Switch |
 | `POST /api/import` `{provider?, name, force?}` | Store the live login |
-| `POST /api/label` `{name, text?}` / `seat` `{name, seat}` / `rename` `{name, to}` / `remove` `{name}` | As the commands |
+| `POST /api/label` `{name, text?}` / `rename` `{name, to}` / `remove` `{name}` | As the commands |
 | `POST /api/refresh` `{name?, force?}` | Refresh inactive credentials |
 | `POST /api/login` `{provider?, name, force?}` | Begin a sign-in and open it in a private window: `{id, url, needsCode, opened}` |
 | `POST /api/login/finish` `{id, code?}` | Finish it and store the result |
