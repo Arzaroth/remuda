@@ -11,9 +11,6 @@ export type Credential = {
   expiresAt: number | null;
   refreshTokenExpiresAt: number | null;
   verified: boolean;
-  team?: boolean;
-  seat?: string | null;
-  reportedSeat?: string | null;
 };
 
 export type Live = {
