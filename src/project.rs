@@ -9,6 +9,7 @@ pub const REMUDA: Project = Project {
     aliases: &[],
     legacy: &[],
     msi_marker_key: None,
+    targets: selvedge::SHORT_TARGETS,
 };
 
 /// selvedge downloads what the release workflow publishes, and nothing checks
@@ -31,7 +32,10 @@ mod tests {
         let release = release_workflow();
         assert!(release.contains("for arch in x86_64 aarch64; do"));
         assert!(release.contains("\"dist/remuda-$safe-linux-$arch.tar.gz\""));
-        let wanted = format!("{}{ARCHIVE_SUFFIX}", arch_target().expect("a known arch"));
+        let wanted = format!(
+            "{}{ARCHIVE_SUFFIX}",
+            arch_target(&REMUDA).expect("a known arch")
+        );
         assert!(
             ["linux-x86_64.tar.gz", "linux-aarch64.tar.gz"].contains(&wanted.as_str()),
             "apply() asks for {wanted}"
