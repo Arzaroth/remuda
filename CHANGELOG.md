@@ -13,6 +13,13 @@
   Claude Code's account block a profile does not carry, including the tier
   that marks a premium seat.
 
+### Changed
+
+- `--update` refuses a binary a package manager installed (a distribution
+  package, the Nix store, a snap) and says how to upgrade it instead, as it
+  already did for Homebrew, and unpacks a release zip that lists its
+  directories.
+
 ### Removed
 
 - `remuda seat`, the page's seat picker and `POST /api/seat`: the seat is
