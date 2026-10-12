@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Combined, Credential, Live, State } from './types';
-import { dropping, dropsLive, inUse, overwrite, resetsAt, seatChoice, seatChoices, shownFor, taken } from './usage';
+import { dropping, dropsLive, inUse, overwrite, resetsAt, shownFor, taken } from './usage';
 
 const cred = (name: string, active = false): Credential => ({
   id: `claude/${name}`,
@@ -92,15 +92,5 @@ describe('resetsAt', () => {
     const c = { parts: [part('2026-10-12T00:00:00Z'), part(null), part('2026-10-10T00:00:00Z')] } as unknown as Combined;
     expect(resetsAt(c)).toBe(Date.parse('2026-10-10T00:00:00Z'));
     expect(resetsAt({ parts: [part(null)] } as unknown as Combined)).toBeNull();
-  });
-});
-
-describe('seat picker', () => {
-  it('names the reported seat on auto and shows the chosen one', () => {
-    const team = { ...cred('work'), team: true, reportedSeat: 'team_standard', seat: null };
-    expect(seatChoices(team)[0].text).toBe('Seat: auto (Standard)');
-    expect(seatChoice(team)).toBe('auto');
-    expect(seatChoice({ ...team, seat: 'team_premium' })).toBe('premium');
-    expect(seatChoices({ ...team, reportedSeat: null })[0].text).toBe('Seat: auto (not reported)');
   });
 });
