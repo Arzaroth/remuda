@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Updating is a flag, as in TokenGauge and TailGauge: `remuda --update`
+  replaces the binary and `remuda --check-update` reports whether a newer
+  release exists. The `remuda update` subcommand is gone.
+
 ## [0.11.0] - 2026-10-11
 
 ### Added

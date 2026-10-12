@@ -38,7 +38,7 @@ completions for bash, zsh and fish when it finds them. Pass `--no-timer`,
 `--no-completions`, or `--version vX.Y.Z` to pin a release
 (`... | bash -s -- --no-timer`). `--serve` also enables
 `remuda-serve.service`, which keeps [the page](#the-page) running for
-`remuda open`. Afterwards, `remuda update` replaces the binary
+`remuda open`. Afterwards, `remuda --update` replaces the binary
 with the latest release and brings the systemd units you installed up to date.
 
 If your shell sets `CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `REMUDA_STORE`, the
@@ -70,7 +70,8 @@ take `-p <cli>`: `claude` (the default), `codex`, `cursor`, `glm`, `grok`,
 | `remuda serve [--port N] [--no-browser]` | Do all of the above from a page in the browser |
 | `remuda open [--no-browser]` | Open the page a running `serve` shows |
 | `remuda completions <shell>` | Print a completion script |
-| `remuda update [--check]` | Replace the binary with the latest release |
+| `remuda --update` | Replace the binary with the latest release |
+| `remuda --check-update` | Report whether a newer release exists |
 
 `login` opens the provider's sign-in page in a private window of your default
 browser (Brave, Chrome, Chromium, Vivaldi, Edge, Firefox or LibreWolf, not
@@ -196,5 +197,5 @@ Nothing in the test suite reaches the network or a real CLI install. The OAuth
 calls run against a local mock server, a Codex sign-in is completed through its
 callback listener on an ephemeral port, and `tests/cli.rs` runs the binary
 against a throwaway `HOME`. What stays uncovered on purpose is the process
-surface in `main.rs`: `remuda update` talking to GitHub, `login` reading stdin,
+surface in `main.rs`: `remuda --update` talking to GitHub, `login` reading stdin,
 `serve` binding its port, and `browser.rs` starting a browser.

@@ -84,7 +84,7 @@ curl -fsSL https://raw.githubusercontent.com/Arzaroth/remuda/master/scripts/inst
 rm -rf "$tmp"
 ```
 
-If the user wants their own install upgraded: `remuda update`, then
+If the user wants their own install upgraded: `remuda --update`, then
 `remuda --version`.
 
 ## Done when
