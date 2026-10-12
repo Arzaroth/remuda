@@ -41,10 +41,20 @@ use crate::store::Store;
 
 /// Keep several Claude Code and Codex logins and switch between them.
 #[derive(Parser)]
-#[command(version)]
+#[command(
+    version,
+    args_conflicts_with_subcommands = true,
+    arg_required_else_help = true
+)]
 struct Cli {
+    /// Replace this binary with the latest release.
+    #[arg(long, conflicts_with = "check_update")]
+    update: bool,
+    /// Only report whether a newer release exists.
+    #[arg(long)]
+    check_update: bool,
     #[command(subcommand)]
-    command: Cmd,
+    command: Option<Cmd>,
 }
 
 const PROVIDERS: [&str; 7] = [
@@ -136,13 +146,7 @@ enum Cmd {
     },
     /// Print a completion script for a shell.
     Completions { shell: clap_complete::Shell },
-    /// Replace this binary with the latest release.
-    Update {
-        /// Only report whether a newer release exists.
-        #[arg(long)]
-        check: bool,
-    },
-    /// Run by `update` as the new binary: bring the installed units up to date.
+    /// Run by `--update` as the new binary: bring the installed units up to date.
     #[command(hide = true)]
     SyncUnits,
 }
@@ -164,7 +168,6 @@ impl Cmd {
             | Cmd::Login { .. }
             | Cmd::Open { .. }
             | Cmd::Completions { .. }
-            | Cmd::Update { .. }
             | Cmd::SyncUnits => None,
         }
     }
@@ -263,16 +266,16 @@ fn open(no_browser: bool) -> Result<()> {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    if let Cmd::Open { no_browser } = cli.command {
+    let Some(command) = cli.command else {
+        return update(cli.check_update);
+    };
+    if let Cmd::Open { no_browser } = command {
         return open(no_browser);
     }
-    if let Cmd::Update { check } = cli.command {
-        return update(check);
-    }
-    if let Cmd::SyncUnits = cli.command {
+    if let Cmd::SyncUnits = command {
         return sync_units();
     }
-    if let Cmd::Completions { shell } = cli.command {
+    if let Cmd::Completions { shell } = command {
         clap_complete::generate(shell, &mut Cli::command(), "remuda", &mut io::stdout());
         return Ok(());
     }
@@ -286,7 +289,7 @@ fn main() -> Result<()> {
     let opencode = ApiKey::opencode();
     let providers: [&dyn Provider; 7] = [&claude, &codex, &cursor, &glm, &grok, &kimi, &opencode];
     let seen = dirs::now(&providers);
-    if let Some(doing) = cli.command.needs_store()
+    if let Some(doing) = command.needs_store()
         && !store.root().exists()
     {
         bail!(
@@ -295,7 +298,7 @@ fn main() -> Result<()> {
         );
     }
     let service = dirs::is_service(matches!(
-        cli.command,
+        command,
         Cmd::Refresh {
             scheduled: true,
             ..
@@ -304,7 +307,7 @@ fn main() -> Result<()> {
     if !service {
         dirs::record(&store, &seen);
     }
-    if let Cmd::Serve { port, no_browser } = cli.command {
+    if let Cmd::Serve { port, no_browser } = command {
         if service {
             let plan = dirs::plan(dirs::recorded(&store).as_ref(), &seen, "serving");
             for line in &plan.skipped {
@@ -362,7 +365,7 @@ fn main() -> Result<()> {
         provider,
         force,
         no_browser,
-    } = &cli.command
+    } = &command
     {
         let p = commands::find(&providers, provider)?;
         let open = |url: &str| {
@@ -387,7 +390,7 @@ fn main() -> Result<()> {
     }
 
     let _lock = store.lock()?;
-    match cli.command {
+    match command {
         Cmd::Use { name, discard } => {
             let (p, name) = commands::resolve(&store, &providers, &name)?;
             println!("{}", ops::switch(&store, p, &name, discard)?);
@@ -482,7 +485,6 @@ fn main() -> Result<()> {
         | Cmd::Serve { .. }
         | Cmd::Open { .. }
         | Cmd::Completions { .. }
-        | Cmd::Update { .. }
         | Cmd::SyncUnits => {
             unreachable!()
         }
