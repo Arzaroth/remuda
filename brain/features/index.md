@@ -9,4 +9,4 @@
 | Names and labels | [names-and-labels.md](names-and-labels.md) | `label`, `rename`, `provider/name` |
 | Team seats | [team-seats.md](team-seats.md) | `seat` |
 | The local page | [web-page.md](web-page.md) | `serve`, `open`, the service |
-| Completions and self-update | [completions-and-update.md](completions-and-update.md) | `completions`, `update` |
+| Completions and self-update | [completions-and-update.md](completions-and-update.md) | `completions`, `--update`, `--check-update` |

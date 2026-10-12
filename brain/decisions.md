@@ -192,7 +192,7 @@ See [architecture/web.md](architecture/web.md).
 ## selvedge for updates, a curl installer for installs
 
 Users do not have cargo, so releases ship prebuilt archives, `install.sh`
-fetches them, and `remuda update` uses selvedge, the updater TokenGauge and
+fetches them, and `remuda --update` uses selvedge, the updater TokenGauge and
 TailGauge share, pinned by tag. remuda has no desktop frontends, so selvedge
 replaces the binary alone, and the new binary then updates the systemd units
 it carries, since the old one cannot know them.
