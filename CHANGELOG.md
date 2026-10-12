@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-12
+
 ### Changed
 
 - Updating is a flag, as in TokenGauge and TailGauge: `remuda --update`
