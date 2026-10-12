@@ -17,7 +17,7 @@ its root, every unit in `systemd/` and the licences. Release notes are the versi
 `CHANGELOG.md` section.
 
 `project.rs` tests hold the workflow, the installer and selvedge to the same
-asset name, so a rename that would break `update` fails `cargo test`.
+asset name, so a rename that would break `--update` fails `cargo test`.
 
 ## Install
 
@@ -71,7 +71,7 @@ stops it before anything is created.
 
 ## Update
 
-`remuda update [--check]` is selvedge `check_cached` / `apply` over the
+`remuda --update` / `--check-update` is selvedge `check_cached` / `apply` over the
 `REMUDA` project (no frontends, no aliases). `REMUDA_REPO` overrides the repo
 for a fork.
 
