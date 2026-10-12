@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-12
+
 ### Fixed
 
 - A premium Claude Team seat is recognised. Anthropic reports its seat tier
