@@ -37,7 +37,7 @@ running.
    except `import` and `login`, which create it (0700) through the
    directories record and the lock. Then it
    takes `<store>/.lock` (except `login`, which takes it only to save, and
-   `completions`/`update`/`open`, which need no store).
+   `completions`/`--update`/`open`, which need no store).
 3. `ops::sync_live` copies the live login back into its credential, and reports
    the live state: signed out, stored (and whether that was confirmed), or
    unstored.

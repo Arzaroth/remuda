@@ -397,12 +397,31 @@ fn completions_cover_every_command() {
     let home = Home::new();
     let zsh = home.ok(&["completions", "zsh"]);
     for command in [
-        "import", "login", "use", "label", "rename", "serve", "open", "update",
+        "import",
+        "login",
+        "use",
+        "label",
+        "rename",
+        "serve",
+        "open",
+        "--update",
+        "--check-update",
     ] {
         assert!(zsh.contains(command), "zsh completions miss {command}");
     }
     assert!(home.ok(&["completions", "bash"]).contains("_remuda"));
     assert!(home.fails(&["completions", "tcsh"]).contains("tcsh"));
+}
+
+#[test]
+fn updating_is_a_flag_as_in_tokengauge_and_tailgauge() {
+    let home = Home::new();
+    assert!(home.fails(&["update"]).contains("unrecognized subcommand"));
+    assert!(home.fails(&["--update", "ls"]).contains("cannot be used"));
+    assert!(
+        home.fails(&["--update", "--check-update"])
+            .contains("cannot be used")
+    );
 }
 
 #[test]

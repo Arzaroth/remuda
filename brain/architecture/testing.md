@@ -51,7 +51,7 @@ the components are checked by hand against a scratch store.
 
 `scripts/coverage.sh` (cargo-llvm-cov) prints the summary and the files with the
 most uncovered lines. Uncovered on purpose: `main.rs`'s process surface
-(`update`, stdin in `login`, binding in `serve`, starting the service in
+(`--update`, stdin in `login`, binding in `serve`, starting the service in
 `open`) and `browser.rs` starting a
 browser; which browser and flag it picks is tested through `launcher`.
 
