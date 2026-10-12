@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
+use selvedge::plans::{Seat, team_seat, tier_multiplier};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
@@ -369,11 +370,12 @@ impl Provider for Claude {
     fn plan(&self, creds: &Value) -> String {
         let o = Self::oauth(creds);
         let get = |k| o.and_then(|o| o.get(k)).and_then(Value::as_str);
-        match (get("subscriptionType"), get("rateLimitTier")) {
-            (Some(sub), Some(tier)) if tier.ends_with("_20x") => format!("{sub} 20x"),
-            (Some(sub), Some(tier)) if tier.ends_with("_5x") => format!("{sub} 5x"),
-            (Some(sub), _) => sub.to_owned(),
-            _ => "-".to_owned(),
+        let Some(sub) = get("subscriptionType") else {
+            return "-".to_owned();
+        };
+        match get("rateLimitTier").and_then(tier_multiplier) {
+            Some(n) if !is_team(sub) => format!("{sub} {n}x"),
+            _ => sub.to_owned(),
         }
     }
 
@@ -494,25 +496,52 @@ impl PendingLogin for ClaudePending {
 /// Anthropic's profile reports for it.
 const SEATS: [(&str, &str); 2] = [("standard", "team_standard"), ("premium", "team_premium")];
 
+fn is_team(subscription: &str) -> bool {
+    subscription.to_ascii_lowercase().contains("team")
+}
+
 /// Whether a stored login holds a Team seat: its tokens say `team`, or its
 /// profile reported a Team seat tier.
 pub fn on_team(e: &Entry) -> bool {
-    let sub = Claude::oauth(&e.creds)
-        .and_then(|o| o.get("subscriptionType"))
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    sub.to_ascii_lowercase().contains("team")
+    token_field(e, "subscriptionType").is_some_and(is_team)
         || reported_seat(e).is_some_and(|t| t.starts_with("team_"))
+}
+
+fn token_field<'a>(e: &'a Entry, key: &str) -> Option<&'a str> {
+    Claude::oauth(&e.creds)?.get(key)?.as_str()
+}
+
+fn account_field<'a>(e: &'a Entry, key: &str) -> Option<&'a str> {
+    e.meta.oauth_account.as_ref()?.get(key)?.as_str()
+}
+
+/// The seat a Team login holds, read off its seat tier and every rate-limit
+/// tier it carries (`selvedge::plans::team_seat`). `None` off a Team plan, and
+/// for a seat tier nothing says the weight of.
+pub fn seat(e: &Entry) -> Option<Seat> {
+    if !on_team(e) {
+        return None;
+    }
+    team_seat(
+        account_field(e, "seatTier"),
+        &[
+            account_field(e, "userRateLimitTier"),
+            token_field(e, "rateLimitTier"),
+        ],
+    )
+}
+
+/// A seat as the user reads it.
+pub fn seat_word(seat: Seat) -> &'static str {
+    match seat {
+        Seat::Standard => "standard",
+        Seat::Premium => "premium",
+    }
 }
 
 /// The seat tier the profile reported when the login was captured.
 pub fn reported_seat(e: &Entry) -> Option<&str> {
-    e.meta
-        .oauth_account
-        .as_ref()?
-        .get("seatTier")?
-        .as_str()
-        .filter(|t| !t.trim().is_empty())
+    account_field(e, "seatTier").filter(|t| !t.trim().is_empty())
 }
 
 /// The seat tier a typed choice names: `None` for `auto`, which follows the

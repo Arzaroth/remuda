@@ -345,7 +345,7 @@ pub fn stored_message(p: &dyn Provider, entry: &Entry) -> String {
         "stored {} ({}, {})",
         entry.qualified(),
         entry.meta.email,
-        p.plan(&entry.creds)
+        plan_shown(p, entry)
     )
 }
 
@@ -586,9 +586,9 @@ fn plan_shown(p: &dyn Provider, e: &Entry) -> String {
     if p.id() != "claude" || !crate::claude::on_team(e) {
         return plan;
     }
-    match (&e.meta.seat_tier, crate::claude::reported_seat(e)) {
+    match (&e.meta.seat_tier, crate::claude::seat(e)) {
         (Some(chosen), _) => format!("{plan} {} (set)", crate::claude::seat_name(chosen)),
-        (None, Some(reported)) => format!("{plan} {}", crate::claude::seat_name(reported)),
+        (None, Some(seat)) => format!("{plan} {}", crate::claude::seat_word(seat)),
         (None, None) => plan,
     }
 }
@@ -1334,6 +1334,7 @@ mod tests {
 
         let mut entry = e.store.get("claude", "work").unwrap().unwrap();
         entry.creds[OAUTH_KEY]["subscriptionType"] = json!("team");
+        entry.creds[OAUTH_KEY]["rateLimitTier"] = json!("default_raven");
         entry.meta.oauth_account =
             Some(json!({"accountUuid": "u-work", "seatTier": "team_standard"}));
         e.store.save(&entry).unwrap();
@@ -1405,6 +1406,45 @@ mod tests {
         let err = seat(&e.store, &e.claude, "work", "gold", &mut Vec::new()).unwrap_err();
         assert!(err.to_string().contains("is not a seat"), "{err}");
         assert!(seat(&e.store, &e.claude, "nope", "auto", &mut Vec::new()).is_err());
+    }
+
+    #[test]
+    fn a_team_login_lists_the_seat_its_tiers_say() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let shown = |token_tier: &str, account: Value| {
+            let mut entry = e.store.get("claude", "work").unwrap().unwrap();
+            entry.creds[OAUTH_KEY]["subscriptionType"] = json!("team");
+            entry.creds[OAUTH_KEY]["rateLimitTier"] = json!(token_tier);
+            entry.meta.oauth_account = Some(account);
+            plan_shown(&e.claude, &entry)
+        };
+        assert_eq!(
+            shown(
+                "default_raven",
+                json!({"seatTier": "team_tier_1", "userRateLimitTier": "default_claude_max_5x"})
+            ),
+            "team premium",
+            "Claude Code's account block names the seat's own tier"
+        );
+        assert_eq!(
+            shown("default_claude_max_5x", json!({"seatTier": "team_tier_1"})),
+            "team premium",
+            "remuda's sign-in puts the seat's tier on the token"
+        );
+        assert_eq!(
+            shown("default_raven", json!({"seatTier": "team_standard"})),
+            "team standard"
+        );
+        assert_eq!(
+            shown("default_raven", json!({"seatTier": "team_tier_1"})),
+            "team",
+            "a seat tier nothing explains is not shown"
+        );
+
+        let mut max = e.store.get("claude", "work").unwrap().unwrap();
+        max.creds[OAUTH_KEY]["rateLimitTier"] = json!("default_claude_max_20x");
+        assert_eq!(plan_shown(&e.claude, &max), "max 20x");
     }
 
     #[test]
