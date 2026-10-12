@@ -23,8 +23,8 @@ at all it prints the store path.
 
 `--json` prints `{store, credentials: [...], live: [...]}`. Each credential has
 `provider`, `name`, `label`, `email`, `accountId`, `plan`, `active`,
-`expiresAt`, `refreshTokenExpiresAt`, `verified`, and `team`, `seat` and
-`reportedSeat` ([team-seats.md](team-seats.md)); each live entry has `provider` and a
+`expiresAt`, `refreshTokenExpiresAt`, `verified`, `team` and `seat`
+([team-seats.md](team-seats.md)); each live entry has `provider` and a
 `state`: `signed_out`, `stored` (with `name` and `confirmed`), `unstored` (with
 `email`), `foreign` (with `what`, e.g. "an API key") or `unreadable` (with
 `error`). A CLI whose files cannot be read is reported and the others are still
