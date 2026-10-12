@@ -91,6 +91,11 @@ fn provider(p: &Value) -> Value {
         "staleReason": p.get("staleReason").and_then(Value::as_str),
         "error": p.pointer("/error/message").and_then(Value::as_str),
         "credentialState": p.get("credentialState").and_then(Value::as_str),
+        "plan": usage
+            .get("loginMethod")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|m| !m.is_empty()),
         // Claude's Team seats are sold as 1.25x and 6.25x a Pro.
         "planWeight": p
             .get("planWeight")
@@ -193,10 +198,10 @@ mod tests {
             "meta": {"schemaVersion": 2, "updatedAtMs": 1},
             "payloads": [
                 {"provider": "claude", "credential": "perso", "active": true, "planWeight": 20,
-                 "usage": {"primary": {"usedPercent": 42, "windowMinutes": 300}}},
+                 "usage": {"primary": {"usedPercent": 42, "windowMinutes": 300}, "loginMethod": " Max "}},
                 {"provider": "claude", "usage": {"primary": {"usedPercent": 7, "windowMinutes": 300}}},
                 {"provider": "claude", "credential": "work", "active": false,
-                 "usage": {"primary": {"usedPercent": 0, "windowMinutes": 300}}},
+                 "usage": {"primary": {"usedPercent": 0, "windowMinutes": 300}, "loginMethod": ""}},
                 {"provider": "claude", "credential": "old", "active": false,
                  "credentialState": "expired", "usage": null},
             ],
@@ -214,6 +219,8 @@ mod tests {
         assert_eq!(accounts["perso"]["windows"][0]["usedPercent"], 42);
         assert_eq!(accounts["perso"]["planWeight"], 20);
         assert_eq!(accounts["work"]["planWeight"], Value::Null);
+        assert_eq!(accounts["perso"]["plan"], "Max");
+        assert_eq!(accounts["work"]["plan"], Value::Null);
         assert_eq!(accounts["work"]["windows"][0]["usedPercent"], 0);
         assert_eq!(accounts["old"]["credentialState"], "expired");
         assert_eq!(accounts["old"]["windows"], json!([]));

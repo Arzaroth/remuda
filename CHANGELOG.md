@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The page names a login's plan when only TokenGauge knows it, such as a
+  Grok login's tier, instead of showing `-`.
+
 ## [0.13.0] - 2026-10-12
 
 ### Fixed
