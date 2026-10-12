@@ -112,16 +112,6 @@ enum Cmd {
     },
     /// Set the label shown beside a credential, or clear it. NAME or PROVIDER/NAME.
     Label { name: String, text: Option<String> },
-    /// Say which Team seat a Claude login holds, for TokenGauge's plan
-    /// weights: standard, premium, or auto to follow what its profile reports.
-    Seat {
-        name: String,
-        #[arg(
-            ignore_case = true,
-            value_parser = ["standard", "premium", "auto", "team_standard", "team_premium"]
-        )]
-        seat: String,
-    },
     /// Print the shell line that makes a CLI reading its key from the
     /// environment use a stored one: `eval "$(remuda env glm/work)"`.
     Env { name: String },
@@ -159,7 +149,6 @@ impl Cmd {
             Cmd::List { .. } => Some("listing"),
             Cmd::Refresh { .. } => Some("refreshing"),
             Cmd::Label { .. } => Some("labelling"),
-            Cmd::Seat { .. } => Some("setting a seat"),
             Cmd::Env { .. } => Some("printing a key"),
             Cmd::Rename { .. } => Some("renaming"),
             Cmd::Remove { .. } => Some("removing"),
@@ -472,10 +461,6 @@ fn main() -> Result<()> {
         Cmd::Label { name, text } => {
             let (p, name) = commands::resolve(&store, &providers, &name)?;
             commands::label(&store, p, &name, text.as_deref(), out)
-        }
-        Cmd::Seat { name, seat } => {
-            let (p, name) = commands::resolve(&store, &providers, &name)?;
-            commands::seat(&store, p, &name, &seat, out)
         }
         Cmd::Rename { name, new_name } => {
             let (p, name) = commands::resolve(&store, &providers, &name)?;

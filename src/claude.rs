@@ -492,10 +492,6 @@ impl PendingLogin for ClaudePending {
     }
 }
 
-/// The seats a Team plan sells, as the name a user types and the `seatTier`
-/// Anthropic's profile reports for it.
-const SEATS: [(&str, &str); 2] = [("standard", "team_standard"), ("premium", "team_premium")];
-
 fn is_team(subscription: &str) -> bool {
     subscription.to_ascii_lowercase().contains("team")
 }
@@ -540,30 +536,8 @@ pub fn seat_word(seat: Seat) -> &'static str {
 }
 
 /// The seat tier the profile reported when the login was captured.
-pub fn reported_seat(e: &Entry) -> Option<&str> {
+fn reported_seat(e: &Entry) -> Option<&str> {
     account_field(e, "seatTier").filter(|t| !t.trim().is_empty())
-}
-
-/// The seat tier a typed choice names: `None` for `auto`, which follows the
-/// profile.
-pub fn chosen_seat(choice: &str) -> Result<Option<&'static str>> {
-    let choice = choice.trim().to_ascii_lowercase();
-    if choice == "auto" {
-        return Ok(None);
-    }
-    SEATS
-        .iter()
-        .find(|(name, tier)| choice == *name || choice == *tier)
-        .map(|(_, tier)| Some(*tier))
-        .with_context(|| format!("{choice:?} is not a seat: standard, premium or auto"))
-}
-
-/// A seat tier as the user reads it: `team_premium` is `premium`.
-pub fn seat_name(tier: &str) -> &str {
-    SEATS
-        .iter()
-        .find(|(_, t)| *t == tier)
-        .map_or(tier, |(name, _)| name)
 }
 
 #[cfg(test)]
