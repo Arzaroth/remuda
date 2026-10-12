@@ -38,7 +38,8 @@
   it. One signed into a login remuda has not stored stays, to import it. With
   no CLI in use at all, every one is shown.
 - One card per stored credential, in a grid under its CLI: name, label,
-  email, plan and state pills, a row per usage window (its title, percentage
+  email, plan and state pills (the plan is TokenGauge's when the credential
+  file does not say, as for Grok), a row per usage window (its title, percentage
   and reset over a bar), how long its access token and its sign-in (refresh
   token) have left, and Use, Refresh, Label, Rename and Remove along the
   bottom. The card in use has a green edge. Remove asks
