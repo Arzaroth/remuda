@@ -17,8 +17,7 @@
 
 - `--update` refuses a binary a package manager installed (a distribution
   package, the Nix store, a snap) and says how to upgrade it instead, as it
-  already did for Homebrew, and unpacks a release zip that lists its
-  directories.
+  already did for Homebrew.
 
 ### Removed
 
