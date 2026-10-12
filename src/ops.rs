@@ -90,14 +90,14 @@ pub fn heal(store: &Store, p: &dyn Provider, live: Option<&Value>) -> Result<()>
                     );
                     entry.meta.email = String::new();
                     entry.meta.oauth_account = None;
-                    entry.meta.seat_tier = None;
                 }
                 entry.meta.account_id = id.account_id;
                 if !id.email.is_empty() {
                     entry.meta.email = id.email;
                 }
-                if id.oauth_account.is_some() {
-                    entry.meta.oauth_account = id.oauth_account;
+                if let Some(fresh) = id.oauth_account {
+                    entry.meta.oauth_account =
+                        Some(profile_over(entry.meta.oauth_account.take(), fresh));
                 }
                 entry.verified = true;
                 store.save(&entry)?;
@@ -109,6 +109,20 @@ pub fn heal(store: &Store, p: &dyn Provider, live: Option<&Value>) -> Result<()>
         }
     }
     Ok(())
+}
+
+/// The account block a profile describes, laid over the one already kept for
+/// the same account: a profile says less than the CLI's own copy (Claude
+/// Code's `userRateLimitTier`, which tells a premium Team seat apart), and
+/// what it does not say is kept.
+fn profile_over(kept: Option<Value>, fresh: Value) -> Value {
+    match (kept, fresh) {
+        (Some(Value::Object(mut kept)), Value::Object(fresh)) => {
+            kept.extend(fresh);
+            Value::Object(kept)
+        }
+        (_, fresh) => fresh,
+    }
 }
 
 /// Copies the live login back into the entry it belongs to. A CLI rotates the
@@ -541,6 +555,60 @@ mod tests {
     }
 
     #[test]
+    fn a_healed_credential_keeps_what_its_profile_does_not_say() {
+        let server = confirming("u-work");
+        let e = env(&server.url());
+        e.stored("work", "u-work", HOUR);
+        let mut work = e.store.get("claude", "work").unwrap().unwrap();
+        work.meta.oauth_account = Some(json!({
+            "accountUuid": "u-work",
+            "seatTier": "team_tier_1",
+            "userRateLimitTier": "default_claude_max_5x",
+        }));
+        e.store.save(&work).unwrap();
+        tear(&e, "work", "a-torn");
+
+        heal(&e.store, &e.claude, None).unwrap();
+
+        let account = e
+            .store
+            .get("claude", "work")
+            .unwrap()
+            .unwrap()
+            .meta
+            .oauth_account
+            .unwrap();
+        assert_eq!(account["userRateLimitTier"], "default_claude_max_5x");
+        assert_eq!(account["seatTier"], Value::Null, "the profile's word wins");
+        assert_eq!(account["fullName"], "Someone");
+    }
+
+    #[test]
+    fn a_torn_credential_relabelled_for_another_account_keeps_nothing_of_it() {
+        let server = confirming("u-real");
+        let e = env(&server.url());
+        e.stored("work", "u-work", HOUR);
+        let mut work = e.store.get("claude", "work").unwrap().unwrap();
+        work.meta.oauth_account =
+            Some(json!({"accountUuid": "u-work", "userRateLimitTier": "default_claude_max_5x"}));
+        e.store.save(&work).unwrap();
+        tear(&e, "work", "a-real");
+
+        heal(&e.store, &e.claude, None).unwrap();
+
+        let account = e
+            .store
+            .get("claude", "work")
+            .unwrap()
+            .unwrap()
+            .meta
+            .oauth_account
+            .unwrap();
+        assert_eq!(account["accountUuid"], "u-real");
+        assert!(account.get("userRateLimitTier").is_none());
+    }
+
+    #[test]
     fn an_unidentified_torn_credential_is_not_switched_to() {
         let e = env(&OFFLINE);
         e.stored("work", "u-work", -HOUR);
@@ -593,9 +661,6 @@ mod tests {
             .create();
         let e = env(&server.url());
         e.stored("work", "u-work", HOUR);
-        let mut seated = e.store.get("claude", "work").unwrap().unwrap();
-        seated.meta.seat_tier = Some("team_premium".into());
-        e.store.save(&seated).unwrap();
         tear(&e, "work", "a-torn");
 
         heal(&e.store, &e.claude, None).unwrap();
@@ -603,7 +668,6 @@ mod tests {
         let work = e.store.get("claude", "work").unwrap().unwrap();
         assert!(work.verified);
         assert_eq!(work.meta.account_id, "u-other");
-        assert_eq!(work.meta.seat_tier, None, "u-work's seat is not u-other's");
         assert_eq!(work.meta.email, "u-other@example.com");
         assert_eq!(e.stored_refresh_token("work").as_deref(), Some("r-new"));
     }

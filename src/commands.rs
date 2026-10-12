@@ -133,14 +133,13 @@ pub fn list_json(store: &Store, lives: &[Live]) -> Result<Value> {
                 "label": e.meta.label,
                 "email": e.meta.email,
                 "accountId": e.meta.account_id,
-                "plan": p.plan(&e.creds),
+                "plan": plan_shown(p, &e),
                 "active": live.state.active_name() == Some(e.name.as_str()),
                 "expiresAt": p.expires_at(&e.creds),
                 "refreshTokenExpiresAt": p.refresh_expires_at(&e.creds),
                 "verified": e.verified,
                 "team": p.id() == "claude" && crate::claude::on_team(&e),
-                "seat": e.meta.seat_tier,
-                "reportedSeat": crate::claude::reported_seat(&e),
+                "seat": seat_shown(p, &e),
             }));
         }
     }
@@ -260,9 +259,8 @@ pub fn import(
             )));
         }
     };
-    let mut entry = Entry::new(p.id(), name, creds, identity, now_ms());
+    let entry = Entry::new(p.id(), name, creds, identity, now_ms());
     ensure_new_account(store, &entry)?;
-    keep_seat(store, &mut entry);
     store.save(&entry)?;
     writeln!(out, "{}", stored_message(p, &entry))?;
     Ok(())
@@ -345,19 +343,8 @@ pub fn stored_message(p: &dyn Provider, entry: &Entry) -> String {
         "stored {} ({}, {})",
         entry.qualified(),
         entry.meta.email,
-        p.plan(&entry.creds)
+        plan_shown(p, entry)
     )
-}
-
-/// A login stored again under its own name keeps the seat chosen for it, while
-/// it is still the same account.
-fn keep_seat(store: &Store, entry: &mut Entry) {
-    if let Ok(Some(old)) = store.get(&entry.provider, &entry.name)
-        && old.verified
-        && old.meta.account_id == entry.meta.account_id
-    {
-        entry.meta.seat_tier = old.meta.seat_tier;
-    }
 }
 
 fn ensure_new_account(store: &Store, entry: &Entry) -> Result<()> {
@@ -384,7 +371,7 @@ pub fn save_login(
     force: bool,
     done: crate::provider::Login,
 ) -> Result<Entry> {
-    let mut entry = Entry::new(p.id(), name, done.creds, done.identity, now_ms());
+    let entry = Entry::new(p.id(), name, done.creds, done.identity, now_ms());
     let _lock = store.lock()?;
     if !force && store.get(p.id(), name)?.is_some() {
         bail!(
@@ -393,7 +380,6 @@ pub fn save_login(
         );
     }
     ensure_new_account(store, &entry)?;
-    keep_seat(store, &mut entry);
     store.save(&entry)?;
     Ok(entry)
 }
@@ -527,69 +513,24 @@ pub fn label(
     Ok(())
 }
 
-/// Say which Team seat a Claude login holds, or let its profile say.
-pub fn seat(
-    store: &Store,
-    p: &dyn Provider,
-    name: &str,
-    choice: &str,
-    out: &mut dyn Write,
-) -> Result<()> {
-    if p.id() != "claude" {
-        bail!("only a Claude Team login has a seat");
-    }
-    let tier = crate::claude::chosen_seat(choice)?;
-    let mut entry = store
-        .get(p.id(), name)?
-        .with_context(|| format!("no credential named {}/{name}", p.id()))?;
-    if !entry.verified {
-        bail!(
-            "{} does not match its sidecar; `remuda ls` online identifies it first",
-            entry.qualified()
-        );
-    }
-    // Setting a seat back to auto is always allowed: a login that has left
-    // its Team plan must not keep a seat it can no longer clear.
-    if tier.is_some() && !crate::claude::on_team(&entry) {
-        bail!("{} is not on a Team plan", entry.qualified());
-    }
-    entry.meta.seat_tier = tier.map(str::to_owned);
-    store.save(&entry)?;
-    match tier {
-        Some(tier) => writeln!(
-            out,
-            "{} holds a {} seat",
-            entry.qualified(),
-            crate::claude::seat_name(tier)
-        )?,
-        None => match crate::claude::reported_seat(&entry) {
-            Some(reported) => writeln!(
-                out,
-                "{} follows the seat its profile reports: {}",
-                entry.qualified(),
-                crate::claude::seat_name(reported)
-            )?,
-            None => writeln!(
-                out,
-                "{} follows the seat its profile reports, which named none",
-                entry.qualified()
-            )?,
-        },
-    }
-    Ok(())
+/// The seat a Claude Team login holds, as the user reads it.
+fn seat_shown(p: &dyn Provider, e: &Entry) -> Option<&'static str> {
+    (p.id() == "claude")
+        .then(|| crate::claude::seat(e))
+        .flatten()
+        .map(crate::claude::seat_word)
 }
 
-/// The plan as listed: a Team login says which seat, and `(set)` when the
-/// user chose it.
+/// The plan as listed: a Team login says which seat, and says Team when only
+/// its profile does.
 fn plan_shown(p: &dyn Provider, e: &Entry) -> String {
-    let plan = p.plan(&e.creds);
-    if p.id() != "claude" || !crate::claude::on_team(e) {
-        return plan;
+    let mut plan = p.plan(&e.creds);
+    if plan == "-" && p.id() == "claude" && crate::claude::on_team(e) {
+        plan = "team".to_owned();
     }
-    match (&e.meta.seat_tier, crate::claude::reported_seat(e)) {
-        (Some(chosen), _) => format!("{plan} {} (set)", crate::claude::seat_name(chosen)),
-        (None, Some(reported)) => format!("{plan} {}", crate::claude::seat_name(reported)),
-        (None, None) => plan,
+    match seat_shown(p, e) {
+        Some(seat) => format!("{plan} {seat}"),
+        None => plan,
     }
 }
 
@@ -802,47 +743,6 @@ mod tests {
         assert!(run("work", false).contains("--force"));
         assert!(run("work", true).contains("already stored as claude/perso"));
         assert!(run("../x", false).contains("not a usable name"));
-    }
-
-    #[test]
-    fn a_login_stored_again_keeps_its_seat_only_for_the_same_account() {
-        let seated = |e: &Env| {
-            let mut entry = e.store.get("claude", "work").unwrap().unwrap();
-            entry.meta.seat_tier = Some("team_premium".into());
-            e.store.save(&entry).unwrap();
-        };
-        let again = |e: &Env| {
-            let unstored = LiveState::Unstored { email: None };
-            import(
-                &e.store,
-                &e.claude,
-                &unstored,
-                "work",
-                true,
-                &mut Vec::new(),
-            )
-            .unwrap();
-            e.store
-                .get("claude", "work")
-                .unwrap()
-                .unwrap()
-                .meta
-                .seat_tier
-        };
-
-        let server = profile_server("u-work");
-        let e = env(&server.url());
-        e.stored("work", "u-work", HOUR);
-        seated(&e);
-        e.sign_in(oauth("new", "new", HOUR), account("u-work"));
-        assert_eq!(again(&e).as_deref(), Some("team_premium"));
-
-        let server = profile_server("u-other");
-        let e = env(&server.url());
-        e.stored("work", "u-work", HOUR);
-        seated(&e);
-        e.sign_in(oauth("new", "new", HOUR), account("u-other"));
-        assert_eq!(again(&e), None);
     }
 
     #[test]
@@ -1326,85 +1226,76 @@ mod tests {
     }
 
     #[test]
-    fn a_team_login_holds_the_seat_it_is_given_until_it_is_set_back_to_auto() {
+    fn a_team_login_lists_the_seat_its_tiers_say() {
         let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);
-        let err = seat(&e.store, &e.claude, "work", "premium", &mut Vec::new()).unwrap_err();
-        assert!(err.to_string().contains("not on a Team plan"), "{err}");
-
-        let mut entry = e.store.get("claude", "work").unwrap().unwrap();
-        entry.creds[OAUTH_KEY]["subscriptionType"] = json!("team");
-        entry.meta.oauth_account =
-            Some(json!({"accountUuid": "u-work", "seatTier": "team_standard"}));
-        e.store.save(&entry).unwrap();
-
-        let mut out = Vec::new();
-        seat(&e.store, &e.claude, "work", "Premium", &mut out).unwrap();
-        assert_eq!(text(out), "claude/work holds a premium seat\n");
-        let saved = e.store.get("claude", "work").unwrap().unwrap();
-        assert_eq!(saved.meta.seat_tier.as_deref(), Some("team_premium"));
+        let shown = |token_tier: &str, account: Value| {
+            let mut entry = e.store.get("claude", "work").unwrap().unwrap();
+            entry.creds[OAUTH_KEY]["subscriptionType"] = json!("team");
+            entry.creds[OAUTH_KEY]["rateLimitTier"] = json!(token_tier);
+            entry.meta.oauth_account = Some(account);
+            plan_shown(&e.claude, &entry)
+        };
         assert_eq!(
-            saved.meta.oauth_account.unwrap()["seatTier"],
-            "team_standard",
-            "what the profile reported is left as it was"
+            shown(
+                "default_raven",
+                json!({"seatTier": "team_tier_1", "userRateLimitTier": "default_claude_max_5x"})
+            ),
+            "team premium",
+            "Claude Code's account block names the seat's own tier"
+        );
+        assert_eq!(
+            shown("default_claude_max_5x", json!({"seatTier": "team_tier_1"})),
+            "team premium",
+            "remuda's sign-in puts the seat's tier on the token"
+        );
+        assert_eq!(
+            shown("default_raven", json!({"seatTier": "team_standard"})),
+            "team standard"
+        );
+        assert_eq!(
+            shown("default_raven", json!({"seatTier": "team_tier_1"})),
+            "team",
+            "a seat tier nothing explains is not shown"
         );
 
-        let mut out = Vec::new();
-        list(&e.store, &live(&e, active("work")), false, &mut out).unwrap();
-        assert!(text(out).contains(" premium (set)"));
+        let mut bare = e.store.get("claude", "work").unwrap().unwrap();
+        bare.creds[OAUTH_KEY]
+            .as_object_mut()
+            .unwrap()
+            .remove("subscriptionType");
+        bare.meta.oauth_account = Some(json!({"seatTier": "team_standard"}));
+        assert_eq!(
+            plan_shown(&e.claude, &bare),
+            "team standard",
+            "a token that names no plan, on a Team seat its profile reports"
+        );
+
+        let mut max = e.store.get("claude", "work").unwrap().unwrap();
+        max.creds[OAUTH_KEY]["rateLimitTier"] = json!("default_claude_max_20x");
+        assert_eq!(plan_shown(&e.claude, &max), "max 20x");
+        max.creds[OAUTH_KEY]["subscriptionType"] = json!("max");
+        max.meta.oauth_account = Some(json!({"seatTier": "team_premium"}));
+        assert_eq!(
+            plan_shown(&e.claude, &max),
+            "max 20x",
+            "a login that left Team keeps no seat its profile last reported"
+        );
+
+        let mut team = max;
+        team.creds[OAUTH_KEY]["subscriptionType"] = json!("team");
+        team.creds[OAUTH_KEY]["rateLimitTier"] = json!("default_raven");
+        team.meta.oauth_account = Some(json!({"seatTier": "team_standard"}));
+        e.store.save(&team).unwrap();
         let mut out = Vec::new();
         list(&e.store, &live(&e, active("work")), true, &mut out).unwrap();
         let v: Value = serde_json::from_slice(&out).unwrap();
         let row = &v["credentials"][0];
         assert_eq!(
-            (&row["team"], &row["seat"], &row["reportedSeat"]),
-            (
-                &json!(true),
-                &json!("team_premium"),
-                &json!("team_standard")
-            )
+            (&row["plan"], &row["team"], &row["seat"]),
+            (&json!("team standard"), &json!(true), &json!("standard"))
         );
-
-        let mut out = Vec::new();
-        seat(&e.store, &e.claude, "work", "auto", &mut out).unwrap();
-        assert_eq!(
-            text(out),
-            "claude/work follows the seat its profile reports: standard\n"
-        );
-        let saved = e.store.get("claude", "work").unwrap().unwrap();
-        assert_eq!(saved.meta.seat_tier, None);
-        let mut out = Vec::new();
-        list(&e.store, &live(&e, active("work")), false, &mut out).unwrap();
-        let listed = text(out);
-        assert!(listed.contains(" standard "), "{listed}");
-
-        // A login that left its Team plan can still be set back to auto.
-        seat(&e.store, &e.claude, "work", "premium", &mut Vec::new()).unwrap();
-        let mut moved = e.store.get("claude", "work").unwrap().unwrap();
-        moved.creds[OAUTH_KEY]["subscriptionType"] = json!("max");
-        moved.meta.oauth_account = Some(json!({"accountUuid": "u-work"}));
-        e.store.save(&moved).unwrap();
-        let err = seat(&e.store, &e.claude, "work", "standard", &mut Vec::new()).unwrap_err();
-        assert!(err.to_string().contains("not on a Team plan"), "{err}");
-        let mut out = Vec::new();
-        seat(&e.store, &e.claude, "work", "auto", &mut out).unwrap();
-        assert_eq!(
-            text(out),
-            "claude/work follows the seat its profile reports, which named none\n"
-        );
-        assert_eq!(
-            e.store
-                .get("claude", "work")
-                .unwrap()
-                .unwrap()
-                .meta
-                .seat_tier,
-            None
-        );
-
-        let err = seat(&e.store, &e.claude, "work", "gold", &mut Vec::new()).unwrap_err();
-        assert!(err.to_string().contains("is not a seat"), "{err}");
-        assert!(seat(&e.store, &e.claude, "nope", "auto", &mut Vec::new()).is_err());
+        assert!(row.get("reportedSeat").is_none());
     }
 
     #[test]
