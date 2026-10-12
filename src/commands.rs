@@ -1258,6 +1258,13 @@ mod tests {
         let mut max = e.store.get("claude", "work").unwrap().unwrap();
         max.creds[OAUTH_KEY]["rateLimitTier"] = json!("default_claude_max_20x");
         assert_eq!(plan_shown(&e.claude, &max), "max 20x");
+        max.creds[OAUTH_KEY]["subscriptionType"] = json!("max");
+        max.meta.oauth_account = Some(json!({"seatTier": "team_premium"}));
+        assert_eq!(
+            plan_shown(&e.claude, &max),
+            "max 20x",
+            "a login that left Team keeps no seat its profile last reported"
+        );
 
         let mut team = max;
         team.creds[OAUTH_KEY]["subscriptionType"] = json!("team");

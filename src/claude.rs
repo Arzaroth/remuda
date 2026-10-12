@@ -496,11 +496,14 @@ fn is_team(subscription: &str) -> bool {
     subscription.to_ascii_lowercase().contains("team")
 }
 
-/// Whether a stored login holds a Team seat: its tokens say `team`, or its
-/// profile reported a Team seat tier.
+/// Whether a stored login holds a Team seat: its tokens say `team`, or say
+/// nothing and its profile reported a Team seat tier. A token that names
+/// another plan has left Team, whatever seat its profile last reported.
 pub fn on_team(e: &Entry) -> bool {
-    token_field(e, "subscriptionType").is_some_and(is_team)
-        || reported_seat(e).is_some_and(|t| t.starts_with("team_"))
+    match token_field(e, "subscriptionType").map(str::trim) {
+        Some(sub) if !sub.is_empty() => is_team(sub),
+        _ => reported_seat(e).is_some_and(|t| t.starts_with("team_")),
+    }
 }
 
 fn token_field<'a>(e: &'a Entry, key: &str) -> Option<&'a str> {
@@ -522,7 +525,8 @@ pub fn seat(e: &Entry) -> Option<Seat> {
         account_field(e, "seatTier"),
         &[
             account_field(e, "userRateLimitTier"),
-            token_field(e, "rateLimitTier"),
+            token_field(e, "rateLimitTier")
+                .filter(|_| token_field(e, "subscriptionType").is_some_and(is_team)),
         ],
     )
 }
