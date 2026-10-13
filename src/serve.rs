@@ -429,22 +429,29 @@ mod tests {
         )
     }
 
-    /// A TokenGauge daemon beside the test snapshot that acks `n` commands.
-    fn gauge_daemon(e: &Env, n: usize) -> std::thread::JoinHandle<Vec<String>> {
+    /// A TokenGauge daemon beside the test snapshot that acks every command,
+    /// and the next command it read, waited for a few seconds at most.
+    fn gauge_daemon(e: &Env) -> impl Fn() -> String {
         use std::io::{BufRead, BufReader};
         let daemon =
             std::os::unix::net::UnixListener::bind(e.tmp.path().join("tokengauge.sock")).unwrap();
+        let (heard, commands) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            (0..n)
-                .map(|_| {
-                    let (s, _) = daemon.accept().unwrap();
-                    let mut line = String::new();
-                    BufReader::new(&s).read_line(&mut line).unwrap();
-                    (&s).write_all(b"{\"type\":\"ack\"}\n").unwrap();
-                    line
-                })
-                .collect()
-        })
+            for s in daemon.incoming() {
+                let s = s.unwrap();
+                let mut line = String::new();
+                BufReader::new(&s).read_line(&mut line).unwrap();
+                if heard.send(line).is_err() {
+                    return;
+                }
+                (&s).write_all(b"{\"type\":\"ack\"}\n").unwrap();
+            }
+        });
+        move || {
+            commands
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("remuda never nudged TokenGauge")
+        }
     }
 
     fn call(app: &App, method: &str, path: &str, body: Value) -> (u16, Value) {
@@ -666,13 +673,29 @@ mod tests {
         let work = e.store.get("claude", "work").unwrap().unwrap();
         e.sign_in(work.creds, account("u-work"));
         let app = app(&e, &OFFLINE);
-        let daemon = gauge_daemon(&e, 2);
+        let heard = gauge_daemon(&e);
 
         let (status, _) = call(&app, "POST", "/api/refresh", json!({}));
         assert_eq!(status, 200);
+        assert_eq!(heard(), "{\"cmd\":\"refresh\"}\n");
         let (status, _) = call(&app, "POST", "/api/use", json!({"name": "perso"}));
         assert_eq!(status, 200);
-        assert_eq!(daemon.join().unwrap(), ["{\"cmd\":\"refresh\"}\n"; 2]);
+        assert_eq!(heard(), "{\"cmd\":\"refresh\"}\n");
+    }
+
+    #[test]
+    fn a_refresh_that_failed_still_asks_tokengauge_to_fetch() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", 3 * HOUR);
+        e.stored("perso", "u-perso", HOUR);
+        let work = e.store.get("claude", "work").unwrap().unwrap();
+        e.sign_in(work.creds, account("u-work"));
+        let app = app(&e, &OFFLINE);
+        let heard = gauge_daemon(&e);
+
+        let (status, _) = call(&app, "POST", "/api/refresh", json!({}));
+        assert_eq!(status, 400);
+        assert_eq!(heard(), "{\"cmd\":\"refresh\"}\n");
     }
 
     #[test]
