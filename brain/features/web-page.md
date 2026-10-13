@@ -80,7 +80,9 @@ while Codex waits for its callback. Cancel abandons it, and for Codex frees port
 1455 immediately.
 
 Usage figures come from TokenGauge's snapshot, which remuda reads and never
-writes or refreshes. Since TokenGauge 0.37 (its ADR 0003), its payloads and
+writes. A refresh or a switch made from the page asks TokenGauge's daemon to
+fetch at once, so a login it skipped as expired shows its figures within
+seconds rather than at TokenGauge's next poll. Since TokenGauge 0.37 (its ADR 0003), its payloads and
 errors name the stored credential they belong to, so each row shows its own
 login's figures, or its own error, and the tile the active one's. A login
 TokenGauge skipped because its access token expired or it is unverified says
