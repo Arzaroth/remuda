@@ -311,11 +311,11 @@ impl App {
                     &mut err,
                     &mut commands::Report::default(),
                 );
+                gauge::nudge(&self.places.snapshot);
                 let err = String::from_utf8_lossy(&err).trim().to_owned();
                 if let Err(e) = result {
                     bail!("{e}: {err}");
                 }
-                gauge::nudge(&self.places.snapshot);
                 let out = String::from_utf8_lossy(&out).trim().to_owned();
                 Ok(
                     json!({"message": if out.is_empty() { "nothing was due".to_owned() } else { out }}),
