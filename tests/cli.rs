@@ -716,3 +716,65 @@ fn sync_units_rewrites_the_installed_units_and_reloads_systemd() {
         "{calls}"
     );
 }
+
+/// A TokenGauge daemon where the binary looks for one under this home, which
+/// acks every command and hands over each one it read.
+fn gauge_daemon(home: &Home) -> std::sync::mpsc::Receiver<String> {
+    use std::io::{BufRead, BufReader, Write};
+    let dir = home.path(".local/state/tokengauge");
+    std::fs::create_dir_all(&dir).unwrap();
+    let daemon = std::os::unix::net::UnixListener::bind(dir.join("tokengauge.sock")).unwrap();
+    let (heard, commands) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for s in daemon.incoming() {
+            let s = s.unwrap();
+            let mut line = String::new();
+            BufReader::new(&s).read_line(&mut line).unwrap();
+            if heard.send(line).is_err() {
+                return;
+            }
+            (&s).write_all(b"{\"type\":\"ack\"}\n").unwrap();
+        }
+    });
+    commands
+}
+
+#[test]
+fn use_and_a_refresh_that_refreshed_ask_tokengauge_to_fetch_now() {
+    let home = Home::new();
+    home.sign_in("a-work", "r-work", "u-work");
+    home.ok(&["import", "work"]);
+    home.sign_in("a-perso", "r-perso", "u-perso");
+    home.ok(&["import", "perso"]);
+    let commands = gauge_daemon(&home);
+    let none = std::time::Duration::ZERO;
+
+    home.ok(&["use", "work"]);
+    assert_eq!(commands.try_recv().unwrap(), "{\"cmd\":\"refresh\"}\n");
+
+    assert_eq!(home.ok(&["refresh"]), "");
+    assert!(commands.recv_timeout(none).is_err());
+
+    {
+        let mut api = home.api.borrow_mut();
+        api.mock("POST", "/v1/oauth/token")
+            .with_body(
+                json!({"access_token": "a-perso2", "refresh_token": "r-perso2",
+                       "expires_in": 28800, "account": {"uuid": "u-perso"}})
+                .to_string(),
+            )
+            .create();
+        api.mock("GET", "/api/oauth/profile")
+            .match_header("authorization", "Bearer a-perso2")
+            .with_body(
+                json!({
+                    "account": {"uuid": "u-perso", "email": "u-perso@example.com"},
+                    "organization": {"uuid": "o-1", "organization_type": "claude_max"},
+                })
+                .to_string(),
+            )
+            .create();
+    }
+    home.ok(&["refresh", "perso", "--force"]);
+    assert_eq!(commands.try_recv().unwrap(), "{\"cmd\":\"refresh\"}\n");
+}
