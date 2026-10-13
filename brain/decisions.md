@@ -86,7 +86,8 @@ is exactly one process that refreshes a stored token.
 The same split holds for usage the other way round: the page shows it by
 reading TokenGauge's snapshot, never by calling a usage endpoint itself, so
 TokenGauge stays the one process fetching usage and remuda needs no usage
-client of its own.
+client of its own. After a refresh or a switch the page only asks TokenGauge's
+daemon to fetch sooner, through its socket.
 
 ## The page reads its own requests
 
