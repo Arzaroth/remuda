@@ -177,6 +177,21 @@ mod tests {
     }
 
     #[test]
+    fn a_daemon_that_never_ends_its_ack_holds_a_nudge_a_second_at_most() {
+        let tmp = tempfile::tempdir().unwrap();
+        let daemon = UnixListener::bind(tmp.path().join("tokengauge.sock")).unwrap();
+        std::thread::spawn(move || {
+            let (mut s, _) = daemon.accept().unwrap();
+            while s.write_all(b"ack").is_ok() {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        });
+        let start = std::time::Instant::now();
+        nudge(&tmp.path().join("tokengauge-usage.json"));
+        assert!(start.elapsed() < Duration::from_secs(3));
+    }
+
+    #[test]
     fn a_nudge_without_a_daemon_does_nothing() {
         let tmp = tempfile::tempdir().unwrap();
         nudge(&tmp.path().join("tokengauge-usage.json"));
