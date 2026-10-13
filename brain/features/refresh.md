@@ -35,6 +35,12 @@ could not be synced), but not `Failed` itself, which only counts them. The
 page's health line reads it. Only a run with no store at all records nothing.
 Interactive runs record nothing.
 
+When the report lists anything refreshed, the command asks TokenGauge's daemon
+to fetch at once (`gauge::nudge`), so a login it skipped as expired gets its
+figures back without waiting for its next poll. A run that refreshed nothing,
+such as most timer runs, leaves TokenGauge alone. The page's refresh always
+asks, since someone is looking at it.
+
 ## Sources
 
 - [src/commands.rs](../../src/commands.rs) `refresh`

@@ -101,10 +101,10 @@ access to anything, and it ends when they stop.
 | --- | --- |
 | `GET /api/state` | Same JSON as `ls --json`, plus `providers`, `health` and `usage` |
 | `GET /api/events` | A server-sent event stream: `data: changed` when the page should reload the state |
-| `POST /api/use` `{name, discard?}` | Switch |
+| `POST /api/use` `{name, discard?}` | Switch, then nudge TokenGauge |
 | `POST /api/import` `{provider?, name, force?}` | Store the live login |
 | `POST /api/label` `{name, text?}` / `rename` `{name, to}` / `remove` `{name}` | As the commands |
-| `POST /api/refresh` `{name?, force?}` | Refresh inactive credentials |
+| `POST /api/refresh` `{name?, force?}` | Refresh inactive credentials, then nudge TokenGauge |
 | `POST /api/login` `{provider?, name, force?}` | Begin a sign-in and open it in a private window: `{id, url, needsCode, opened}` |
 | `POST /api/login/finish` `{id, code?}` | Finish it and store the result |
 | `POST /api/login/cancel` `{id}` | Abandon it; a waiting Codex callback stops |
@@ -114,6 +114,11 @@ previous one. `App::api` takes the store lock once for every route except the
 `/api/login` ones, which lock only to save (`commands::save_login`). The name
 check before a sign-in and the "stored ..." message are `commands::begin_login`
 and `commands::stored_message`, shared with the CLI.
+
+The nudge (`gauge::nudge`) writes `{"cmd":"refresh"}` to `tokengauge.sock`
+beside the snapshot, the command TokenGauge's own refresh button sends its
+daemon, and waits up to a second for the ack. With no daemon listening it does
+nothing. TokenGauge still does the fetching ([decisions](../decisions.md)).
 
 `/api/state` reports each CLI's live login as `signed_out`, `stored` (with
 `confirmed`), `unstored`, `foreign` (an API key; the page says only
