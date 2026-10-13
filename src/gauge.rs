@@ -2,6 +2,8 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
+use std::sync::mpsc;
+use std::thread;
 use std::time::Duration;
 
 use serde_json::{Map, Value, json};
@@ -22,20 +24,26 @@ fn load(snapshot: &Path) -> Option<Value> {
 }
 
 /// Asks TokenGauge's daemon, on the socket beside its snapshot, to fetch now
-/// rather than at its next poll. No daemon, no fetch.
+/// rather than at its next poll, waiting a second at most. No daemon, no fetch.
 pub fn nudge(snapshot: &Path) {
     let Some(dir) = snapshot.parent() else {
         return;
     };
-    let Ok(mut daemon) = UnixStream::connect(dir.join("tokengauge.sock")) else {
-        return;
-    };
-    let wait = Some(Duration::from_secs(1));
-    let _ = daemon.set_read_timeout(wait);
-    let _ = daemon.set_write_timeout(wait);
-    if daemon.write_all(b"{\"cmd\":\"refresh\"}\n").is_ok() {
-        let _ = BufReader::new(&daemon).read_line(&mut String::new());
-    }
+    let socket = dir.join("tokengauge.sock");
+    let wait = Duration::from_secs(1);
+    let (done, finished) = mpsc::channel();
+    // `connect` takes no timeout, so the exchange runs where it cannot hold the caller.
+    thread::spawn(move || {
+        if let Ok(mut daemon) = UnixStream::connect(socket) {
+            let _ = daemon.set_read_timeout(Some(wait));
+            let _ = daemon.set_write_timeout(Some(wait));
+            if daemon.write_all(b"{\"cmd\":\"refresh\"}\n").is_ok() {
+                let _ = BufReader::new((&daemon).take(64)).read_line(&mut String::new());
+            }
+        }
+        let _ = done.send(());
+    });
+    let _ = finished.recv_timeout(wait);
 }
 
 pub fn read(snapshot: &Path) -> Option<Value> {
