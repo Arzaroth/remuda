@@ -1,6 +1,10 @@
 use std::fs::{self, File};
-use std::io::Read;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::os::unix::net::UnixStream;
 use std::path::Path;
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 
 use serde_json::{Map, Value, json};
 
@@ -17,6 +21,29 @@ fn load(snapshot: &Path) -> Option<Value> {
         .read_to_string(&mut text)
         .ok()?;
     serde_json::from_str(&text).ok()
+}
+
+/// Asks TokenGauge's daemon, on the socket beside its snapshot, to fetch now
+/// rather than at its next poll, waiting a second at most. No daemon, no fetch.
+pub fn nudge(snapshot: &Path) {
+    let Some(dir) = snapshot.parent() else {
+        return;
+    };
+    let socket = dir.join("tokengauge.sock");
+    let wait = Duration::from_secs(1);
+    let (done, finished) = mpsc::channel();
+    // `connect` takes no timeout, so the exchange runs where it cannot hold the caller.
+    thread::spawn(move || {
+        if let Ok(mut daemon) = UnixStream::connect(socket) {
+            let _ = daemon.set_read_timeout(Some(wait));
+            let _ = daemon.set_write_timeout(Some(wait));
+            if daemon.write_all(b"{\"cmd\":\"refresh\"}\n").is_ok() {
+                let _ = BufReader::new((&daemon).take(64)).read_line(&mut String::new());
+            }
+        }
+        let _ = done.send(());
+    });
+    let _ = finished.recv_timeout(wait);
 }
 
 pub fn read(snapshot: &Path) -> Option<Value> {
@@ -132,6 +159,53 @@ fn span(minutes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::net::UnixListener;
+
+    #[test]
+    fn a_nudge_sends_the_daemon_a_refresh_and_waits_for_its_ack() {
+        let tmp = tempfile::tempdir().unwrap();
+        let daemon = UnixListener::bind(tmp.path().join("tokengauge.sock")).unwrap();
+        let heard = std::thread::spawn(move || {
+            let (s, _) = daemon.accept().unwrap();
+            let mut line = String::new();
+            BufReader::new(&s).read_line(&mut line).unwrap();
+            (&s).write_all(b"{\"type\":\"ack\"}\n").unwrap();
+            line
+        });
+        nudge(&tmp.path().join("tokengauge-usage.json"));
+        assert_eq!(heard.join().unwrap(), "{\"cmd\":\"refresh\"}\n");
+    }
+
+    #[test]
+    fn a_daemon_that_never_ends_its_ack_holds_a_nudge_a_second_at_most() {
+        let tmp = tempfile::tempdir().unwrap();
+        let daemon = UnixListener::bind(tmp.path().join("tokengauge.sock")).unwrap();
+        std::thread::spawn(move || {
+            let (mut s, _) = daemon.accept().unwrap();
+            while s.write_all(b"ack").is_ok() {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        });
+        let start = std::time::Instant::now();
+        nudge(&tmp.path().join("tokengauge-usage.json"));
+        assert!(start.elapsed() < Duration::from_secs(3));
+    }
+
+    #[test]
+    fn a_nudge_without_a_daemon_does_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        nudge(&tmp.path().join("tokengauge-usage.json"));
+        nudge(Path::new(""));
+    }
+
+    #[test]
+    fn a_daemon_that_never_acks_holds_a_nudge_a_second_at_most() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _daemon = UnixListener::bind(tmp.path().join("tokengauge.sock")).unwrap();
+        let start = std::time::Instant::now();
+        nudge(&tmp.path().join("tokengauge-usage.json"));
+        assert!(start.elapsed() < Duration::from_secs(3));
+    }
 
     #[test]
     fn a_snapshot_becomes_titled_windows_per_provider() {

@@ -24,6 +24,10 @@
    (`runs::switched`, best effort), so the page can tell usage TokenGauge
    fetched before the switch from usage of the new login.
 
+Once switched, `use` and the page ask TokenGauge's daemon to fetch at once
+(`gauge::nudge`, see [web.md](../architecture/web.md)) rather than at its
+next poll.
+
 Running Claude Code sessions watch their credential files and adopt the new
 login. A running Codex session may keep the login it started with until it is
 restarted.
