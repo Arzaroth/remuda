@@ -266,7 +266,9 @@ impl App {
             }
             ("POST", "/api/use") => {
                 let (p, name) = commands::resolve(store, &providers, spec()?)?;
-                Ok(json!({"message": ops::switch(store, p, &name, flag("discard"))?}))
+                let message = ops::switch(store, p, &name, flag("discard"))?;
+                gauge::nudge(&self.places.snapshot);
+                Ok(json!({ "message": message }))
             }
             ("POST", "/api/import") => {
                 let p = commands::find(
@@ -313,6 +315,7 @@ impl App {
                 if let Err(e) = result {
                     bail!("{e}: {err}");
                 }
+                gauge::nudge(&self.places.snapshot);
                 let out = String::from_utf8_lossy(&out).trim().to_owned();
                 Ok(
                     json!({"message": if out.is_empty() { "nothing was due".to_owned() } else { out }}),
