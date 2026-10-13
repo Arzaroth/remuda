@@ -383,6 +383,7 @@ fn main() -> Result<()> {
         Cmd::Use { name, discard } => {
             let (p, name) = commands::resolve(&store, &providers, &name)?;
             println!("{}", ops::switch(&store, p, &name, discard)?);
+            gauge::nudge(&paths::tokengauge_snapshot());
             Ok(())
         }
         Cmd::List { json } => {
@@ -438,6 +439,9 @@ fn main() -> Result<()> {
                 };
                 commands::refresh(&store, &lives, scope, out, &mut io::stderr(), &mut report)
             })();
+            if !report.refreshed.is_empty() {
+                gauge::nudge(&paths::tokengauge_snapshot());
+            }
             if let Some(plan) = &plan {
                 let run = runs::Run::of(fsx::now_ms(), &plan.skipped, report, &result);
                 runs::record(&store, &run);
