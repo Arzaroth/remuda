@@ -4,9 +4,10 @@
 
 ### Fixed
 
-- A login refreshed or switched to from the page shows its usage within
-  seconds: the page asks TokenGauge to fetch at once instead of showing
-  "Its access token has expired" until TokenGauge's next poll.
+- A login refreshed or switched to shows its usage within seconds:
+  `remuda use`, a `remuda refresh` that refreshed something, and the page's
+  Use and Refresh ask TokenGauge to fetch at once, instead of the page
+  showing "Its access token has expired" until TokenGauge's next poll.
 
 - The page names a login's plan when only TokenGauge knows it, such as a
   Grok login's tier, instead of showing `-`.
