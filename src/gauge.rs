@@ -1,6 +1,8 @@
 use std::fs::{self, File};
-use std::io::Read;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::os::unix::net::UnixStream;
 use std::path::Path;
+use std::time::Duration;
 
 use serde_json::{Map, Value, json};
 
@@ -17,6 +19,23 @@ fn load(snapshot: &Path) -> Option<Value> {
         .read_to_string(&mut text)
         .ok()?;
     serde_json::from_str(&text).ok()
+}
+
+/// Asks TokenGauge's daemon, on the socket beside its snapshot, to fetch now
+/// rather than at its next poll. No daemon, no fetch.
+pub fn nudge(snapshot: &Path) {
+    let Some(dir) = snapshot.parent() else {
+        return;
+    };
+    let Ok(mut daemon) = UnixStream::connect(dir.join("tokengauge.sock")) else {
+        return;
+    };
+    let wait = Some(Duration::from_secs(1));
+    let _ = daemon.set_read_timeout(wait);
+    let _ = daemon.set_write_timeout(wait);
+    if daemon.write_all(b"{\"cmd\":\"refresh\"}\n").is_ok() {
+        let _ = BufReader::new(&daemon).read_line(&mut String::new());
+    }
 }
 
 pub fn read(snapshot: &Path) -> Option<Value> {
