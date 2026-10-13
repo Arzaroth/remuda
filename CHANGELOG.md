@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-10-13
+
 ### Fixed
 
 - A login refreshed or switched to shows its usage within seconds:
