@@ -6,9 +6,6 @@ done.
 
 ## Decisions before roadmap work
 
-- [ ] Auto-switch: whether a Claude Code or Codex session already running
-      takes up the credential a switch writes, or keeps its token until it
-      restarts. It decides whether auto mode helps sessions already open.
 - [ ] Auto-switch: whether a session in the middle of a request can be told
       apart, so a switch can wait for it. Until then auto mode does not try.
 - [ ] `remuda run`: flock or process check to mark a login in use, and how a

@@ -76,6 +76,15 @@ unstored live login makes it refuse and report rather than drop it. remuda
 cannot yet tell a session in the middle of a request apart, so it does not
 wait for one.
 
+**Running sessions.** Claude Code checks its credential file's mtime before
+each request and takes up the new login, and writes back only over the token
+it started from, so a switch reaches every open session on its next request.
+Codex never re-reads `auth.json` while it runs: on its next refresh it finds
+another account, refuses it and asks the user to sign in again, and a refresh
+already in flight writes the old account's tokens into the new file (codex-cli
+0.162.1, `codex-rs/login/src/auth/manager.rs`). So auto mode switches Codex
+only while no `codex` process runs, and the page says it is waiting.
+
 `remuda auto` prints, per provider, the rule in force, each eligible login's
 score and why it was or was not picked, so the rules can be checked before they
 are switched on. The page shows the same.
