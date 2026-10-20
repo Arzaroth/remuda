@@ -128,7 +128,18 @@ fn provider(p: &Value) -> Value {
             .get("planWeight")
             .filter(|w| w.as_f64().is_some_and(|w| w.is_finite() && w > 0.0)),
         "windows": fixed.chain(extra).collect::<Vec<_>>(),
+        "bankedResets": banked(usage.get("bankedResets")),
     })
+}
+
+fn banked(resets: Option<&Value>) -> Value {
+    match resets.and_then(|r| r.get("available")?.as_u64()) {
+        Some(available) if available > 0 => json!({
+            "available": available,
+            "expiresAt": resets.and_then(|r| r.get("expiresAt")?.as_str()),
+        }),
+        _ => Value::Null,
+    }
 }
 
 fn window(title: Option<&str>, w: &Value) -> Option<Value> {
