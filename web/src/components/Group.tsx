@@ -109,8 +109,11 @@ function Banked(props: { c: Credential }) {
     return r && !(r.expiresAt && Date.parse(r.expiresAt) <= now()) ? r : null;
   };
   const confirm = createConfirm();
+  const [spentWith, setSpentWith] = createSignal<string | null>(null);
+  const held = () => spentWith() !== null && spentWith() === JSON.stringify(resets());
   const spend = () => {
-    if (!confirm.ask(`Spend ${props.c.name}'s?`)) return;
+    if (held() || !confirm.ask(`Spend ${props.c.name}'s?`)) return;
+    setSpentWith(JSON.stringify(resets()));
     return act('/api/reset', { name: `${props.c.provider}/${props.c.name}` });
   };
   return (
@@ -126,7 +129,8 @@ function Banked(props: { c: Credential }) {
           <button
             class="btn"
             data-armed={confirm.text() ? '1' : undefined}
-            title="Clears the session and weekly limits now"
+            title={held() ? 'Waiting for TokenGauge to report what is left' : 'Clears the session and weekly limits now'}
+            disabled={held()}
             onClick={spend}
           >
             {confirm.text() ?? 'Reset limits'}
