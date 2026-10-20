@@ -144,6 +144,7 @@ h2 { font-size: 15px; font-weight: 700; margin: 0; }
 .win-head .when { color: var(--muted); font-size: 12px; white-space: nowrap; min-width: 8.5ch; text-align: right; }
 .aside { color: var(--muted); font-size: 13px; }
 .aside + .aside, .windows + .aside { margin-top: 8px; }
+.banked { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
 
 .tokens { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px 16px; padding-top: 12px;
   border-top: 1px solid var(--rule); font-size: 13px; }

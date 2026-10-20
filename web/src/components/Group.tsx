@@ -1,7 +1,7 @@
 import { createSignal, For, Match, onMount, Show, Switch } from 'solid-js';
 import { brand } from '../brand';
 import { createConfirm } from '../confirm';
-import { date, DAY, HOUR, span, until, usedTone } from '../format';
+import { date, DAY, HOUR, plural, span, until, usedTone } from '../format';
 import { act, now, store } from '../state';
 import type { Credential, Live, Provider, Window } from '../types';
 import { dropping, dropsLive, overwrite, planFor, shownFor, taken } from '../usage';
@@ -99,6 +99,44 @@ function Windows(props: { c: Credential }) {
           </Show>
         </Match>
       </Switch>
+    </Show>
+  );
+}
+
+function Banked(props: { c: Credential }) {
+  const resets = () => {
+    const r = shownFor(store.s!, props.c)?.bankedResets;
+    return r && !(r.expiresAt && Date.parse(r.expiresAt) <= now()) ? r : null;
+  };
+  const confirm = createConfirm();
+  const [spentWith, setSpentWith] = createSignal<string | null>(null);
+  const held = () => spentWith() !== null && spentWith() === JSON.stringify(resets());
+  const spend = () => {
+    if (held() || !confirm.ask(`Spend ${props.c.name}'s?`)) return;
+    setSpentWith(JSON.stringify(resets()));
+    return act('/api/reset', { name: `${props.c.provider}/${props.c.name}` });
+  };
+  return (
+    <Show when={resets()}>
+      {(r) => (
+        <div class="banked">
+          <span class="aside">
+            {plural(r().available, 'banked reset')}
+            <Show when={r().expiresAt && !Number.isNaN(Date.parse(r().expiresAt!)) && r().expiresAt}>
+              {(at) => <span title={date(Date.parse(at()))}>, expires {until(Date.parse(at()), now())}</span>}
+            </Show>
+          </span>
+          <button
+            class="btn"
+            data-armed={confirm.text() ? '1' : undefined}
+            title={held() ? 'Waiting for TokenGauge to report what is left' : 'Clears the session and weekly limits now'}
+            disabled={held()}
+            onClick={spend}
+          >
+            {confirm.text() ?? 'Reset limits'}
+          </button>
+        </div>
+      )}
     </Show>
   );
 }
@@ -269,6 +307,7 @@ function Row(props: { c: Credential; live: Live | undefined }) {
       </header>
       <div class="usage">
         <Windows c={c()} />
+        <Banked c={c()} />
       </div>
       <div class="tokens">
         <Lifetime title="Access token" at={c().expiresAt} horizon={8 * HOUR} warnBelow={HOUR} />

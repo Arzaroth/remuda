@@ -89,6 +89,12 @@ TokenGauge stays the one process fetching usage and remuda needs no usage
 client of its own. After a refresh or a switch remuda only asks TokenGauge's
 daemon to fetch sooner, through its socket.
 
+Spending a Claude banked reset is the one exception: right before the POST,
+remuda asks the usage endpoint itself which grant the server would accept now.
+The snapshot only says how many are left, may be minutes old, and carries no
+grant id, and spending the wrong one, or one already gone, wastes a click at
+best and a reset at worst.
+
 ## The page reads its own requests
 
 An HTTP library that reads a body before handing over the request lets anyone

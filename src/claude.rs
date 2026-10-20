@@ -17,7 +17,8 @@ const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const AUTHORIZE_URL: &str = "https://claude.com/cai/oauth/authorize";
 const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
 const REDIRECT_URI: &str = "https://platform.claude.com/oauth/code/callback";
-const PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
+const API_URL: &str = "https://api.anthropic.com";
+const CLI_USER_AGENT: &str = "claude-cli/2.1.304 (external, cli)";
 const LOGIN_SCOPES: &[&str] = &[
     "org:create_api_key",
     "user:profile",
@@ -34,7 +35,7 @@ pub const OAUTH_KEY: &str = "claudeAiOauth";
 pub struct Api {
     client: reqwest::blocking::Client,
     token_url: String,
-    profile_url: String,
+    api_url: String,
 }
 
 impl Api {
@@ -42,29 +43,22 @@ impl Api {
         #[cfg(debug_assertions)]
         if let Some(base) = std::env::var_os("REMUDA_TEST_CLAUDE_API") {
             let base = base.to_string_lossy();
-            return Self::at(
-                &format!("{base}/v1/oauth/token"),
-                &format!("{base}/api/oauth/profile"),
-            );
+            return Self::at(&format!("{base}/v1/oauth/token"), &base);
         }
-        Self::at(TOKEN_URL, PROFILE_URL)
+        Self::at(TOKEN_URL, API_URL)
     }
 
-    fn at(token_url: &str, profile_url: &str) -> Result<Self> {
+    fn at(token_url: &str, api_url: &str) -> Result<Self> {
         Ok(Api {
             client: oauth::client()?,
             token_url: token_url.to_owned(),
-            profile_url: profile_url.to_owned(),
+            api_url: api_url.to_owned(),
         })
     }
 
     #[cfg(test)]
     pub fn local(base: &str) -> Self {
-        Self::at(
-            &format!("{base}/v1/oauth/token"),
-            &format!("{base}/api/oauth/profile"),
-        )
-        .unwrap()
+        Self::at(&format!("{base}/v1/oauth/token"), base).unwrap()
     }
 }
 
@@ -136,7 +130,7 @@ fn refresh(api: &Api, oauth: &mut Map<String, Value>) -> Result<Option<String>> 
 fn profile(api: &Api, access_token: &str) -> Result<Value> {
     let resp = api
         .client
-        .get(&api.profile_url)
+        .get(format!("{}/api/oauth/profile", api.api_url))
         .bearer_auth(access_token)
         .header("Cache-Control", "no-cache")
         .send()
@@ -199,6 +193,80 @@ fn oauth_account_from_profile(p: &Value) -> Result<Value> {
     out.insert("seatTier".into(), s(org, "seat_tier"));
     out.insert("profileFetchedAt".into(), json!(now_ms()));
     Ok(Value::Object(out))
+}
+
+/// The banked reset to spend: the one the usage endpoint names next, else
+/// any it would accept now.
+fn usable_grant(cedar_ember: &Value) -> Option<&str> {
+    if cedar_ember.get("eligible").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    let at_limit = cedar_ember.get("at_limit").and_then(Value::as_bool) == Some(true);
+    let flag = |g: &Value, k: &str| g.get(k).and_then(Value::as_bool) == Some(true);
+    let usable: Vec<&str> = cedar_ember
+        .get("grants")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|g| {
+            g.get("resets_left").and_then(Value::as_f64).unwrap_or(0.0) >= 1.0
+                && !flag(g, "paused")
+                && flag(g, "usable_now")
+                && (at_limit || !flag(g, "use_requires_limit"))
+        })
+        .filter_map(|g| g.get("id")?.as_str())
+        .collect();
+    let next = cedar_ember.get("next_grant_id").and_then(Value::as_str);
+    next.filter(|n| usable.contains(n))
+        .or_else(|| usable.first().copied())
+}
+
+/// Spends one of the login's banked usage-limit resets and returns what the
+/// endpoint says came of it.
+fn redeem_reset(api: &Api, access_token: &str, organization: &str) -> Result<String> {
+    let usage = api
+        .client
+        .get(format!("{}/api/oauth/usage?cedar_ember=1", api.api_url))
+        .bearer_auth(access_token)
+        .header("anthropic-beta", "oauth-2025-04-20")
+        .header("User-Agent", CLI_USER_AGENT)
+        .send()
+        .context("usage request failed")?;
+    let status = usage.status();
+    if !status.is_success() {
+        bail!("usage endpoint answered {status}");
+    }
+    let usage: Value = usage.json().context("malformed usage response")?;
+    let grant = usage
+        .get("cedar_ember")
+        .and_then(usable_grant)
+        .context("no banked reset can be used right now")?;
+    let resp = api
+        .client
+        .post(format!(
+            "{}/api/organizations/{organization}/reset_rate_limits",
+            api.api_url
+        ))
+        .bearer_auth(access_token)
+        .header("anthropic-beta", "oauth-2025-04-20")
+        .header("User-Agent", CLI_USER_AGENT)
+        .json(&json!({"program": "cedar_ember", "grant_id": grant, "request_id": pkce::uuid()?}))
+        .send()
+        .context("reset request failed, and it may have gone through: check the card once TokenGauge updates before trying again")?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().unwrap_or_default();
+        bail!(
+            "reset endpoint answered {status}: {}",
+            body.chars().take(200).collect::<String>()
+        );
+    }
+    let answer: Value = resp.json().unwrap_or(Value::Null);
+    Ok(answer
+        .get("result")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_owned())
 }
 
 fn subscription_type(org_type: Option<&str>) -> Value {
@@ -460,6 +528,26 @@ impl Provider for Claude {
         refresh(&self.api, oauth)
     }
 
+    fn redeem_reset(&self, entry: &Entry) -> Result<String> {
+        if self
+            .expires_at(&entry.creds)
+            .is_some_and(|at| at <= now_ms())
+        {
+            bail!(
+                "{}'s access token has expired: refresh it, or run claude if it is the login in use, then try again",
+                entry.qualified()
+            );
+        }
+        let access = self
+            .access_token(&entry.creds)
+            .context("stored credential has no access token")?;
+        let organization = account_field(entry, "organizationUuid")
+            .filter(|o| !o.is_empty() && o.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+            .context("stored credential names no organization")?;
+        let result = redeem_reset(&self.api, access, organization)?;
+        Ok(format!("{}: banked reset {result}", entry.qualified()))
+    }
+
     fn begin_login(&self) -> Result<Box<dyn PendingLogin>> {
         Ok(Box::new(ClaudePending {
             api: self.api.clone(),
@@ -607,6 +695,59 @@ mod tests {
         ] {
             assert_eq!(subscription_type(Some(org)), plan, "{org}");
         }
+    }
+
+    fn grant(id: &str) -> Value {
+        json!({"id": id, "resets_left": 1, "paused": false, "usable_now": true, "use_requires_limit": false})
+    }
+
+    fn banked(grants: Vec<Value>) -> Value {
+        json!({"eligible": true, "at_limit": false, "grants": grants, "next_grant_id": null})
+    }
+
+    #[test]
+    fn only_a_grant_the_endpoint_would_accept_now_is_spent() {
+        assert_eq!(usable_grant(&banked(vec![grant("g")])), Some("g"));
+        assert_eq!(usable_grant(&json!({})), None);
+        let mut ineligible = banked(vec![grant("g")]);
+        ineligible["eligible"] = json!(false);
+        assert_eq!(usable_grant(&ineligible), None);
+        for (key, value) in [
+            ("resets_left", json!(0)),
+            ("paused", json!(true)),
+            ("usable_now", json!(false)),
+            ("use_requires_limit", json!(true)),
+        ] {
+            let mut g = grant("g");
+            g[key] = value;
+            assert_eq!(usable_grant(&banked(vec![g])), None, "{key}");
+        }
+        let mut at_limit = grant("g");
+        at_limit["use_requires_limit"] = json!(true);
+        let mut wall = banked(vec![at_limit]);
+        wall["at_limit"] = json!(true);
+        assert_eq!(usable_grant(&wall), Some("g"));
+    }
+
+    #[test]
+    fn the_grant_the_endpoint_names_next_goes_first_while_it_is_usable() {
+        let mut both = banked(vec![grant("a"), grant("b")]);
+        both["next_grant_id"] = json!("b");
+        assert_eq!(usable_grant(&both), Some("b"));
+        both["next_grant_id"] = json!("retired");
+        assert_eq!(usable_grant(&both), Some("a"));
+    }
+
+    #[test]
+    fn an_expired_token_spends_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let claude = Claude::at(tmp.path(), Api::local(&crate::ops::testing::OFFLINE));
+        let mut identity = crate::ops::testing::identity("u-work");
+        identity.oauth_account.as_mut().unwrap()["organizationUuid"] = json!("o-work");
+        let creds = crate::ops::testing::oauth("a-work", "r-work", -1000);
+        let entry = Entry::new("claude", "work", creds, identity, 1);
+        let err = claude.redeem_reset(&entry).unwrap_err();
+        assert!(err.to_string().contains("expired"), "{err}");
     }
 
     #[test]

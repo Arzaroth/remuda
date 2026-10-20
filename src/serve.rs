@@ -292,6 +292,16 @@ impl App {
                 let state = ops::sync_live(store, p)?;
                 capture(|out| commands::remove(store, p, &state, &name, out))
             }
+            ("POST", "/api/reset") => {
+                let (p, name) = commands::resolve(store, &providers, spec()?)?;
+                ops::sync_live(store, p)?;
+                let entry = store
+                    .get(p.id(), &name)?
+                    .with_context(|| format!("no credential named {}/{name}", p.id()))?;
+                let message = p.redeem_reset(&entry)?;
+                gauge::nudge(&self.places.snapshot);
+                Ok(json!({ "message": message }))
+            }
             ("POST", "/api/refresh") => {
                 let only = text("name")
                     .map(|s| commands::resolve(store, &providers, s))
@@ -711,6 +721,179 @@ mod tests {
             r["message"],
             "stored claude/new (u-new@example.com, max 5x)"
         );
+    }
+
+    fn stored_in_org(e: &Env, name: &str) {
+        let mut identity = identity(&format!("u-{name}"));
+        identity.oauth_account.as_mut().unwrap()["organizationUuid"] = json!(format!("o-{name}"));
+        let creds = oauth(&format!("a-{name}"), &format!("r-{name}"), HOUR);
+        e.store
+            .save(&crate::store::Entry::new(
+                "claude", name, creds, identity, 1,
+            ))
+            .unwrap();
+    }
+
+    const CLI: &str = r"^claude-cli/\S+ \(external, cli\)$";
+
+    fn usage_offering(server: &mut mockito::Server, grant: Value) -> mockito::Mock {
+        usage_offering_to(server, "a-work", grant)
+    }
+
+    fn usage_offering_to(server: &mut mockito::Server, token: &str, grant: Value) -> mockito::Mock {
+        server
+            .mock("GET", "/api/oauth/usage")
+            .match_query(mockito::Matcher::UrlEncoded(
+                "cedar_ember".into(),
+                "1".into(),
+            ))
+            .match_header("authorization", format!("Bearer {token}").as_str())
+            .match_header("anthropic-beta", "oauth-2025-04-20")
+            .match_header("user-agent", mockito::Matcher::Regex(CLI.into()))
+            .with_body(
+                json!({"cedar_ember": {"eligible": true, "at_limit": false, "grants": [grant],
+                    "next_grant_id": "launch"}})
+                .to_string(),
+            )
+            .create()
+    }
+
+    #[test]
+    fn a_banked_reset_is_spent_with_its_logins_own_token() {
+        let mut server = mockito::Server::new();
+        let e = env(&server.url());
+        stored_in_org(&e, "work");
+        let asked = usage_offering(
+            &mut server,
+            json!({"id": "launch", "resets_left": 1, "usable_now": true}),
+        );
+        let spent = server
+            .mock("POST", "/api/organizations/o-work/reset_rate_limits")
+            .match_header("authorization", "Bearer a-work")
+            .match_header("anthropic-beta", "oauth-2025-04-20")
+            .match_header("user-agent", mockito::Matcher::Regex(CLI.into()))
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::PartialJson(
+                    json!({"program": "cedar_ember", "grant_id": "launch"}),
+                ),
+                mockito::Matcher::Regex(
+                    r#""request_id":"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}""#
+                        .into(),
+                ),
+            ]))
+            .with_body(json!({"result": "applied"}).to_string())
+            .expect(1)
+            .create();
+        let nudged = gauge_daemon(&e);
+        let app = app(&e, &server.url());
+
+        let (status, r) = call(&app, "POST", "/api/reset", json!({"name": "work"}));
+        assert_eq!(status, 200, "{r}");
+        assert_eq!(r["message"], "claude/work: banked reset applied");
+        asked.assert();
+        spent.assert();
+        assert_eq!(nudged(), "{\"cmd\":\"refresh\"}\n");
+    }
+
+    #[test]
+    fn a_reset_the_endpoint_would_refuse_is_never_asked_for() {
+        let mut server = mockito::Server::new();
+        let e = env(&server.url());
+        stored_in_org(&e, "work");
+        usage_offering(
+            &mut server,
+            json!({"id": "launch", "resets_left": 0, "usable_now": false}),
+        );
+        let spent = server
+            .mock("POST", mockito::Matcher::Any)
+            .expect(0)
+            .create();
+        let app = app(&e, &server.url());
+
+        let (status, r) = call(&app, "POST", "/api/reset", json!({"name": "work"}));
+        assert_ne!(status, 200);
+        assert!(r.to_string().contains("no banked reset"), "{r}");
+        spent.assert();
+    }
+
+    #[test]
+    fn the_login_in_use_is_spent_with_the_token_its_cli_rotated_to() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("GET", "/api/oauth/profile")
+            .with_body(profile_body("u-work"))
+            .create();
+        let e = env(&server.url());
+        stored_in_org(&e, "work");
+        let mut live_account = account("u-work");
+        live_account["organizationUuid"] = json!("o-work");
+        e.sign_in(oauth("a-new", "r-new", HOUR), live_account);
+        usage_offering_to(
+            &mut server,
+            "a-new",
+            json!({"id": "launch", "resets_left": 1, "usable_now": true}),
+        );
+        let spent = server
+            .mock("POST", "/api/organizations/o-work/reset_rate_limits")
+            .match_header("authorization", "Bearer a-new")
+            .with_body(json!({"result": "applied"}).to_string())
+            .expect(1)
+            .create();
+        let app = app(&e, &server.url());
+
+        let (status, r) = call(&app, "POST", "/api/reset", json!({"name": "work"}));
+        assert_eq!(status, 200, "{r}");
+        spent.assert();
+        assert_eq!(e.stored_refresh_token("work").as_deref(), Some("r-new"));
+    }
+
+    #[test]
+    fn a_refused_reset_says_what_the_endpoint_answered_and_nudges_nothing() {
+        let mut server = mockito::Server::new();
+        let e = env(&server.url());
+        stored_in_org(&e, "work");
+        usage_offering(
+            &mut server,
+            json!({"id": "launch", "resets_left": 1, "usable_now": true}),
+        );
+        server
+            .mock("POST", "/api/organizations/o-work/reset_rate_limits")
+            .with_status(409)
+            .with_body(format!("already used{}", "!".repeat(500)))
+            .create();
+        let nudges =
+            std::os::unix::net::UnixListener::bind(e.tmp.path().join("tokengauge.sock")).unwrap();
+        nudges.set_nonblocking(true).unwrap();
+        let app = app(&e, &server.url());
+
+        let (status, r) = call(&app, "POST", "/api/reset", json!({"name": "work"}));
+        assert_ne!(status, 200);
+        let error = r["error"].as_str().unwrap();
+        assert!(
+            error.contains("409") && error.contains("already used"),
+            "{error}"
+        );
+        assert!(error.len() < 400, "{error}");
+        assert!(nudges.accept().is_err(), "a failed reset nudged TokenGauge");
+    }
+
+    #[test]
+    fn a_login_without_an_organization_spends_nothing() {
+        let mut server = mockito::Server::new();
+        let e = env(&server.url());
+        e.stored("work", "u-work", HOUR);
+        let asked = server.mock("GET", mockito::Matcher::Any).expect(0).create();
+        let spent = server
+            .mock("POST", mockito::Matcher::Any)
+            .expect(0)
+            .create();
+        let app = app(&e, &server.url());
+
+        let (status, r) = call(&app, "POST", "/api/reset", json!({"name": "work"}));
+        assert_ne!(status, 200);
+        assert!(r.to_string().contains("names no organization"), "{r}");
+        asked.assert();
+        spent.assert();
     }
 
     #[test]

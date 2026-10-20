@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 use serde_json::Value;
 
 use crate::store::Entry;
@@ -84,5 +84,9 @@ pub trait Provider: Send + Sync {
     }
     /// Returns the account id the token endpoint answered for, when it says.
     fn refresh(&self, creds: &mut Value) -> Result<Option<String>>;
+    /// Spends one of the login's banked usage-limit resets.
+    fn redeem_reset(&self, _entry: &Entry) -> Result<String> {
+        bail!("{} has no banked resets", self.name())
+    }
     fn begin_login(&self) -> Result<Box<dyn PendingLogin>>;
 }
