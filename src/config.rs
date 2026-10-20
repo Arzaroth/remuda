@@ -577,3 +577,265 @@ fn merge_item(old: &mut Item, new: &Item) {
         (o, n) => *o = n.clone(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SAMPLE: &str = r#"# auto mode
+[schedules.workday]
+days  = ["mon", "tue", "wed", "thu", "fri"]
+hours = "09:00-18:00"   # local time
+
+[auto.claude]
+enabled = true
+
+[[auto.claude.rule]]
+when  = "workday"
+order = [["work"], ["perso"]]
+
+[[auto.claude.rule]]
+when    = "otherwise"
+order   = [["perso"], ["work"]]
+reserve = { work = "workday" }
+"#;
+
+    fn stored(provider: &str) -> Option<Vec<String>> {
+        (provider == "claude").then(|| vec!["work".into(), "perso".into()])
+    }
+
+    fn sample() -> Config {
+        toml_edit::de::from_str(SAMPLE).unwrap()
+    }
+
+    fn written(text: &str, config: &Config) -> String {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(&path, text).unwrap();
+        save(&path, config, &version(text)).unwrap();
+        std::fs::read_to_string(&path).unwrap()
+    }
+
+    #[test]
+    fn the_roadmap_example_reads_and_checks_clean() {
+        let c = sample();
+        let day = &c.schedules["workday"];
+        assert_eq!(day.days.len(), 5);
+        assert_eq!(
+            day.hours,
+            Some(Hours {
+                start: 540,
+                end: 1080
+            })
+        );
+        let auto = &c.auto["claude"];
+        assert!(auto.enabled);
+        assert_eq!(auto.dwell, Span(1800));
+        assert_eq!(auto.margin, 0.25);
+        assert_eq!(auto.rules[1].reserve["work"], "workday");
+        assert_eq!(c.check(&stored), []);
+    }
+
+    #[test]
+    fn hours_and_spans_read_the_way_they_are_written() {
+        let hours = |s: &str| Hours::try_from(s.to_owned());
+        assert_eq!(
+            hours("22:00-06:30"),
+            Ok(Hours {
+                start: 1320,
+                end: 390
+            })
+        );
+        assert_eq!(
+            hours("9:00-24:00"),
+            Ok(Hours {
+                start: 540,
+                end: 1440
+            })
+        );
+        for bad in [
+            "09:00",
+            "09:00-09:00",
+            "24:00-01:00",
+            "25:00-01:00",
+            "9-17",
+            "09:60-10:00",
+        ] {
+            assert!(hours(bad).is_err(), "{bad}");
+        }
+        assert_eq!(
+            String::from(Hours {
+                start: 1320,
+                end: 390
+            }),
+            "22:00-06:30"
+        );
+
+        let span = |s: &str| Span::try_from(s.to_owned());
+        assert_eq!(span("1h30m"), Ok(Span(5400)));
+        assert_eq!(span("90s"), Ok(Span(90)));
+        for bad in ["", "30", "m", "1d", "1h 30m"] {
+            assert!(span(bad).is_err(), "{bad}");
+        }
+        assert_eq!(String::from(Span(5400)), "1h30m");
+        assert_eq!(String::from(Span(0)), "0s");
+    }
+
+    #[test]
+    fn unknown_keys_are_refused() {
+        assert!(toml_edit::de::from_str::<Config>("[auto.claude]\nenable = true").is_err());
+    }
+
+    #[test]
+    fn check_names_what_auto_mode_cannot_act_on() {
+        let c: Config = toml_edit::de::from_str(
+            r#"
+[schedules.otherwise]
+[schedules.week]
+days = ["mon", "mon"]
+
+[auto.nope]
+
+[auto.claude]
+margin = -1.0
+logins = ["ghost"]
+
+[[auto.claude.rule]]
+when  = "nights"
+order = [["work", "work"], []]
+reserve = { perso = "week", work = "weekend" }
+
+[[auto.claude.rule]]
+when  = "otherwise"
+order = [["perso"]]
+
+[[auto.claude.rule]]
+when  = "week"
+order = [["perso"]]
+"#,
+        )
+        .unwrap();
+        let problems: Vec<String> = c.check(&stored).iter().map(ToString::to_string).collect();
+        assert_eq!(
+            problems,
+            [
+                "schedules.otherwise: \"otherwise\" is kept for the catch-all rule",
+                "schedules.week: a day is named twice",
+                "auto.claude.logins: no stored login claude/ghost",
+                "auto.claude.rule[1].order: work is named twice",
+                "auto.claude.rule[1].order: a tier is empty",
+                "auto.claude.rule[1].when: no schedule named \"nights\"",
+                "auto.claude.rule[1].reserve.perso: perso is not in this rule's order",
+                "auto.claude.rule[1].reserve.work: no schedule named \"weekend\"",
+                "auto.claude.rule[3]: never in force: rule 2 matches any time",
+                "auto.claude.margin: the margin is a fraction, 0 or more",
+                "auto.nope: remuda has no provider \"nope\"",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_write_keeps_the_comments_around_what_it_did_not_change() {
+        let mut c = sample();
+        c.auto.get_mut("claude").unwrap().enabled = false;
+        c.schedules.get_mut("workday").unwrap().hours = Some(Hours {
+            start: 480,
+            end: 1020,
+        });
+
+        let text = written(SAMPLE, &c);
+
+        assert!(text.starts_with("# auto mode\n[schedules.workday]\n"));
+        assert!(text.contains("hours = \"08:00-17:00\"   # local time\n"));
+        assert!(!text.contains("enabled"));
+        assert!(text.contains("reserve = { work = \"workday\" }"));
+        assert_eq!(toml_edit::de::from_str::<Config>(&text).unwrap(), c);
+    }
+
+    #[test]
+    fn a_write_that_changes_nothing_leaves_the_bytes_alone() {
+        assert_eq!(written(SAMPLE, &sample()), SAMPLE);
+    }
+
+    #[test]
+    fn rules_are_added_and_dropped_in_place() {
+        let mut c = sample();
+        let rules = &mut c.auto.get_mut("claude").unwrap().rules;
+        rules.remove(0);
+        rules.push(Rule {
+            when: "workday".into(),
+            order: vec![vec!["work".into()]],
+            reserve: BTreeMap::new(),
+        });
+
+        let text = written(SAMPLE, &c);
+
+        assert_eq!(toml_edit::de::from_str::<Config>(&text).unwrap(), c);
+        assert_eq!(text.matches("[[auto.claude.rule]]").count(), 2);
+    }
+
+    #[test]
+    fn a_new_file_is_written_from_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("remuda/config.toml");
+        let loaded = load(&path).unwrap();
+        assert_eq!(loaded.config, Config::default());
+
+        let v = save(&path, &sample(), &loaded.version).unwrap();
+
+        let back = load(&path).unwrap();
+        assert_eq!(back.config, sample());
+        assert_eq!(back.version, v);
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("[auto]\n"));
+    }
+
+    #[test]
+    fn a_write_against_an_old_version_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        let old = load(&path).unwrap().version;
+        std::fs::write(&path, SAMPLE).unwrap();
+
+        let err = save(&path, &Config::default(), &old).unwrap_err();
+
+        assert!(err.is::<Stale>());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), SAMPLE);
+    }
+
+    #[test]
+    fn a_removed_login_leaves_its_tiers_and_reservations() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(&path, SAMPLE).unwrap();
+
+        forget_login(&path, "claude", "work").unwrap();
+
+        let rules = &load(&path).unwrap().config.auto["claude"].rules;
+        assert_eq!(rules[0].order, [["perso"]]);
+        assert_eq!(rules[1].order, [["perso"]]);
+        assert!(rules[1].reserve.is_empty());
+    }
+
+    #[test]
+    fn a_renamed_login_keeps_its_place() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(&path, SAMPLE).unwrap();
+
+        rename_login(&path, "claude", "work", "job").unwrap();
+        rename_login(&path, "codex", "perso", "x").unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("order = [[\"job\"], [\"perso\"]]"));
+        assert!(text.contains("reserve = { job = \"workday\" }"));
+        assert!(text.contains("hours = \"09:00-18:00\"   # local time"));
+    }
+
+    #[test]
+    fn upkeep_writes_nothing_without_a_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        forget_login(&path, "claude", "work").unwrap();
+        assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 0);
+    }
+}
