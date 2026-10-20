@@ -42,7 +42,7 @@
   file does not say, as for Grok), a row per usage window (its title, percentage
   and reset over a bar), a Claude login's banked usage-limit resets and when
   they expire, with a Reset limits button that asks for a second click before
-  it spends one, how long its access token and its sign-in (refresh
+  it spends one and then holds until TokenGauge reports the new count, how long its access token and its sign-in (refresh
   token) have left, and Use, Refresh, Label, Rename and Remove along the
   bottom. The card in use has a green edge. Remove asks
   for a second click; Use, Refresh and Remove are disabled on the active one.
