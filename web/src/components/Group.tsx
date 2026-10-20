@@ -103,6 +103,37 @@ function Windows(props: { c: Credential }) {
   );
 }
 
+function Banked(props: { c: Credential }) {
+  const resets = () => shownFor(store.s!, props.c)?.bankedResets;
+  const confirm = createConfirm();
+  const spend = () => {
+    if (!confirm.ask('Spend it?')) return;
+    return act('/api/reset', { name: `${props.c.provider}/${props.c.name}` });
+  };
+  return (
+    <Show when={resets()}>
+      {(r) => (
+        <div class="banked">
+          <span class="aside">
+            {r().available} banked {r().available === 1 ? 'reset' : 'resets'}
+            <Show when={r().expiresAt}>
+              {(at) => <span title={date(Date.parse(at()))}>, expires {until(Date.parse(at()), now())}</span>}
+            </Show>
+          </span>
+          <button
+            class="btn"
+            data-armed={confirm.text() ? '1' : undefined}
+            title="Clears the session and weekly limits now"
+            onClick={spend}
+          >
+            {confirm.text() ?? 'Reset limits'}
+          </button>
+        </div>
+      )}
+    </Show>
+  );
+}
+
 function Lifetime(props: { title: string; at: number | null; horizon: number; warnBelow: number }) {
   const left = () => props.at! - now();
   const tone = () => (left() < 0 ? 'bad' : left() < props.warnBelow ? 'warn' : '');
@@ -269,6 +300,7 @@ function Row(props: { c: Credential; live: Live | undefined }) {
       </header>
       <div class="usage">
         <Windows c={c()} />
+        <Banked c={c()} />
       </div>
       <div class="tokens">
         <Lifetime title="Access token" at={c().expiresAt} horizon={8 * HOUR} warnBelow={HOUR} />

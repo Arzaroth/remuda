@@ -34,6 +34,7 @@ export type Usage = {
   planWeight?: number | null;
   plan?: string | null;
   windows: Window[];
+  bankedResets?: { available: number; expiresAt: string | null } | null;
   accounts?: Record<string, Usage>;
 };
 
