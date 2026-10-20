@@ -18,6 +18,7 @@ from a CLI. `creds` is always the store's shape for that CLI.
 | `renews` | False for an API key, which `refresh` skips (true by default) |
 | `env_line` | The `export` line `remuda env` prints, for a key read from the environment |
 | `begin_login` | Start a sign-in, returning a `PendingLogin` |
+| `redeem_reset` | Spend one of the login's banked usage-limit resets (Claude only; the others refuse) |
 
 Another CLI is one more implementation plus a line in `main.rs` (the
 `PROVIDERS` list for `-p` and the provider arrays) and in `serve`'s list. Token
@@ -38,6 +39,13 @@ refresh token into "sign this credential in again".
   `platform.claude.com/v1/oauth/token` (JSON body), profile at
   `api.anthropic.com/api/oauth/profile`. Sign-in redirects to
   `platform.claude.com/oauth/code/callback`, which shows a `code#state` to paste.
+- A banked usage-limit reset is spent by asking
+  `api.anthropic.com/api/oauth/usage?cedar_ember=1` which grant it would accept
+  (`next_grant_id` while it is usable, else any usable one) and POSTing
+  `{program: "cedar_ember", grant_id, request_id}` to
+  `/api/organizations/<organizationUuid>/reset_rate_limits`. Both send Claude
+  Code's own user agent, `claude-cli/2.1.304 (external, cli)`, as TokenGauge does: the endpoint
+  offers the grants to no other client (`ineligible_reason: "surface"`).
 - A login builds `oauthAccount` from the profile the way Claude Code does
   (`oauth_account_from_profile`) and maps `organization_type` onto
   `subscriptionType`.

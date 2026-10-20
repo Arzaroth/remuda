@@ -105,6 +105,7 @@ access to anything, and it ends when they stop.
 | `POST /api/import` `{provider?, name, force?}` | Store the live login |
 | `POST /api/label` `{name, text?}` / `rename` `{name, to}` / `remove` `{name}` | As the commands |
 | `POST /api/refresh` `{name?, force?}` | Refresh inactive credentials, then nudge TokenGauge |
+| `POST /api/reset` `{name}` | Spend one of a Claude login's banked usage-limit resets with its own token, then nudge TokenGauge |
 | `POST /api/login` `{provider?, name, force?}` | Begin a sign-in and open it in a private window: `{id, url, needsCode, opened}` |
 | `POST /api/login/finish` `{id, code?}` | Finish it and store the result |
 | `POST /api/login/cancel` `{id}` | Abandon it; a waiting Codex callback stops |
@@ -143,7 +144,8 @@ read only when it is a regular file, and at most 4 MiB of it. `usage` holds
 `updatedAt` and, per provider id, `stale`, `staleReason`, `error` (from the
 snapshot's top-level `errors`, where TokenGauge files a fetch that failed with
 nothing cached), `credentialState`, `planWeight` (TokenGauge's nominal plan multiplier, when it knows one: any positive number, since a Claude Team seat is 1.25 or 6.25), `plan` (the snapshot's `usage.loginMethod`, the plan as TokenGauge names it, such as Grok's tier, which no credential file holds), `windows` (`title`, `usedPercent`,
-`resetsAt`), placeholders dropped, and `accounts`: the same fields per stored
+`resetsAt`), placeholders dropped, `bankedResets` (`available`, `expiresAt`:
+the Claude resets TokenGauge counts usable, null when none are left), and `accounts`: the same fields per stored
 credential name. TokenGauge 0.37 (snapshot schema 2) names the credential a
 payload or an error belongs to in its `credential` field; those go under
 `accounts`, the rest stay at provider level. A row takes its own entry in

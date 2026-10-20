@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- A Claude login's card shows its banked usage-limit resets and when they
+  expire, as TokenGauge reports them, and Reset limits spends one with that
+  login's own token after a second click.
+
 ## [0.13.1] - 2026-10-13
 
 ### Fixed

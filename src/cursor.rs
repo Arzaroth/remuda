@@ -78,23 +78,6 @@ fn identity_of(creds: &Value) -> Option<Identity> {
     })
 }
 
-/// A random version 4 UUID, which is what Cursor's sign-in expects.
-fn uuid() -> Result<String> {
-    let mut b = [0u8; 16];
-    getrandom::fill(&mut b).map_err(|e| anyhow::anyhow!("no randomness: {e}"))?;
-    b[6] = (b[6] & 0x0f) | 0x40;
-    b[8] = (b[8] & 0x3f) | 0x80;
-    let hex: String = b.iter().map(|x| format!("{x:02x}")).collect();
-    Ok(format!(
-        "{}-{}-{}-{}-{}",
-        &hex[..8],
-        &hex[8..12],
-        &hex[12..16],
-        &hex[16..20],
-        &hex[20..]
-    ))
-}
-
 /// Cursor: the whole of cursor-agent's `auth.json` belongs to the login. The
 /// IDE keeps its own login in a database remuda leaves alone.
 pub struct Cursor {
@@ -217,7 +200,7 @@ impl Provider for Cursor {
 
     fn begin_login(&self) -> Result<Box<dyn PendingLogin>> {
         let verifier = pkce::random()?;
-        let uuid = uuid()?;
+        let uuid = pkce::uuid()?;
         let url = reqwest::Url::parse_with_params(
             &format!("{}/loginDeepControl", self.api.web),
             &[
