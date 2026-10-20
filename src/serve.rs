@@ -795,6 +795,32 @@ mod tests {
     }
 
     #[test]
+    fn the_page_checks_a_config_without_saving_it() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let app = app(&e, &OFFLINE);
+
+        let (_, r) = call(
+            &app,
+            "POST",
+            "/api/config/check",
+            json!({"config": {"auto": {"claude": {"logins": ["work", "ghost"]}}}}),
+        );
+        assert_eq!(
+            r["problems"],
+            json!([{"at": "auto.claude.logins", "message": "no stored login claude/ghost"}])
+        );
+        let (_, r) = call(
+            &app,
+            "POST",
+            "/api/config/check",
+            json!({"config": {"schedules": {"x": {"hours": "09:00-09:00"}}}}),
+        );
+        assert_eq!(r["problems"][0]["at"], "config");
+        assert!(!places(&e).config.exists());
+    }
+
+    #[test]
     fn a_config_edited_by_hand_reports_what_it_names_wrongly() {
         let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);
