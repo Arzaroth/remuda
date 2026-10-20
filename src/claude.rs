@@ -17,7 +17,7 @@ const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const AUTHORIZE_URL: &str = "https://claude.com/cai/oauth/authorize";
 const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
 const REDIRECT_URI: &str = "https://platform.claude.com/oauth/code/callback";
-const PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
+const API_URL: &str = "https://api.anthropic.com";
 const LOGIN_SCOPES: &[&str] = &[
     "org:create_api_key",
     "user:profile",
@@ -34,7 +34,7 @@ pub const OAUTH_KEY: &str = "claudeAiOauth";
 pub struct Api {
     client: reqwest::blocking::Client,
     token_url: String,
-    profile_url: String,
+    api_url: String,
 }
 
 impl Api {
@@ -42,29 +42,22 @@ impl Api {
         #[cfg(debug_assertions)]
         if let Some(base) = std::env::var_os("REMUDA_TEST_CLAUDE_API") {
             let base = base.to_string_lossy();
-            return Self::at(
-                &format!("{base}/v1/oauth/token"),
-                &format!("{base}/api/oauth/profile"),
-            );
+            return Self::at(&format!("{base}/v1/oauth/token"), &base);
         }
-        Self::at(TOKEN_URL, PROFILE_URL)
+        Self::at(TOKEN_URL, API_URL)
     }
 
-    fn at(token_url: &str, profile_url: &str) -> Result<Self> {
+    fn at(token_url: &str, api_url: &str) -> Result<Self> {
         Ok(Api {
             client: oauth::client()?,
             token_url: token_url.to_owned(),
-            profile_url: profile_url.to_owned(),
+            api_url: api_url.to_owned(),
         })
     }
 
     #[cfg(test)]
     pub fn local(base: &str) -> Self {
-        Self::at(
-            &format!("{base}/v1/oauth/token"),
-            &format!("{base}/api/oauth/profile"),
-        )
-        .unwrap()
+        Self::at(&format!("{base}/v1/oauth/token"), base).unwrap()
     }
 }
 
@@ -136,7 +129,7 @@ fn refresh(api: &Api, oauth: &mut Map<String, Value>) -> Result<Option<String>> 
 fn profile(api: &Api, access_token: &str) -> Result<Value> {
     let resp = api
         .client
-        .get(&api.profile_url)
+        .get(format!("{}/api/oauth/profile", api.api_url))
         .bearer_auth(access_token)
         .header("Cache-Control", "no-cache")
         .send()
