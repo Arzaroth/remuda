@@ -38,8 +38,8 @@ file. Any other provider refuses.
 
 ## `remuda rm <name>`
 
-Deletes the credential and its sidecar. Refuses the active credential: switch
-away first.
+Deletes the credential and its sidecar, and takes it out of `config.toml`.
+Refuses the active credential: switch away first.
 
 ## Sources
 

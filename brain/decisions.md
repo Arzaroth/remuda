@@ -229,6 +229,14 @@ Client ids, endpoints and scopes are not a public API. They were read out of
 Claude Code 2.1.282 and codex-cli 0.153.4 binaries and are pinned in one place
 per provider, so a CLI release that moves them is one edit.
 
+## The page edits the config the user edits by hand
+
+`config.toml` is written by the page and by the user's editor, so a page save
+rewrites only the values that changed and keeps every comment, rather than
+serialising the config afresh. It is saved against the version the page read,
+the digest of the file's bytes, so a hand edit made while the page was open is
+refused rather than overwritten ([config.rs](../src/config.rs) `save`).
+
 ## Sources
 
 - [src/ops.rs](../src/ops.rs)
