@@ -741,7 +741,7 @@ mod tests {
     #[test]
     fn an_expired_token_spends_nothing() {
         let tmp = tempfile::tempdir().unwrap();
-        let claude = Claude::at(tmp.path(), Api::local("http://127.0.0.1:9"));
+        let claude = Claude::at(tmp.path(), Api::local(&crate::ops::testing::OFFLINE));
         let mut identity = crate::ops::testing::identity("u-work");
         identity.oauth_account.as_mut().unwrap()["organizationUuid"] = json!("o-work");
         let creds = crate::ops::testing::oauth("a-work", "r-work", -1000);
