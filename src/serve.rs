@@ -734,18 +734,22 @@ mod tests {
             .unwrap();
     }
 
+    const CLI: &str = r"^claude-cli/\S+ \(external, cli\)$";
+
     fn usage_offering(server: &mut mockito::Server, grant: Value) -> mockito::Mock {
+        usage_offering_to(server, "a-work", grant)
+    }
+
+    fn usage_offering_to(server: &mut mockito::Server, token: &str, grant: Value) -> mockito::Mock {
         server
             .mock("GET", "/api/oauth/usage")
             .match_query(mockito::Matcher::UrlEncoded(
                 "cedar_ember".into(),
                 "1".into(),
             ))
-            .match_header("authorization", "Bearer a-work")
-            .match_header(
-                "user-agent",
-                mockito::Matcher::Regex(r"^claude-cli/\S+ \(external, cli\)$".into()),
-            )
+            .match_header("authorization", format!("Bearer {token}").as_str())
+            .match_header("anthropic-beta", "oauth-2025-04-20")
+            .match_header("user-agent", mockito::Matcher::Regex(CLI.into()))
             .with_body(
                 json!({"cedar_ember": {"eligible": true, "at_limit": false, "grants": [grant],
                     "next_grant_id": "launch"}})
@@ -766,9 +770,17 @@ mod tests {
         let spent = server
             .mock("POST", "/api/organizations/o-work/reset_rate_limits")
             .match_header("authorization", "Bearer a-work")
-            .match_body(mockito::Matcher::PartialJson(
-                json!({"program": "cedar_ember", "grant_id": "launch"}),
-            ))
+            .match_header("anthropic-beta", "oauth-2025-04-20")
+            .match_header("user-agent", mockito::Matcher::Regex(CLI.into()))
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::PartialJson(
+                    json!({"program": "cedar_ember", "grant_id": "launch"}),
+                ),
+                mockito::Matcher::Regex(
+                    r#""request_id":"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}""#
+                        .into(),
+                ),
+            ]))
             .with_body(json!({"result": "applied"}).to_string())
             .expect(1)
             .create();
@@ -801,6 +813,86 @@ mod tests {
         let (status, r) = call(&app, "POST", "/api/reset", json!({"name": "work"}));
         assert_ne!(status, 200);
         assert!(r.to_string().contains("no banked reset"), "{r}");
+        spent.assert();
+    }
+
+    #[test]
+    fn the_login_in_use_is_spent_with_the_token_its_cli_rotated_to() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("GET", "/api/oauth/profile")
+            .with_body(profile_body("u-work"))
+            .create();
+        let e = env(&server.url());
+        stored_in_org(&e, "work");
+        let mut live_account = account("u-work");
+        live_account["organizationUuid"] = json!("o-work");
+        e.sign_in(oauth("a-new", "r-new", HOUR), live_account);
+        usage_offering_to(
+            &mut server,
+            "a-new",
+            json!({"id": "launch", "resets_left": 1, "usable_now": true}),
+        );
+        let spent = server
+            .mock("POST", "/api/organizations/o-work/reset_rate_limits")
+            .match_header("authorization", "Bearer a-new")
+            .with_body(json!({"result": "applied"}).to_string())
+            .expect(1)
+            .create();
+        let app = app(&e, &server.url());
+
+        let (status, r) = call(&app, "POST", "/api/reset", json!({"name": "work"}));
+        assert_eq!(status, 200, "{r}");
+        spent.assert();
+        assert_eq!(e.stored_refresh_token("work").as_deref(), Some("r-new"));
+    }
+
+    #[test]
+    fn a_refused_reset_says_what_the_endpoint_answered_and_nudges_nothing() {
+        let mut server = mockito::Server::new();
+        let e = env(&server.url());
+        stored_in_org(&e, "work");
+        usage_offering(
+            &mut server,
+            json!({"id": "launch", "resets_left": 1, "usable_now": true}),
+        );
+        server
+            .mock("POST", "/api/organizations/o-work/reset_rate_limits")
+            .with_status(409)
+            .with_body(format!("already used{}", "!".repeat(500)))
+            .create();
+        let nudges =
+            std::os::unix::net::UnixListener::bind(e.tmp.path().join("tokengauge.sock")).unwrap();
+        nudges.set_nonblocking(true).unwrap();
+        let app = app(&e, &server.url());
+
+        let (status, r) = call(&app, "POST", "/api/reset", json!({"name": "work"}));
+        assert_ne!(status, 200);
+        let error = r["error"].as_str().unwrap();
+        assert!(
+            error.contains("409") && error.contains("already used"),
+            "{error}"
+        );
+        assert!(error.len() < 400, "{error}");
+        assert!(nudges.accept().is_err(), "a failed reset nudged TokenGauge");
+    }
+
+    #[test]
+    fn a_login_without_an_organization_spends_nothing() {
+        let mut server = mockito::Server::new();
+        let e = env(&server.url());
+        e.stored("work", "u-work", HOUR);
+        let asked = server.mock("GET", mockito::Matcher::Any).expect(0).create();
+        let spent = server
+            .mock("POST", mockito::Matcher::Any)
+            .expect(0)
+            .create();
+        let app = app(&e, &server.url());
+
+        let (status, r) = call(&app, "POST", "/api/reset", json!({"name": "work"}));
+        assert_ne!(status, 200);
+        assert!(r.to_string().contains("names no organization"), "{r}");
+        asked.assert();
         spent.assert();
     }
 
