@@ -712,6 +712,122 @@ mod tests {
     }
 
     #[test]
+    fn the_page_reads_and_saves_the_config() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        e.stored("perso", "u-perso", HOUR);
+        let app = app(&e, &OFFLINE);
+        let path = places(&e).config;
+
+        let (status, r) = call(&app, "GET", "/api/config", Value::Null);
+        assert_eq!((status, &r["config"]), (200, &json!({})));
+        assert_eq!(r["problems"], json!([]));
+        let empty = r["version"].clone();
+
+        let config = json!({
+            "auto": {"claude": {"enabled": true, "logins": ["work", "perso"]}}
+        });
+        let (status, r) = call(
+            &app,
+            "POST",
+            "/api/config",
+            json!({"config": config, "version": empty}),
+        );
+        assert_eq!((status, &r["config"]), (200, &config));
+        assert_ne!(r["version"], empty);
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("logins = [\"work\", \"perso\"]"));
+
+        let (status, r) = call(
+            &app,
+            "POST",
+            "/api/config",
+            json!({"config": {}, "version": empty}),
+        );
+        assert_eq!(status, 400);
+        assert!(
+            r["error"]
+                .as_str()
+                .unwrap()
+                .contains("changed since it was read")
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+    }
+
+    #[test]
+    fn the_page_cannot_save_a_config_auto_mode_cannot_act_on() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let app = app(&e, &OFFLINE);
+        let (_, r) = call(&app, "GET", "/api/config", Value::Null);
+
+        let (status, r) = call(
+            &app,
+            "POST",
+            "/api/config",
+            json!({
+                "config": {"auto": {"claude": {"logins": ["ghost"]}}},
+                "version": r["version"],
+            }),
+        );
+
+        assert_eq!(
+            (status, r["error"].as_str()),
+            (
+                400,
+                Some("the config was not saved: auto.claude.logins: no stored login claude/ghost")
+            )
+        );
+        assert!(!places(&e).config.exists());
+    }
+
+    #[test]
+    fn a_config_edited_by_hand_reports_what_it_names_wrongly() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let app = app(&e, &OFFLINE);
+        std::fs::write(places(&e).config, "[auto.claude]\nlogins = [\"gone\"]\n").unwrap();
+
+        let (status, r) = call(&app, "GET", "/api/config", Value::Null);
+
+        assert_eq!(status, 200);
+        assert_eq!(r["problems"][0]["at"], "auto.claude.logins");
+        assert_eq!(r["problems"][0]["message"], "no stored login claude/gone");
+    }
+
+    #[test]
+    fn renaming_and_removing_from_the_page_keep_the_config_in_step() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        e.stored("perso", "u-perso", HOUR);
+        let app = app(&e, &OFFLINE);
+        let path = places(&e).config;
+        std::fs::write(&path, "[auto.claude]\nlogins = [\"work\", \"perso\"]\n").unwrap();
+
+        call(
+            &app,
+            "POST",
+            "/api/rename",
+            json!({"name": "work", "to": "job"}),
+        );
+        call(&app, "POST", "/api/remove", json!({"name": "perso"}));
+
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "[auto.claude]\nlogins = [\"job\"]\n"
+        );
+    }
+
+    #[test]
+    fn a_config_edit_wakes_the_page() {
+        let e = env(&OFFLINE);
+        let app = app(&e, &OFFLINE);
+        let before = app.fingerprint();
+        std::fs::write(places(&e).config, "[schedules.x]\n").unwrap();
+        assert_ne!(app.fingerprint(), before);
+    }
+
+    #[test]
     fn a_refresh_and_a_switch_ask_tokengauge_to_fetch_now() {
         let e = env(&OFFLINE);
         e.stored("work", "u-work", 3 * HOUR);
