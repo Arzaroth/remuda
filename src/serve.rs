@@ -723,6 +723,87 @@ mod tests {
         );
     }
 
+    fn stored_in_org(e: &Env, name: &str) {
+        let mut identity = identity(&format!("u-{name}"));
+        identity.oauth_account.as_mut().unwrap()["organizationUuid"] = json!(format!("o-{name}"));
+        let creds = oauth(&format!("a-{name}"), &format!("r-{name}"), HOUR);
+        e.store
+            .save(&crate::store::Entry::new(
+                "claude", name, creds, identity, 1,
+            ))
+            .unwrap();
+    }
+
+    fn usage_offering(server: &mut mockito::Server, grant: Value) -> mockito::Mock {
+        server
+            .mock("GET", "/api/oauth/usage")
+            .match_query(mockito::Matcher::UrlEncoded(
+                "cedar_ember".into(),
+                "1".into(),
+            ))
+            .match_header("authorization", "Bearer a-work")
+            .match_header(
+                "user-agent",
+                mockito::Matcher::Regex(r"^claude-cli/\S+ \(external, cli\)$".into()),
+            )
+            .with_body(
+                json!({"cedar_ember": {"eligible": true, "at_limit": false, "grants": [grant],
+                    "next_grant_id": "launch"}})
+                .to_string(),
+            )
+            .create()
+    }
+
+    #[test]
+    fn a_banked_reset_is_spent_with_its_logins_own_token() {
+        let mut server = mockito::Server::new();
+        let e = env(&server.url());
+        stored_in_org(&e, "work");
+        let asked = usage_offering(
+            &mut server,
+            json!({"id": "launch", "resets_left": 1, "usable_now": true}),
+        );
+        let spent = server
+            .mock("POST", "/api/organizations/o-work/reset_rate_limits")
+            .match_header("authorization", "Bearer a-work")
+            .match_body(mockito::Matcher::PartialJson(
+                json!({"program": "cedar_ember", "grant_id": "launch"}),
+            ))
+            .with_body(json!({"result": "applied"}).to_string())
+            .expect(1)
+            .create();
+        let nudged = gauge_daemon(&e);
+        let app = app(&e, &server.url());
+
+        let (status, r) = call(&app, "POST", "/api/reset", json!({"name": "work"}));
+        assert_eq!(status, 200, "{r}");
+        assert_eq!(r["message"], "claude/work: banked reset applied");
+        asked.assert();
+        spent.assert();
+        assert_eq!(nudged(), "{\"cmd\":\"refresh\"}\n");
+    }
+
+    #[test]
+    fn a_reset_the_endpoint_would_refuse_is_never_asked_for() {
+        let mut server = mockito::Server::new();
+        let e = env(&server.url());
+        stored_in_org(&e, "work");
+        usage_offering(
+            &mut server,
+            json!({"id": "launch", "resets_left": 0, "usable_now": false}),
+        );
+        let spent = server
+            .mock("POST", mockito::Matcher::Any)
+            .expect(0)
+            .create();
+        let app = app(&e, &server.url());
+
+        let (status, r) = call(&app, "POST", "/api/reset", json!({"name": "work"}));
+        assert_ne!(status, 200);
+        assert!(r.to_string().contains("no banked reset"), "{r}");
+        spent.assert();
+    }
+
     #[test]
     fn a_sign_in_runs_in_two_calls() {
         let mut server = mockito::Server::new();

@@ -219,6 +219,33 @@ mod tests {
     }
 
     #[test]
+    fn banked_resets_ride_along_only_while_some_are_left() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("tokengauge-usage.json");
+        let payload = |name: &str, resets: Value| json!({"provider": "claude", "credential": name, "usage": {"bankedResets": resets}});
+        std::fs::write(
+            &file,
+            json!({"payloads": [
+                payload("work", json!({"available": 1, "expiresAt": "2026-10-22T16:00:00+00:00"})),
+                payload("spent", json!({"available": 0, "expiresAt": "2026-10-22T16:00:00+00:00"})),
+                payload("odd", json!({"available": "1"})),
+                payload("none", Value::Null),
+            ]})
+            .to_string(),
+        )
+        .unwrap();
+        let usage = read(&file).unwrap();
+        let accounts = &usage["providers"]["claude"]["accounts"];
+        assert_eq!(
+            accounts["work"]["bankedResets"],
+            json!({"available": 1, "expiresAt": "2026-10-22T16:00:00+00:00"})
+        );
+        for name in ["spent", "odd", "none"] {
+            assert!(accounts[name]["bankedResets"].is_null(), "{name}");
+        }
+    }
+
+    #[test]
     fn a_snapshot_becomes_titled_windows_per_provider() {
         let tmp = tempfile::tempdir().unwrap();
         let file = tmp.path().join("tokengauge-usage.json");

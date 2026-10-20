@@ -712,6 +712,69 @@ mod tests {
         }
     }
 
+    fn grant(id: &str) -> Value {
+        json!({"id": id, "resets_left": 1, "paused": false, "usable_now": true, "use_requires_limit": false})
+    }
+
+    fn banked(grants: Vec<Value>) -> Value {
+        json!({"eligible": true, "at_limit": false, "grants": grants, "next_grant_id": null})
+    }
+
+    #[test]
+    fn only_a_grant_the_endpoint_would_accept_now_is_spent() {
+        assert_eq!(usable_grant(&banked(vec![grant("g")])), Some("g"));
+        assert_eq!(usable_grant(&json!({})), None);
+        let mut ineligible = banked(vec![grant("g")]);
+        ineligible["eligible"] = json!(false);
+        assert_eq!(usable_grant(&ineligible), None);
+        for (key, value) in [
+            ("resets_left", json!(0)),
+            ("paused", json!(true)),
+            ("usable_now", json!(false)),
+            ("use_requires_limit", json!(true)),
+        ] {
+            let mut g = grant("g");
+            g[key] = value;
+            assert_eq!(usable_grant(&banked(vec![g])), None, "{key}");
+        }
+        let mut at_limit = grant("g");
+        at_limit["use_requires_limit"] = json!(true);
+        let mut wall = banked(vec![at_limit]);
+        wall["at_limit"] = json!(true);
+        assert_eq!(usable_grant(&wall), Some("g"));
+    }
+
+    #[test]
+    fn the_grant_the_endpoint_names_next_goes_first_while_it_is_usable() {
+        let mut both = banked(vec![grant("a"), grant("b")]);
+        both["next_grant_id"] = json!("b");
+        assert_eq!(usable_grant(&both), Some("b"));
+        both["next_grant_id"] = json!("retired");
+        assert_eq!(usable_grant(&both), Some("a"));
+    }
+
+    #[test]
+    fn a_request_id_is_a_v4_uuid() {
+        let id = request_id().unwrap();
+        let parts: Vec<_> = id.split('-').map(str::len).collect();
+        assert_eq!(parts, [8, 4, 4, 4, 12], "{id}");
+        assert_eq!(&id[14..15], "4");
+        assert!("89ab".contains(&id[19..20]), "{id}");
+        assert_ne!(id, request_id().unwrap());
+    }
+
+    #[test]
+    fn an_expired_token_spends_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let claude = Claude::at(tmp.path(), Api::local("http://127.0.0.1:9"));
+        let mut identity = crate::ops::testing::identity("u-work");
+        identity.oauth_account.as_mut().unwrap()["organizationUuid"] = json!("o-work");
+        let creds = crate::ops::testing::oauth("a-work", "r-work", -1000);
+        let entry = Entry::new("claude", "work", creds, identity, 1);
+        let err = claude.redeem_reset(&entry).unwrap_err();
+        assert!(err.to_string().contains("expired"), "{err}");
+    }
+
     #[test]
     fn the_authorize_url_carries_pkce() {
         let pkce = start_login().unwrap();
