@@ -18,7 +18,7 @@ const AUTHORIZE_URL: &str = "https://claude.com/cai/oauth/authorize";
 const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
 const REDIRECT_URI: &str = "https://platform.claude.com/oauth/code/callback";
 const API_URL: &str = "https://api.anthropic.com";
-const CLI_USER_AGENT: &str = "claude-cli/2.1.282 (external, cli)";
+const CLI_USER_AGENT: &str = "claude-cli/2.1.304 (external, cli)";
 const LOGIN_SCOPES: &[&str] = &[
     "org:create_api_key",
     "user:profile",
@@ -196,7 +196,7 @@ fn oauth_account_from_profile(p: &Value) -> Result<Value> {
 }
 
 /// The banked reset to spend: the one the usage endpoint names next, else
-/// any it would accept now (the rule TokenGauge counts them by).
+/// any it would accept now.
 fn usable_grant(cedar_ember: &Value) -> Option<&str> {
     if cedar_ember.get("eligible").and_then(Value::as_bool) != Some(true) {
         return None;
@@ -209,7 +209,7 @@ fn usable_grant(cedar_ember: &Value) -> Option<&str> {
         .into_iter()
         .flatten()
         .filter(|g| {
-            g.get("resets_left").and_then(Value::as_f64).unwrap_or(0.0) > 0.0
+            g.get("resets_left").and_then(Value::as_f64).unwrap_or(0.0) >= 1.0
                 && !flag(g, "paused")
                 && flag(g, "usable_now")
                 && (at_limit || !flag(g, "use_requires_limit"))
@@ -268,7 +268,7 @@ fn redeem_reset(api: &Api, access_token: &str, organization: &str) -> Result<Str
         .header("User-Agent", CLI_USER_AGENT)
         .json(&json!({"program": "cedar_ember", "grant_id": grant, "request_id": request_id()?}))
         .send()
-        .context("reset request failed")?;
+        .context("reset request failed, and it may have gone through: check the card once TokenGauge updates before trying again")?;
     let status = resp.status();
     if !status.is_success() {
         let body = resp.text().unwrap_or_default();
@@ -550,7 +550,7 @@ impl Provider for Claude {
             .is_some_and(|at| at <= now_ms())
         {
             bail!(
-                "{}'s access token has expired; refresh it first",
+                "{}'s access token has expired: refresh it, or run claude if it is the login in use, then try again",
                 entry.qualified()
             );
         }
@@ -558,6 +558,7 @@ impl Provider for Claude {
             .access_token(&entry.creds)
             .context("stored credential has no access token")?;
         let organization = account_field(entry, "organizationUuid")
+            .filter(|o| !o.is_empty() && o.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
             .context("stored credential names no organization")?;
         let result = redeem_reset(&self.api, access, organization)?;
         Ok(format!("{}: banked reset {result}", entry.qualified()))
