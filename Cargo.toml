@@ -19,6 +19,7 @@ selvedge = { git = "https://github.com/Arzaroth/selvedge", tag = "v0.8.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
+toml_edit = { version = "0.25", default-features = false, features = ["parse", "display", "serde"] }
 
 [dev-dependencies]
 mockito = "1"

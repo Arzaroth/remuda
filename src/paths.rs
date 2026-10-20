@@ -87,6 +87,11 @@ fn config_home() -> PathBuf {
     var_dir("XDG_CONFIG_HOME").unwrap_or_else(|| home().join(".config"))
 }
 
+/// remuda's settings: `REMUDA_CONFIG`, else `$XDG_CONFIG_HOME/remuda/config.toml`.
+pub fn config_file() -> PathBuf {
+    var_dir("REMUDA_CONFIG").unwrap_or_else(|| config_home().join("remuda/config.toml"))
+}
+
 /// Where `install.sh` puts the units.
 pub fn installed_units() -> PathBuf {
     config_home().join("systemd/user")
