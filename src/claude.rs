@@ -18,6 +18,7 @@ const AUTHORIZE_URL: &str = "https://claude.com/cai/oauth/authorize";
 const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
 const REDIRECT_URI: &str = "https://platform.claude.com/oauth/code/callback";
 const API_URL: &str = "https://api.anthropic.com";
+const CLI_USER_AGENT: &str = "claude-cli/2.1.282 (external, cli)";
 const LOGIN_SCOPES: &[&str] = &[
     "org:create_api_key",
     "user:profile",
@@ -192,6 +193,96 @@ fn oauth_account_from_profile(p: &Value) -> Result<Value> {
     out.insert("seatTier".into(), s(org, "seat_tier"));
     out.insert("profileFetchedAt".into(), json!(now_ms()));
     Ok(Value::Object(out))
+}
+
+/// The banked reset to spend: the one the usage endpoint names next, else
+/// any it would accept now (the rule TokenGauge counts them by).
+fn usable_grant(cedar_ember: &Value) -> Option<&str> {
+    if cedar_ember.get("eligible").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    let at_limit = cedar_ember.get("at_limit").and_then(Value::as_bool) == Some(true);
+    let flag = |g: &Value, k: &str| g.get(k).and_then(Value::as_bool) == Some(true);
+    let usable: Vec<&str> = cedar_ember
+        .get("grants")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|g| {
+            g.get("resets_left").and_then(Value::as_f64).unwrap_or(0.0) > 0.0
+                && !flag(g, "paused")
+                && flag(g, "usable_now")
+                && (at_limit || !flag(g, "use_requires_limit"))
+        })
+        .filter_map(|g| g.get("id")?.as_str())
+        .collect();
+    let next = cedar_ember.get("next_grant_id").and_then(Value::as_str);
+    next.filter(|n| usable.contains(n))
+        .or_else(|| usable.first().copied())
+}
+
+fn request_id() -> Result<String> {
+    let mut b = [0u8; 16];
+    getrandom::fill(&mut b).map_err(|e| anyhow::anyhow!("no randomness: {e}"))?;
+    b[6] = b[6] & 0x0f | 0x40;
+    b[8] = b[8] & 0x3f | 0x80;
+    let hex: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    Ok(format!(
+        "{}-{}-{}-{}-{}",
+        &hex[..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..]
+    ))
+}
+
+/// Spends one of the login's banked usage-limit resets and returns what the
+/// endpoint says came of it.
+fn redeem_reset(api: &Api, access_token: &str, organization: &str) -> Result<String> {
+    let usage = api
+        .client
+        .get(format!("{}/api/oauth/usage?cedar_ember=1", api.api_url))
+        .bearer_auth(access_token)
+        .header("anthropic-beta", "oauth-2025-04-20")
+        .header("User-Agent", CLI_USER_AGENT)
+        .send()
+        .context("usage request failed")?;
+    let status = usage.status();
+    if !status.is_success() {
+        bail!("usage endpoint answered {status}");
+    }
+    let usage: Value = usage.json().context("malformed usage response")?;
+    let grant = usage
+        .get("cedar_ember")
+        .and_then(usable_grant)
+        .context("no banked reset can be used right now")?;
+    let resp = api
+        .client
+        .post(format!(
+            "{}/api/organizations/{organization}/reset_rate_limits",
+            api.api_url
+        ))
+        .bearer_auth(access_token)
+        .header("anthropic-beta", "oauth-2025-04-20")
+        .header("User-Agent", CLI_USER_AGENT)
+        .json(&json!({"program": "cedar_ember", "grant_id": grant, "request_id": request_id()?}))
+        .send()
+        .context("reset request failed")?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().unwrap_or_default();
+        bail!(
+            "reset endpoint answered {status}: {}",
+            body.chars().take(200).collect::<String>()
+        );
+    }
+    let answer: Value = resp.json().unwrap_or(Value::Null);
+    Ok(answer
+        .get("result")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_owned())
 }
 
 fn subscription_type(org_type: Option<&str>) -> Value {
@@ -451,6 +542,25 @@ impl Provider for Claude {
             .and_then(Value::as_object_mut)
             .context("stored credential has no login")?;
         refresh(&self.api, oauth)
+    }
+
+    fn redeem_reset(&self, entry: &Entry) -> Result<String> {
+        if self
+            .expires_at(&entry.creds)
+            .is_some_and(|at| at <= now_ms())
+        {
+            bail!(
+                "{}'s access token has expired; refresh it first",
+                entry.qualified()
+            );
+        }
+        let access = self
+            .access_token(&entry.creds)
+            .context("stored credential has no access token")?;
+        let organization = account_field(entry, "organizationUuid")
+            .context("stored credential names no organization")?;
+        let result = redeem_reset(&self.api, access, organization)?;
+        Ok(format!("{}: banked reset {result}", entry.qualified()))
     }
 
     fn begin_login(&self) -> Result<Box<dyn PendingLogin>> {
