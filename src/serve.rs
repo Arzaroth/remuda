@@ -86,6 +86,11 @@ impl Response {
     }
 }
 
+fn sent_config(body: &Value) -> Result<config::Config> {
+    serde_json::from_value(body.get("config").cloned().unwrap_or(json!({})))
+        .context("config is not a valid config")
+}
+
 fn capture(run: impl FnOnce(&mut dyn Write) -> Result<()>) -> Result<Value> {
     let mut out = Vec::new();
     run(&mut out)?;
@@ -286,10 +291,18 @@ impl App {
                 Ok(state)
             }
             ("GET", "/api/config") => self.config(),
+            ("POST", "/api/config/check") => {
+                let problems = match sent_config(&body) {
+                    Ok(config) => config.check(&|id| self.logins(id)),
+                    Err(e) => vec![config::Problem {
+                        at: "config".into(),
+                        message: format!("{e:#}"),
+                    }],
+                };
+                Ok(json!({ "problems": problems }))
+            }
             ("POST", "/api/config") => {
-                let config: config::Config =
-                    serde_json::from_value(body.get("config").cloned().unwrap_or(json!({})))
-                        .context("config is not a valid config")?;
+                let config = sent_config(&body)?;
                 let version = text("version").context("version is required")?;
                 let problems = config.check(&|id| self.logins(id));
                 if !problems.is_empty() {
