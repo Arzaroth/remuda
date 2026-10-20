@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-20
+
 ### Added
 
 - A Claude login's card shows its banked usage-limit resets and when they
