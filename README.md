@@ -171,7 +171,9 @@ remuda talks to the same OAuth endpoints and clients as Claude Code 2.1.282,
 codex-cli 0.153.4, xAI's grok-build and MoonshotAI's kimi-code. They are not a
 public API, and a release of any of them can change them. cursor-agent is
 closed source: its refresh endpoint and sign-in are the ones the open-source
-Cursor clients agree on, and the first to break.
+Cursor clients agree on, and the first to break. Claude's banked resets are
+listed only to a client sending Claude Code's own user agent, which remuda and
+TokenGauge do; Anthropic can stop that at any time.
 
 ## Development
 
