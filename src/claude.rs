@@ -221,22 +221,6 @@ fn usable_grant(cedar_ember: &Value) -> Option<&str> {
         .or_else(|| usable.first().copied())
 }
 
-fn request_id() -> Result<String> {
-    let mut b = [0u8; 16];
-    getrandom::fill(&mut b).map_err(|e| anyhow::anyhow!("no randomness: {e}"))?;
-    b[6] = b[6] & 0x0f | 0x40;
-    b[8] = b[8] & 0x3f | 0x80;
-    let hex: String = b.iter().map(|x| format!("{x:02x}")).collect();
-    Ok(format!(
-        "{}-{}-{}-{}-{}",
-        &hex[..8],
-        &hex[8..12],
-        &hex[12..16],
-        &hex[16..20],
-        &hex[20..]
-    ))
-}
-
 /// Spends one of the login's banked usage-limit resets and returns what the
 /// endpoint says came of it.
 fn redeem_reset(api: &Api, access_token: &str, organization: &str) -> Result<String> {
@@ -266,7 +250,7 @@ fn redeem_reset(api: &Api, access_token: &str, organization: &str) -> Result<Str
         .bearer_auth(access_token)
         .header("anthropic-beta", "oauth-2025-04-20")
         .header("User-Agent", CLI_USER_AGENT)
-        .json(&json!({"program": "cedar_ember", "grant_id": grant, "request_id": request_id()?}))
+        .json(&json!({"program": "cedar_ember", "grant_id": grant, "request_id": pkce::uuid()?}))
         .send()
         .context("reset request failed, and it may have gone through: check the card once TokenGauge updates before trying again")?;
     let status = resp.status();
@@ -752,16 +736,6 @@ mod tests {
         assert_eq!(usable_grant(&both), Some("b"));
         both["next_grant_id"] = json!("retired");
         assert_eq!(usable_grant(&both), Some("a"));
-    }
-
-    #[test]
-    fn a_request_id_is_a_v4_uuid() {
-        let id = request_id().unwrap();
-        let parts: Vec<_> = id.split('-').map(str::len).collect();
-        assert_eq!(parts, [8, 4, 4, 4, 12], "{id}");
-        assert_eq!(&id[14..15], "4");
-        assert!("89ab".contains(&id[19..20]), "{id}");
-        assert_ne!(id, request_id().unwrap());
     }
 
     #[test]
