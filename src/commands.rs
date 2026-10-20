@@ -1,4 +1,5 @@
 use std::io::Write;
+use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
@@ -536,18 +537,27 @@ fn plan_shown(p: &dyn Provider, e: &Entry) -> String {
 
 pub fn rename(
     store: &Store,
+    config: &Path,
     p: &dyn Provider,
     from: &str,
     to: &str,
     out: &mut dyn Write,
 ) -> Result<()> {
     store.rename(p.id(), from, to)?;
+    if let Err(e) = crate::config::rename_login(config, p.id(), from, to) {
+        eprintln!(
+            "warning: {} still names {}/{from}: {e:#}",
+            config.display(),
+            p.id()
+        );
+    }
     writeln!(out, "renamed {0}/{from} to {0}/{to}", p.id())?;
     Ok(())
 }
 
 pub fn remove(
     store: &Store,
+    config: &Path,
     p: &dyn Provider,
     state: &LiveState,
     name: &str,
@@ -566,6 +576,13 @@ pub fn remove(
         );
     }
     store.remove(p.id(), name)?;
+    if let Err(e) = crate::config::forget_login(config, p.id(), name) {
+        eprintln!(
+            "warning: {} still names {}/{name}: {e:#}",
+            config.display(),
+            p.id()
+        );
+    }
     writeln!(out, "removed {}/{name}", p.id())?;
     Ok(())
 }
@@ -1211,6 +1228,7 @@ mod tests {
         e.stored("work", "u-work", HOUR);
         let err = remove(
             &e.store,
+            &e.tmp.path().join("config.toml"),
             &e.claude,
             &active("work"),
             "work",
@@ -1220,7 +1238,15 @@ mod tests {
         assert!(err.to_string().contains("is active"), "{err}");
 
         let mut out = Vec::new();
-        remove(&e.store, &e.claude, &LiveState::SignedOut, "work", &mut out).unwrap();
+        remove(
+            &e.store,
+            &e.tmp.path().join("config.toml"),
+            &e.claude,
+            &LiveState::SignedOut,
+            "work",
+            &mut out,
+        )
+        .unwrap();
         assert_eq!(text(out), "removed claude/work\n");
         assert!(e.store.get("claude", "work").unwrap().is_none());
     }
@@ -1373,9 +1399,27 @@ mod tests {
         let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);
         let mut out = Vec::new();
-        rename(&e.store, &e.claude, "work", "job", &mut out).unwrap();
+        rename(
+            &e.store,
+            &e.tmp.path().join("config.toml"),
+            &e.claude,
+            "work",
+            "job",
+            &mut out,
+        )
+        .unwrap();
         assert_eq!(text(out), "renamed claude/work to claude/job\n");
-        assert!(rename(&e.store, &e.claude, "job", "../x", &mut Vec::new()).is_err());
+        assert!(
+            rename(
+                &e.store,
+                &e.tmp.path().join("config.toml"),
+                &e.claude,
+                "job",
+                "../x",
+                &mut Vec::new()
+            )
+            .is_err()
+        );
     }
 
     #[test]

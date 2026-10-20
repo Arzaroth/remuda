@@ -320,12 +320,12 @@ impl App {
             ("POST", "/api/rename") => {
                 let (p, name) = commands::resolve(store, &providers, spec()?)?;
                 let to = text("to").context("to is required")?;
-                capture(|out| commands::rename(store, p, &name, to, out))
+                capture(|out| commands::rename(store, &self.places.config, p, &name, to, out))
             }
             ("POST", "/api/remove") => {
                 let (p, name) = commands::resolve(store, &providers, spec()?)?;
                 let state = ops::sync_live(store, p)?;
-                capture(|out| commands::remove(store, p, &state, &name, out))
+                capture(|out| commands::remove(store, &self.places.config, p, &state, &name, out))
             }
             ("POST", "/api/reset") => {
                 let (p, name) = commands::resolve(store, &providers, spec()?)?;
