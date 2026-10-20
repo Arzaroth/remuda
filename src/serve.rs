@@ -8,6 +8,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use serde_json::{Value, json};
 
 use crate::commands::{self, RefreshScope};
+use crate::config;
 use crate::gauge;
 use crate::ops;
 use crate::paths;
@@ -33,6 +34,7 @@ struct Pending {
 pub struct Places {
     pub units: Vec<PathBuf>,
     pub snapshot: PathBuf,
+    pub config: PathBuf,
 }
 
 impl Places {
@@ -40,6 +42,7 @@ impl Places {
         Places {
             units: paths::systemd_user_units(),
             snapshot: paths::tokengauge_snapshot(),
+            config: paths::config_file(),
         }
     }
 }
@@ -167,6 +170,7 @@ impl App {
             }
         }
         files.push(self.places.snapshot.clone());
+        files.push(self.places.config.clone());
         let mut seen: Vec<_> = files.into_iter().filter_map(stamp).collect();
         seen.sort();
         seen
@@ -233,6 +237,23 @@ impl App {
         }
     }
 
+    fn logins(&self, provider: &str) -> Option<Vec<String>> {
+        let p = self.providers().into_iter().find(|p| p.id() == provider)?;
+        let entries = self.store.list(p.id()).ok()?;
+        Some(entries.into_iter().map(|e| e.name).collect())
+    }
+
+    fn config(&self) -> Result<Value> {
+        let loaded = config::load(&self.places.config)?;
+        let problems = loaded.config.check(&|id| self.logins(id));
+        Ok(json!({
+            "config": loaded.config,
+            "version": loaded.version,
+            "problems": problems,
+            "path": self.places.config,
+        }))
+    }
+
     fn api(&self, method: &str, path: &str, body: &str) -> Result<Value> {
         let body: Value = if body.trim().is_empty() {
             json!({})
@@ -263,6 +284,20 @@ impl App {
                 state["usage"] = gauge::read(&self.places.snapshot).unwrap_or(Value::Null);
                 state["shown"] = shown::shown(&state);
                 Ok(state)
+            }
+            ("GET", "/api/config") => self.config(),
+            ("POST", "/api/config") => {
+                let config: config::Config =
+                    serde_json::from_value(body.get("config").cloned().unwrap_or(json!({})))
+                        .context("config is not a valid config")?;
+                let version = text("version").context("version is required")?;
+                let problems = config.check(&|id| self.logins(id));
+                if !problems.is_empty() {
+                    let list: Vec<String> = problems.iter().map(ToString::to_string).collect();
+                    bail!("the config was not saved: {}", list.join("; "));
+                }
+                config::save(&self.places.config, &config, version)?;
+                self.config()
             }
             ("POST", "/api/use") => {
                 let (p, name) = commands::resolve(store, &providers, spec()?)?;
@@ -419,6 +454,7 @@ mod tests {
         Places {
             units: vec![e.tmp.path().join("units"), e.tmp.path().join("global")],
             snapshot: e.tmp.path().join("tokengauge-usage.json"),
+            config: e.tmp.path().join("config.toml"),
         }
     }
 

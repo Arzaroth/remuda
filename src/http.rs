@@ -347,6 +347,7 @@ mod tests {
             crate::serve::Places {
                 units: vec![e.tmp.path().join("units")],
                 snapshot: e.tmp.path().join("tokengauge-usage.json"),
+                config: e.tmp.path().join("config.toml"),
             },
             providers,
             TOKEN.into(),

@@ -3,6 +3,7 @@ mod browser;
 mod claude;
 mod codex;
 mod commands;
+mod config;
 mod cursor;
 mod device;
 mod dirs;
