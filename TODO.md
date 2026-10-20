@@ -17,7 +17,7 @@ done.
       base URL, and how each copes with a credential that has no refresh token.
 - [ ] Hub and satellites: pairing and per-satellite tokens, TLS on a plain LAN.
 - [ ] Banked resets: check Codex's credit fields against a real answer, and
-      agree with TokenGauge on adding grants and credits to its snapshot.
+      agree with TokenGauge on adding the credits to its snapshot.
 - [ ] More providers: whether `cursor-agent` honours a config-dir override,
       which `remuda run` needs.
 - [ ] More providers: check Grok, Kimi and Cursor sign-in, refresh and
