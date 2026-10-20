@@ -77,8 +77,8 @@ Responses carry `Cache-Control: no-store`, `nosniff` and `no-referrer`.
 only a holder of the token gets one), it takes one of 8 stream slots, inside
 the 32 connections, or gets a 503. It sends the head and `: connected`, then
 every 2 s compares `App::fingerprint`, the path, modification time and size
-of the store's `*.json` files, one directory level down, and of TokenGauge's
-snapshot, links followed, and sends `data: changed` when it moved. Other files
+of the store's `*.json` files, one directory level down, of TokenGauge's
+snapshot and of `config.toml`, links followed, and sends `data: changed` when it moved. Other files
 in the store are left out: the temp files writes go through, and the redirect
 pages kept there when `$XDG_RUNTIME_DIR` is unset. `App::streams` names the
 route; the listener serves it itself, since it outlives one `Response`. After 15 s with nothing
@@ -101,6 +101,8 @@ access to anything, and it ends when they stop.
 | --- | --- |
 | `GET /api/state` | Same JSON as `ls --json`, plus `providers`, `health` and `usage` |
 | `GET /api/events` | A server-sent event stream: `data: changed` when the page should reload the state |
+| `GET /api/config` | `{config, version, problems, path}`: the config as JSON, the version to save against, what auto mode cannot act on |
+| `POST /api/config` `{config, version}` | Save it ([config.md](config.md)), refused with any problem or when the file changed since `version` |
 | `POST /api/use` `{name, discard?}` | Switch, then nudge TokenGauge |
 | `POST /api/import` `{provider?, name, force?}` | Store the live login |
 | `POST /api/label` `{name, text?}` / `rename` `{name, to}` / `remove` `{name}` | As the commands |

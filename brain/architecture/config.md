@@ -1,0 +1,65 @@
+# The config file
+
+## Location
+
+`$REMUDA_CONFIG`, else `$XDG_CONFIG_HOME/remuda/config.toml`, else
+`~/.config/remuda/config.toml` ([paths.rs](../../src/paths.rs) `config_file`).
+A missing file is an empty config.
+
+## What it holds
+
+Auto mode's settings (the design is in [ROADMAP.md](../../ROADMAP.md)): named
+schedules, shared by every provider, and one `[auto.<provider>]` section per
+provider.
+
+```toml
+[schedules.workday]
+days  = ["mon", "tue", "wed", "thu", "fri"]   # none: every day
+hours = "09:00-18:00"                         # local; none: all day; may wrap midnight
+
+[auto.claude]
+enabled = true      # default false
+dwell   = "30m"     # default; h, m, s
+margin  = 0.25      # default
+logins  = ["work", "perso"]   # the one tier used when no rule is in force
+
+[[auto.claude.rule]]
+when    = "workday"           # a schedule, or "otherwise"
+order   = [["work"], ["perso"]]
+reserve = { work = "workday" }
+```
+
+Unknown keys are refused. A key at its default is left out when remuda writes
+the file.
+
+## Checks
+
+`Config::check` lists what auto mode cannot act on, each with where it is
+(`auto.claude.rule[2].when`): a provider remuda does not have, a login not
+stored, a schedule that does not exist, `otherwise` used as a schedule name, a
+day named twice, a login twice in one rule, an empty tier, a reservation for a
+login outside its rule's order, a rule after an `otherwise` one (never in
+force), a negative margin. The page cannot save a config with any of them; a
+file edited by hand is still read, and the page shows them.
+
+## Writes
+
+A write parses the file as it is (`toml_edit`) and changes only the values
+that differ from the new config, so comments and layout around the rest stay,
+and a write that changes nothing leaves the bytes alone. `save` takes the
+version the caller read, the SHA-256 of the file's bytes, and refuses with
+`Stale` if the file has changed since. A `config.toml.lock` beside the file
+serialises writers.
+
+`remuda rename` and `remuda rm` (and the page's) keep the names in step: a
+renamed login keeps its place in every tier and reservation, and a removed one
+leaves them, taking a tier it empties with it. They write nothing when there is
+no file, and a config that cannot be updated leaves the store change standing,
+with a warning.
+
+## Sources
+
+- [src/config.rs](../../src/config.rs)
+- [src/paths.rs](../../src/paths.rs) `config_file`
+- [src/commands.rs](../../src/commands.rs) `rename`, `remove`
+- [src/serve.rs](../../src/serve.rs) `config`, `/api/config`

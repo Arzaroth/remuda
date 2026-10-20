@@ -27,6 +27,7 @@ shared.
 | How does a new account get in? | [features/sign-in.md](features/sign-in.md) |
 | Why would a stored login stop working? | [features/refresh.md](features/refresh.md), [decisions.md](decisions.md) |
 | Where are credentials kept, and in what shape? | [architecture/store.md](architecture/store.md) |
+| Where are remuda's settings, and how does the page edit them? | [architecture/config.md](architecture/config.md) |
 | What does TokenGauge rely on? | [architecture/store.md](architecture/store.md) |
 | How is Claude Code different from Codex? | [architecture/providers.md](architecture/providers.md) |
 | How do I add a third CLI? | [architecture/providers.md](architecture/providers.md) |
