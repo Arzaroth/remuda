@@ -195,6 +195,34 @@ impl Default for Auto {
     }
 }
 
+impl Auto {
+    fn forget(&mut self, name: &str) {
+        self.logins.retain(|n| n != name);
+        for rule in &mut self.rules {
+            for tier in &mut rule.order {
+                tier.retain(|n| n != name);
+            }
+            rule.order.retain(|t| !t.is_empty());
+            rule.reserve.remove(name);
+        }
+    }
+
+    fn rename(&mut self, from: &str, to: &str) {
+        let swap = |n: &mut String| {
+            if n == from {
+                *n = to.to_owned();
+            }
+        };
+        self.logins.iter_mut().for_each(swap);
+        for rule in &mut self.rules {
+            rule.order.iter_mut().flatten().for_each(swap);
+            if let Some(schedule) = rule.reserve.remove(from) {
+                rule.reserve.insert(to.to_owned(), schedule);
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Rule {
@@ -458,6 +486,41 @@ fn write(path: &Path, text: &str, config: &Config) -> Result<String> {
         fsx::write_private(path, &body)?;
     }
     Ok(version(&body))
+}
+
+/// Applies `edit` to the config as it is now; writes nothing when there is
+/// no file or `edit` changes nothing.
+fn update(path: &Path, edit: impl FnOnce(&mut Config)) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let _lock = lock(path)?;
+    let Some(text) = read(path)? else {
+        return Ok(());
+    };
+    let mut config = parse(path, &text)?;
+    let before = config.clone();
+    edit(&mut config);
+    if config != before {
+        write(path, &text, &config)?;
+    }
+    Ok(())
+}
+
+pub fn forget_login(path: &Path, provider: &str, name: &str) -> Result<()> {
+    update(path, |c| {
+        if let Some(auto) = c.auto.get_mut(provider) {
+            auto.forget(name);
+        }
+    })
+}
+
+pub fn rename_login(path: &Path, provider: &str, from: &str, to: &str) -> Result<()> {
+    update(path, |c| {
+        if let Some(auto) = c.auto.get_mut(provider) {
+            auto.rename(from, to);
+        }
+    })
 }
 
 fn bare(v: &Value) -> String {

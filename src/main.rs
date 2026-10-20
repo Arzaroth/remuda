@@ -457,7 +457,7 @@ fn main() -> Result<()> {
         Cmd::Remove { name } => {
             let (p, name) = commands::resolve(&store, &providers, &name)?;
             let state = ops::sync_live(&store, p)?;
-            commands::remove(&store, p, &state, &name, out)
+            commands::remove(&store, &paths::config_file(), p, &state, &name, out)
         }
         Cmd::Env { name } => {
             let (p, name) = commands::resolve(&store, &providers, &name)?;
@@ -469,7 +469,7 @@ fn main() -> Result<()> {
         }
         Cmd::Rename { name, new_name } => {
             let (p, name) = commands::resolve(&store, &providers, &name)?;
-            commands::rename(&store, p, &name, &new_name, out)
+            commands::rename(&store, &paths::config_file(), p, &name, &new_name, out)
         }
         Cmd::Login { .. }
         | Cmd::Serve { .. }
