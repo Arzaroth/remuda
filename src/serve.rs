@@ -292,6 +292,16 @@ impl App {
                 let state = ops::sync_live(store, p)?;
                 capture(|out| commands::remove(store, p, &state, &name, out))
             }
+            ("POST", "/api/reset") => {
+                let (p, name) = commands::resolve(store, &providers, spec()?)?;
+                ops::sync_live(store, p)?;
+                let entry = store
+                    .get(p.id(), &name)?
+                    .with_context(|| format!("no credential named {}/{name}", p.id()))?;
+                let message = p.redeem_reset(&entry)?;
+                gauge::nudge(&self.places.snapshot);
+                Ok(json!({ "message": message }))
+            }
             ("POST", "/api/refresh") => {
                 let only = text("name")
                     .map(|s| commands::resolve(store, &providers, s))
