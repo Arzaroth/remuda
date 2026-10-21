@@ -68,7 +68,7 @@ export function Proxy() {
           <h2>API proxy</h2>
           <p>
             One local endpoint for any OpenAI or Anthropic client. The model name picks the CLI whose active login answers,
-            and the path tells the format.
+            and any format reaches any CLI: remuda translates where the CLI speaks another.
           </p>
         </div>
         <button
@@ -183,7 +183,7 @@ export function Proxy() {
               <li>
                 <span class="dot" style={{ background: brand(r.provider) }} />
                 <code>{r.models.join(', ')}</code>
-                <span class="muted">{r.formats.join(' · ')}</span>
+                <span class="muted">speaks {r.formats.join(' · ')}</span>
               </li>
             )}
           </For>
