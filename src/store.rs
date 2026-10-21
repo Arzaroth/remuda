@@ -65,7 +65,7 @@ impl Entry {
     }
 }
 
-fn digest(text: &str) -> String {
+pub(crate) fn digest(text: &str) -> String {
     use sha2::{Digest, Sha256};
     Sha256::digest(text.as_bytes())
         .iter()
