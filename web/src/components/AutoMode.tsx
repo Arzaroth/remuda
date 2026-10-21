@@ -373,9 +373,9 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
           </For>
         </div>
       </div>
-      <Show when={loginsOf(props.p.id).length}>
+      <Show when={props.p.warm && loginsOf(props.p.id).length}>
         <div class="pickable">
-          <span class="aside">Keep the 5-hour window open: reopened with a one-token ping as soon as it closes, even with auto mode off</span>
+          <span class="aside">Keep the 5-hour window open: reopened with the smallest request as soon as it closes, even with auto mode off</span>
           <div class="chips">
             <For each={loginsOf(props.p.id)}>
               {(name) => (
@@ -620,7 +620,7 @@ export function AutoMode(props: { providers: Provider[] }) {
   const elsewhere = createMemo(() => {
     const shown = new Set(props.providers.map((p) => p.id));
     return problems().filter((p) => {
-      const m = p.at.match(/^auto\.([^.[]+)/);
+      const m = p.at.match(/^(?:auto|warm)\.([^.[]+)/);
       return m && !shown.has(m[1]);
     });
   });
