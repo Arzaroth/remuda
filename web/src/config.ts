@@ -32,7 +32,7 @@ export const DAYS: [Day, string][] = [
   ['sun', 'Sun'],
 ];
 
-const OPTIONAL_TABLES = new Set(['reserve', 'schedules', 'auto']);
+const OPTIONAL_TABLES = new Set(['reserve', 'schedules', 'auto', 'ceilings']);
 const unset = (k: string, v: unknown): boolean =>
   v === undefined ||
   v === false ||
