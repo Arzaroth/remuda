@@ -7,6 +7,7 @@ import {
   headline,
   hours,
   minutes,
+  percent,
   problemsAt,
   renameSchedule,
   scheduleName,
@@ -151,5 +152,16 @@ describe('headline', () => {
   it('says what it would do when off', () => {
     expect(headline(status('switch', { enabled: false }), 'perso').text).toBe('Off; it would switch to work');
     expect(headline(status('stay', { enabled: false }), 'perso').text).toBe('Off');
+  });
+});
+
+describe('percent', () => {
+  it('reads a ceiling typed into a field', () => {
+    expect(percent('93')).toBe(93);
+    expect(percent('92.6')).toBe(93);
+    expect(percent('0')).toBe(1);
+    expect(percent('250')).toBe(100);
+    expect(percent('')).toBeNull();
+    expect(percent('abc')).toBeNull();
   });
 });
