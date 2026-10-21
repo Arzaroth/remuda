@@ -1,8 +1,11 @@
 mod forward;
 mod listen;
+mod ping;
 pub mod route;
 pub mod settings;
 mod translate;
+
+pub use ping::ping;
 
 use std::sync::{Mutex, Weak};
 
