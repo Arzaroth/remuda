@@ -5,9 +5,10 @@
 ### Added
 
 - Auto mode ceilings: a window can count as full before 100% (`ceiling`), and
-  a login's 5-hour window sooner still (`ceilings`), so auto mode moves a CLI
-  on before it hits the wall. `fallback` names the login to go to when every
-  other is full. All three are on the page.
+  a login can have its own ceiling for its 5-hour window (`ceilings`), so auto
+  mode moves a CLI on before it hits the wall. `fallback` names the login to go
+  to when every login, the active one included, is full. All three are on the
+  page.
 
 ## [0.16.0] - 2026-10-21
 
