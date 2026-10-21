@@ -269,6 +269,18 @@ fn guards_live(discard: bool, live: &LiveState) -> bool {
 
 /// Returns what to tell the user.
 pub fn switch(store: &Store, p: &dyn Provider, name: &str, discard: bool) -> Result<String> {
+    switch_when(store, p, name, discard, &|| Ok(()))
+}
+
+/// [`switch`], asking `ready` once the live login is locked, right before the
+/// write: auto mode refuses there when a session has started meanwhile.
+pub fn switch_when(
+    store: &Store,
+    p: &dyn Provider,
+    name: &str,
+    discard: bool,
+    ready: &dyn Fn() -> Result<()>,
+) -> Result<String> {
     let mut target = store
         .get(p.id(), name)?
         .with_context(|| format!("no credential named {}/{name}", p.id()))?;
@@ -317,6 +329,7 @@ pub fn switch(store: &Store, p: &dyn Provider, name: &str, discard: bool) -> Res
         store.save(&target)?;
     }
     let _live = p.lock_live()?;
+    ready()?;
     let mut attempts = 0;
     loop {
         // The CLI may rotate its own login at any moment, so the login being

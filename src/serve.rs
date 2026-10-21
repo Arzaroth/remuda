@@ -63,6 +63,12 @@ pub struct App {
 /// Opens a sign-in page in a private window; false leaves it to the page.
 pub type Opener = Box<dyn Fn(&str) -> bool + Send + Sync>;
 
+/// What a round decided, without its reasons, whose figures move every round.
+fn gist(seen: &Value) -> (&Value, &Value) {
+    let action = &seen["decision"]["action"];
+    (&action["kind"], &action["to"])
+}
+
 /// Runs auto mode beside the page: when the store, TokenGauge's snapshot or
 /// the config changes, and every minute so a schedule takes effect on time.
 pub fn watch(app: std::sync::Arc<App>) {
@@ -173,20 +179,26 @@ impl App {
                 switched_at: switches.get(id).copied(),
                 now,
             };
+            if !settings.enabled {
+                after.insert(id.clone(), json!({"enabled": false}));
+                continue;
+            }
             let decision = match ops::sync_live(&self.store, p) {
-                Ok(live) => auto::assess(settings, id, &live, &cx, auto::sessions_open(id)),
+                Ok(live) => auto::assess(settings, p, &live, &cx),
                 Err(e) => auto::Decision::hold(format!("{e:#}")),
             };
             let at = now.timestamp().as_millisecond();
-            let mut seen = json!({"enabled": settings.enabled, "at": at, "decision": decision});
+            let mut seen = json!({"enabled": true, "at": at, "decision": decision});
             let last = before.get(id.as_str());
             if let Some(prev) = last.and_then(|l| l.get("switched")) {
                 seen["switched"] = prev.clone();
             }
-            if settings.enabled
-                && let auto::Action::Switch { to, why } = &decision.action
-            {
-                match ops::switch(&self.store, p, to, false) {
+            let ready = || match auto::sessions_open(p) {
+                Some(busy) => bail!("{busy}"),
+                None => Ok(()),
+            };
+            if let auto::Action::Switch { to, why } = &decision.action {
+                match ops::switch_when(&self.store, p, to, false, &ready) {
                     Ok(message) => {
                         eprintln!("auto mode: {message}: {why}");
                         seen["switched"] = json!({"at": at, "to": to, "why": why});
@@ -199,9 +211,7 @@ impl App {
                         }
                     }
                 }
-            } else if settings.enabled
-                && last.map(|l| &l["decision"]["action"]) != Some(&seen["decision"]["action"])
-            {
+            } else if last.map(gist) != Some(gist(&seen)) {
                 let action = &seen["decision"]["action"];
                 eprintln!(
                     "auto mode: {} {}: {}",
@@ -956,7 +966,7 @@ mod tests {
     fn auto_mode_moves_a_cli_off_a_maxed_login_then_waits_for_new_figures() {
         let e = env(&OFFLINE);
         let app = on_perso(&e, true);
-        snapshot(&e, crate::fsx::now_ms(), 100, 10);
+        snapshot(&e, crate::fsx::now_ms() - 1000, 100, 10);
 
         app.auto_round(&Zoned::now());
 
@@ -964,7 +974,7 @@ mod tests {
         let (_, state) = call(&app, "GET", "/api/state", Value::Null);
         let claude = &state["auto"]["claude"];
         assert_eq!(claude["switched"]["to"], "work");
-        assert_eq!(claude["switched"]["why"], "perso's 5-hour window maxed");
+        assert_eq!(claude["switched"]["why"], "perso's 5 hours limit maxed");
 
         app.auto_round(&Zoned::now());
 
@@ -979,7 +989,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_mode_off_says_what_it_would_do_and_switches_nothing() {
+    fn auto_mode_off_leaves_the_cli_alone() {
         let e = env(&OFFLINE);
         let app = on_perso(&e, false);
         snapshot(&e, crate::fsx::now_ms(), 100, 10);
@@ -988,10 +998,7 @@ mod tests {
 
         assert_eq!(e.live_refresh_token().as_deref(), Some("r-perso"));
         let (_, state) = call(&app, "GET", "/api/state", Value::Null);
-        let claude = &state["auto"]["claude"];
-        assert_eq!(claude["enabled"], false);
-        assert_eq!(claude["decision"]["action"]["to"], "work");
-        assert!(claude.get("switched").is_none());
+        assert_eq!(state["auto"]["claude"], json!({"enabled": false}));
     }
 
     #[test]

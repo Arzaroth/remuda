@@ -82,6 +82,11 @@ pub trait Provider: Send + Sync {
     fn lock_live(&self) -> Result<Option<std::fs::File>> {
         Ok(None)
     }
+    /// The processes whose running sessions a switch made unattended must
+    /// wait out, because they keep the old login and would write it back.
+    fn sessions(&self) -> &'static [&'static str] {
+        &[]
+    }
     /// Returns the account id the token endpoint answered for, when it says.
     fn refresh(&self, creds: &mut Value) -> Result<Option<String>>;
     /// Spends one of the login's banked usage-limit resets.
