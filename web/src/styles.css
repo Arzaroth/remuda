@@ -271,7 +271,6 @@ h3 { font-size: 14px; font-weight: 700; margin: 0; }
 .proxy { margin-top: 24px; padding: 18px 20px 20px; border: 1px solid var(--rule); border-radius: 14px; background: var(--card); }
 .proxy-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
 .proxy-head p { margin: 4px 0 0; color: var(--muted); max-width: 640px; }
-.proxy .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; white-space: nowrap; }
 .proxy-status { margin: 10px 0 4px; font-size: 13px; color: var(--muted); }
 .proxy-status.good { color: var(--good); }
 .proxy-status.bad { color: var(--bad); }
