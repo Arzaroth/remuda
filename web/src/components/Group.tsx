@@ -5,28 +5,58 @@ import { act, now, store } from '../state';
 import type { Credential, Live, Provider, Window } from '../types';
 import { carriedSince, dropping, dropsLive, overwrite, planFor, shownFor, taken } from '../usage';
 import { warmLine } from '../warm';
-import { Brand } from './Brand';
+import { remember, remembered } from '../storage';
 import { Icon } from './Icon';
 import { Meter } from './Meter';
 
-export function Group(props: { p: Provider; titled: boolean }) {
+type Order = 'store' | 'headroom' | 'name';
+const [order, setOrder] = createSignal<Order>((remembered('remuda-order') as Order) || 'store');
+
+const headroom = (c: Credential) => {
+  const w = shownFor(store.s!, c)?.windows ?? [];
+  return w.length ? Math.min(...w.map((x) => 100 - x.usedPercent)) : -1;
+};
+
+export function Logins(props: { p: Provider }) {
   const s = () => store.s!;
-  const creds = () => s().credentials.filter((c) => c.provider === props.p.id);
+  const creds = () => {
+    const all = s().credentials.filter((c) => c.provider === props.p.id);
+    if (order() === 'name') return [...all].sort((a, b) => a.name.localeCompare(b.name));
+    if (order() === 'headroom') return [...all].sort((a, b) => headroom(b) - headroom(a));
+    return all;
+  };
   const live = () => s().live.find((l) => l.provider === props.p.id);
+  const pick = (o: Order) => {
+    setOrder(o);
+    remember('remuda-order', o);
+  };
   return (
-    <section class="group">
-      <Show when={props.titled}>
-        <div class="group-head">
-          <Brand provider={props.p.id} name={props.p.name} size={26} />
-          <h2>{props.p.name}</h2>
-          <span class="group-count">{creds().length}</span>
+    <section class="logins">
+      <Show when={live()}>{(l) => <LiveNote p={props.p} live={l()} />}</Show>
+      <Show when={creds().length > 1}>
+        <div class="list-tools">
+          <span class="aside">Order</span>
+          <div class="seg" role="group" aria-label="Order logins">
+            <button aria-pressed={order() === 'store'} onClick={() => pick('store')}>
+              As stored
+            </button>
+            <button aria-pressed={order() === 'headroom'} onClick={() => pick('headroom')}>
+              Most headroom
+            </button>
+            <button aria-pressed={order() === 'name'} onClick={() => pick('name')}>
+              Name
+            </button>
+          </div>
         </div>
       </Show>
-      <Show when={live()}>{(l) => <LiveNote p={props.p} live={l()} />}</Show>
-      <div class="cards">
+      <div class="list">
         <For
           each={creds()}
-          fallback={<div class="empty">No stored {props.p.name} logins. Import the one in use or add an account below.</div>}
+          fallback={
+            <div class="empty">
+              No stored {props.p.name} logins yet. Import the one in use above, or add one with Add a login.
+            </div>
+          }
         >
           {(c) => <Row c={c} live={live()} />}
         </For>
@@ -109,6 +139,24 @@ function Windows(props: { c: Credential }) {
         </Match>
       </Switch>
     </Show>
+  );
+}
+
+function Compact(props: { c: Credential }) {
+  const u = () => shownFor(store.s!, props.c);
+  const shown = () => (u() && !u()!.error && !u()!.missing && !u()!.passive ? u()!.windows : []);
+  return (
+    <div class="compact">
+      <For each={shown()} fallback={<span class="aside">no figures</span>}>
+        {(w) => (
+          <div class="cw" title={`${w.title}: ${w.usedPercent}%${w.resetsAt ? `, resets ${until(Date.parse(w.resetsAt), now())}` : ''}`}>
+            <span class="cw-title">{w.title}</span>
+            <b classList={{ late: w.usedPercent >= 100 }}>{w.usedPercent}%</b>
+            <Meter fraction={w.usedPercent / 100} tone={usedTone(w.usedPercent)} />
+          </div>
+        )}
+      </For>
+    </div>
   );
 }
 
@@ -273,7 +321,7 @@ function Row(props: { c: Credential; live: Live | undefined }) {
   );
   const iconButton = (kind: 'label' | 'rename', title: string, disabled: boolean) => (
     <button
-      class="btn icon"
+      class="btn"
       data-armed={confirms[kind].text() ? '1' : undefined}
       aria-label={`${title} ${c().name}`}
       aria-pressed={editing()?.kind === kind ? 'true' : undefined}
@@ -281,84 +329,123 @@ function Row(props: { c: Credential; live: Live | undefined }) {
       disabled={disabled}
       onClick={() => toggle(kind)}
     >
-      {confirms[kind].text() ?? <Icon name={kind} />}
+      {confirms[kind].text() ?? (
+        <>
+          <Icon name={kind} /> {title}
+        </>
+      )}
     </button>
   );
 
+  const [expanded, setExpanded] = createSignal(false);
+  const warm = () => store.s!.warm?.[spec()];
+  const tokenLeft = () => (c().expiresAt == null ? null : c().expiresAt! - now());
+
   return (
-    <article class="card" classList={{ active: c().active }}>
-      <header class="who">
-        <div class="name-line">
-          <Show when={editing()?.kind === 'rename'} fallback={<span class="spec">{c().name}</span>}>
-            {editor('rename')}
-          </Show>
-          <Show when={editing()?.kind === 'label'} fallback={<span class="label">{c().label || ''}</span>}>
-            {editor('label')}
-          </Show>
+    <article class="login" classList={{ active: c().active, open: expanded() }}>
+      <div class="login-main">
+        <span class="state" classList={{ on: c().active }} aria-hidden="true" />
+        <div class="who">
+          <div class="name-line">
+            <Show when={editing()?.kind === 'rename'} fallback={<span class="spec">{c().name}</span>}>
+              {editor('rename')}
+            </Show>
+            <Show when={editing()?.kind === 'label'} fallback={<span class="label">{c().label || ''}</span>}>
+              {editor('label')}
+            </Show>
+          </div>
+          <div class="mail">{c().email}</div>
         </div>
-        <div class="mail">{c().email}</div>
         <div class="pills">
-          <Show when={planFor(store.s!, c())}>
-            {(plan) => <span class="pill">{plan()}</span>}
-          </Show>
-          <Show when={c().active}>
-            <span class="pill on">In use</span>
-          </Show>
+          <Show when={planFor(store.s!, c())}>{(plan) => <span class="pill">{plan()}</span>}</Show>
           <Show when={unverified()}>
-            <span
-              class="pill odd"
-              title="Its sidecar was written for other tokens; remuda identifies it again on its next run"
-            >
+            <span class="pill odd" title="Its sidecar was written for other tokens; remuda identifies it again on its next run">
               Unverified
             </span>
           </Show>
+          <Show when={warm()}>
+            {(w) => (
+              <span class={`pill warm-pill ${w().state === 'failed' ? 'bad' : ''}`} title={warmLine(w(), now()).text}>
+                Kept warm
+              </span>
+            )}
+          </Show>
         </div>
-      </header>
-      <div class="usage">
-        <Windows c={c()} />
-        <Banked c={c()} />
+        <Compact c={c()} />
+        <div class="token-left" title="Access token">
+          <Show when={tokenLeft() != null} fallback={<span class="aside">&nbsp;</span>}>
+            <span class="aside">token</span>
+            <b classList={{ late: tokenLeft()! < 0, soon: tokenLeft()! >= 0 && tokenLeft()! < HOUR }}>
+              {tokenLeft()! < 0 ? 'expired' : span(tokenLeft()!)}
+            </b>
+          </Show>
+        </div>
+        <div class="use">
+          <Show
+            when={!c().active}
+            fallback={<span class="in-use">In use</span>}
+          >
+            <button class="btn go" data-armed={confirms.use.text() ? '1' : undefined} disabled={unverified()} onClick={use}>
+              {confirms.use.text() ?? 'Use'}
+            </button>
+          </Show>
+        </div>
+        <button
+          class="more"
+          aria-expanded={expanded()}
+          aria-label={`${expanded() ? 'Hide' : 'Show'} details for ${c().name}`}
+          onClick={() => setExpanded(!expanded())}
+        >
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+            <path d="M4 6l4 4 4-4" />
+          </svg>
+        </button>
       </div>
-      <div class="tokens">
-        <Lifetime title="Access token" at={c().expiresAt} horizon={8 * HOUR} warnBelow={HOUR} />
-        <Lifetime title="Sign-in lasts" at={c().refreshTokenExpiresAt} horizon={30 * DAY} warnBelow={3 * DAY} />
-      </div>
-      <Show when={store.s!.warm?.[`${c().provider}/${c().name}`]}>
-        {(w) => {
-          const line = () => warmLine(w(), now());
-          return <div class={`aside warm ${line().tone}`}>{line().text}</div>;
-        }}
+      <Show when={expanded()}>
+        <div class="login-detail">
+          <div class="detail-usage">
+            <Windows c={c()} />
+            <Banked c={c()} />
+          </div>
+          <div class="detail-side">
+            <div class="tokens">
+              <Lifetime title="Access token" at={c().expiresAt} horizon={8 * HOUR} warnBelow={HOUR} />
+              <Lifetime title="Sign-in lasts" at={c().refreshTokenExpiresAt} horizon={30 * DAY} warnBelow={3 * DAY} />
+            </div>
+            <Show when={warm()}>
+              {(w) => {
+                const line = () => warmLine(w(), now());
+                return <div class={`aside warm ${line().tone}`}>{line().text}</div>;
+              }}
+            </Show>
+            <div class="actions">
+              <button
+                class="btn"
+                disabled={c().active || unverified()}
+                title={c().active ? 'The CLI refreshes the login in use itself' : unverified() ? undefined : 'Refresh its tokens now'}
+                onClick={() => act('/api/refresh', { name: spec(), force: true })}
+              >
+                <Icon name="refresh" /> Refresh
+              </button>
+              {iconButton('label', 'Label', unverified())}
+              {iconButton('rename', 'Rename', false)}
+              <button
+                class="btn danger"
+                data-armed={confirms.remove.text() ? '1' : undefined}
+                disabled={c().active}
+                title={c().active ? 'Switch to another login first' : 'Remove'}
+                onClick={remove}
+              >
+                {confirms.remove.text() ?? (
+                  <>
+                    <Icon name="remove" /> Remove
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       </Show>
-      <footer class="actions">
-        <button
-          class="btn go"
-          data-armed={confirms.use.text() ? '1' : undefined}
-          disabled={c().active || unverified()}
-          onClick={use}
-        >
-          {confirms.use.text() ?? 'Use'}
-        </button>
-        <button
-          class="btn icon"
-          aria-label={`Refresh ${c().name}`}
-          disabled={c().active || unverified()}
-          title={c().active ? 'The CLI refreshes the login in use itself' : unverified() ? undefined : 'Refresh its tokens now'}
-          onClick={() => act('/api/refresh', { name: spec(), force: true })}
-        >
-          <Icon name="refresh" />
-        </button>
-        {iconButton('label', 'Label', unverified())}
-        {iconButton('rename', 'Rename', false)}
-        <button
-          class="btn icon danger"
-          data-armed={confirms.remove.text() ? '1' : undefined}
-          aria-label={`Remove ${c().name}`}
-          disabled={c().active}
-          title={c().active ? 'Switch to another login first' : 'Remove'}
-          onClick={remove}
-        >
-          {confirms.remove.text() ?? <Icon name="remove" />}
-        </button>
-      </footer>
     </article>
   );
 }
@@ -380,7 +467,7 @@ function LiveNote(props: { p: Provider; live: Live }) {
   return (
     <Switch>
       <Match when={l().state === 'signed_out'}>
-        <div class="note">{props.p.name} is signed out. Pick a login above to use it.</div>
+        <div class="note">{props.p.name} is signed out. Pick a login below to use it.</div>
       </Match>
       <Match when={l().state === 'unreadable'}>
         <div class="note">

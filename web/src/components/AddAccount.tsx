@@ -3,6 +3,7 @@ import { api } from '../api';
 import { createConfirm } from '../confirm';
 import { load, store, toast } from '../state';
 import { overwrite, taken } from '../usage';
+import { ProviderIcon } from './ProviderIcon';
 
 type Login = { id: string; url: string; needsCode: boolean; asksFor: string; opened: boolean; name: string };
 
@@ -68,12 +69,24 @@ export function AddAccount(props: { provider?: string }) {
 
   return (
     <section class="add">
-      <h2>Add an account</h2>
-      <p>Sign in with the account in your browser and remuda stores it under the name you choose.</p>
+      <h2>Add a login</h2>
+      <p>Pick the CLI, name the login, and sign in with that account in your browser. remuda stores it under the name.</p>
       <form onSubmit={submit}>
-        <select aria-label="CLI" value={provider()} onChange={(e) => setProvider(e.currentTarget.value)}>
-          <For each={store.s!.providers}>{(p) => <option value={p.id}>{p.name}</option>}</For>
-        </select>
+        <div class="pick-cli" role="radiogroup" aria-label="CLI">
+          <For each={store.s!.providers}>
+            {(p) => (
+              <button
+                type="button"
+                role="radio"
+                aria-checked={provider() === p.id}
+                onClick={() => setProvider(p.id)}
+              >
+                <ProviderIcon provider={p.id} size={22} />
+                {p.name}
+              </button>
+            )}
+          </For>
+        </div>
         <input
           placeholder="Name, e.g. work"
           required
