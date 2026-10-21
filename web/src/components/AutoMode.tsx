@@ -335,12 +335,14 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
               min="1"
               max="100"
               value={a().ceiling ?? 100}
-              onChange={(e) =>
+              onChange={(e) => {
+                const c = percent(e.currentTarget.value) ?? 100;
+                e.currentTarget.value = String(c);
                 set((x) => {
-                  x.ceiling = percent(e.currentTarget.value) ?? 100;
-                  if (x.ceiling === 100) delete x.ceiling;
-                })
-              }
+                  x.ceiling = c;
+                  if (c === 100) delete x.ceiling;
+                });
+              }}
             />
             %
           </span>
@@ -369,7 +371,7 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
       </div>
       <Show when={loginsOf(props.p.id).length}>
         <div class="pickable">
-          <span class="aside">Its shortest window is full sooner for</span>
+          <span class="aside">A login's own ceiling for its shortest window (Claude's 5-hour one)</span>
           <div class="ceilings">
             <For each={loginsOf(props.p.id)}>
               {(name) => (
@@ -383,14 +385,17 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
                       aria-label={`${name} is full at`}
                       placeholder={String(a().ceiling ?? 100)}
                       value={a().ceilings?.[name] ?? ''}
-                      onChange={(e) =>
+                      onChange={(e) => {
+                        const c = percent(e.currentTarget.value);
+                        e.currentTarget.value = c === null ? '' : String(c);
                         set((x) => {
-                          const c = percent(e.currentTarget.value);
-                          if (c === null) {
-                            if (x.ceilings) delete x.ceilings[name];
-                          } else (x.ceilings ??= {})[name] = c;
-                        })
-                      }
+                          if (c !== null) (x.ceilings ??= {})[name] = c;
+                          else if (x.ceilings) {
+                            delete x.ceilings[name];
+                            if (!Object.keys(x.ceilings).length) delete x.ceilings;
+                          }
+                        });
+                      }}
                     />
                     %
                   </span>
