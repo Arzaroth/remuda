@@ -828,6 +828,9 @@ fn merge_item(old: &mut Item, new: &Item) {
     match (&mut *old, new) {
         (Item::Table(o), Item::Table(n)) => merge_table(o, n),
         (Item::ArrayOfTables(o), Item::ArrayOfTables(n)) => merge_rules(o, n),
+        (Item::Table(o), Item::Value(Value::InlineTable(n))) => {
+            merge_table(o, &n.clone().into_table());
+        }
         (Item::Value(o), Item::Value(n)) => {
             if bare(o) != bare(n) {
                 let decor = o.decor().clone();
