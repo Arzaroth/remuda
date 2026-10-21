@@ -151,6 +151,7 @@ fn window(title: Option<&str>, w: &Value) -> Option<Value> {
     };
     Some(json!({
         "title": title,
+        "minutes": w.get("windowMinutes").and_then(Value::as_u64),
         "usedPercent": used.min(100),
         "resetsAt": w.get("resetsAt").and_then(Value::as_str),
     }))

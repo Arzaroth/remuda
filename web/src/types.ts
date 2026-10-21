@@ -24,7 +24,7 @@ export type Live = {
   email?: string | null;
 };
 
-export type Window = { title: string; usedPercent: number; resetsAt: string | null };
+export type Window = { title: string; minutes?: number | null; usedPercent: number; resetsAt: string | null };
 
 export type Usage = {
   stale?: boolean;
