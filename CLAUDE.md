@@ -55,12 +55,15 @@ computes for the live key too. Changing any of them changes that ADR too.
 - Before finishing: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`,
   `cargo test`. After a change under `web/` (the page's source), also
   `pnpm test` and `pnpm build` there: `src/serve.html` is the built page,
-  committed, and CI fails when it is stale. CI also shellchecks `scripts/install.sh` and
-  `scripts/release.sh`.
+  committed, and CI fails when it is stale. CI also shellchecks `scripts/install.sh`,
+  `scripts/release.sh` and the packaging scripts.
 - `scripts/coverage.sh` ranks files by uncovered lines; `main.rs`'s process
   surface stays uncovered on purpose.
 - Releases go through `scripts/release.sh` (the `release` skill); the tag push
-  builds and publishes them.
+  builds, signs, verifies and publishes them. A pull request that touches the
+  release rehearses it. The signing key's public half is
+  `packaging/remuda.asc`; once it is committed a release without the
+  `REMUDA_GPG_KEY` secret fails.
 - The OAuth constants in `claude.rs` and `codex.rs` were read out of Claude Code
   2.1.282 and codex-cli 0.153.4. When a CLI release breaks sign-in or refresh,
   re-read them from the new binary (`strings` on it) rather than guessing.
