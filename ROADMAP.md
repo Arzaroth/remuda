@@ -67,9 +67,9 @@ LAN with no tailnet, TLS or a warning that traffic is in clear.
 
 The proxy on `127.0.0.1` exists ([brain/features/proxy.md](brain/features/proxy.md)):
 it spends the active login of whichever CLI a model names, with per-client
-keys made on the page. What the second way still needs is the bind address,
-pairing and TLS above, and translation between formats, so that a client
-speaking one format can reach a provider that takes another.
+keys made on the page. It translates between formats, so any client reaches
+any provider. What the second way still needs is the bind address, pairing
+and TLS above.
 
 ## Banked resets: what is left
 

@@ -38,7 +38,9 @@ proxy never refreshes it ([decisions](../decisions.md)): an expired access
 token answers 401 and says to run the CLI once or switch, and a signed-out
 CLI answers 503.
 
-Each provider takes the formats its own endpoint speaks:
+Any client format reaches any provider. Each provider's endpoint speaks
+some formats; a request in another is translated on the way in and its answer
+on the way out:
 
 | Provider | Formats |
 | --- | --- |
@@ -49,8 +51,14 @@ Each provider takes the formats its own endpoint speaks:
 | GLM | Anthropic messages, OpenAI chat completions |
 | opencode Go | the format of the model's maker |
 
-A request in a format the provider does not take is refused with a 400 that
-names the ones it does.
+So Claude Code can run on a Codex login with `--model gpt-5`, and an OpenAI
+SDK can use a Claude login. Text, images, tools and their results, reasoning,
+stop reasons and token counts carry over, streamed or not. What does not:
+Anthropic's server tools (web search and the like) are dropped on the way to
+an OpenAI endpoint, reasoning from one provider is not handed to another
+(each refuses the other's signatures), and `count_tokens` works only on a
+provider that takes Anthropic requests. A request that Codex gets without
+`stream: true` is streamed from Codex all the same and answered whole.
 
 ## Access keys
 

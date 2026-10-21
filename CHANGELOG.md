@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- The proxy translates between formats, so any client reaches any CLI:
+  OpenAI chat completions, OpenAI responses and Anthropic messages are turned
+  into each other, streamed or not. Claude Code can run on a Codex login
+  (`--model gpt-5`), and an OpenAI SDK on a Claude login. A request Codex gets
+  without `stream: true` is answered whole instead of refused.
+
 ## [0.17.0] - 2026-10-21
 
 ### Added
