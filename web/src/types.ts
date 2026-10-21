@@ -69,6 +69,27 @@ export type ProviderShown = {
   absolute: Combined[];
 };
 
+export type AutoSeen = {
+  name: string;
+  tier: number | null;
+  score: number | null;
+  usable: boolean;
+  maxed: boolean;
+  note: string;
+};
+
+export type AutoStatus = {
+  enabled: boolean;
+  at: number;
+  decision: {
+    rule: string | null;
+    logins: AutoSeen[];
+    action: { kind: 'stay' | 'switch' | 'hold'; to?: string; why: string };
+  };
+  switched?: { at: number; to: string; why: string };
+  error?: string;
+};
+
 export type State = {
   store: string;
   providers: Provider[];
@@ -77,4 +98,5 @@ export type State = {
   health: Health;
   usage: { updatedAt: number | null; providers: Record<string, Usage> } | null;
   shown: Record<string, ProviderShown>;
+  auto?: Record<string, AutoStatus | string>;
 };
