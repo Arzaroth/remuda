@@ -83,6 +83,16 @@ pub fn store_root() -> PathBuf {
         .join("remuda/credentials")
 }
 
+/// The proxy's settings and access keys, beside the store rather than in it:
+/// `$XDG_DATA_HOME/remuda/proxy.json`.
+pub fn proxy_settings() -> PathBuf {
+    env::var_os("XDG_DATA_HOME")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home().join(".local/share"))
+        .join("remuda/proxy.json")
+}
+
 fn config_home() -> PathBuf {
     var_dir("XDG_CONFIG_HOME").unwrap_or_else(|| home().join(".config"))
 }

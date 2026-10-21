@@ -348,6 +348,7 @@ mod tests {
                 units: vec![e.tmp.path().join("units")],
                 snapshot: e.tmp.path().join("tokengauge-usage.json"),
                 config: e.tmp.path().join("config.toml"),
+                proxy: e.tmp.path().join("proxy.json"),
             },
             providers,
             TOKEN.into(),
