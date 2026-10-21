@@ -2,6 +2,7 @@ mod forward;
 mod listen;
 pub mod route;
 pub mod settings;
+mod translate;
 
 use std::sync::{Mutex, Weak};
 
@@ -330,20 +331,127 @@ mod tests {
         assert!(body.contains("signed out"), "{body}");
     }
 
+    const CLAUDE_HELLO: &str = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"usage\":{\"input_tokens\":3}}}\n\n\
+event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n\
+event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n\
+event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n\
+event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
+
     #[test]
-    fn a_format_the_provider_does_not_take_is_named() {
+    fn a_chat_client_reaches_claude_through_translation() {
+        let mut server = mockito::Server::new();
+        let upstream = server
+            .mock("POST", "/v1/messages")
+            .match_query(Matcher::Any)
+            .match_header("authorization", "Bearer a-live")
+            .match_body(Matcher::PartialJson(json!({
+                "model": "claude-x",
+                "stream": true,
+                "messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}],
+                "system": [
+                    {"type": "text", "text": "You are Claude Code, Anthropic's official CLI for Claude."},
+                    {"type": "text", "text": "rules"},
+                ],
+            })))
+            .with_header("content-type", "text/event-stream")
+            .with_body(CLAUDE_HELLO)
+            .expect(2)
+            .create();
+        let (_tmp, claude) = signed_in_claude(&server, HOUR);
+        let p = run(vec![Box::new(claude)]);
+        let auth = format!("Authorization: Bearer {KEY}\r\n");
+        let chat = json!({"model": "claude-x", "messages": [
+            {"role": "system", "content": "rules"},
+            {"role": "user", "content": "hi"},
+        ]});
+        let (status, head, body) = post(p.port, "/v1/chat/completions", &auth, &chat);
+        assert_eq!(status, 200, "{body}");
+        assert!(head.contains("application/json"), "{head}");
+        let body: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(body["choices"][0]["message"]["content"], "hello");
+        assert_eq!(body["choices"][0]["finish_reason"], "stop");
+        assert_eq!(body["model"], "claude-x");
+
+        let mut streamed = chat.clone();
+        streamed["stream"] = json!(true);
+        let (status, head, body) = post(p.port, "/v1/chat/completions", &auth, &streamed);
+        assert_eq!(status, 200);
+        assert!(head.contains("text/event-stream"), "{head}");
+        assert!(body.contains(r#""content":"hello""#), "{body}");
+        assert!(body.trim_end().ends_with("data: [DONE]"), "{body}");
+        upstream.assert();
+    }
+
+    #[test]
+    fn an_upstream_error_reaches_a_translated_client_in_its_shape() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/v1/messages")
+            .match_query(Matcher::Any)
+            .with_status(529)
+            .with_body(
+                r#"{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#,
+            )
+            .create();
+        let (_tmp, claude) = signed_in_claude(&server, HOUR);
+        let p = run(vec![Box::new(claude)]);
+        let (status, _, body) = post(
+            p.port,
+            "/v1/chat/completions",
+            &format!("Authorization: Bearer {KEY}\r\n"),
+            &json!({"model": "claude-x", "messages": [{"role": "user", "content": "hi"}]}),
+        );
+        assert_eq!(status, 529);
+        let body: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(
+            body["error"]["message"],
+            "Claude Code answered 529: Overloaded"
+        );
+    }
+
+    #[test]
+    fn claude_code_reaches_codex_through_translation() {
+        let mut server = mockito::Server::new();
+        let upstream = server
+            .mock("POST", "/responses")
+            .match_header("chatgpt-account-id", "ws-1")
+            .match_body(Matcher::PartialJson(json!({
+                "model": "gpt-5",
+                "stream": true,
+                "store": false,
+                "instructions": "sys",
+                "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hi"}]}],
+            })))
+            .with_header("content-type", "text/event-stream")
+            .with_body(concat!(
+                "data: {\"type\":\"response.created\",\"response\":{\"id\":\"r1\"}}\n\n",
+                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hey\"}\n\n",
+                "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":5,\"output_tokens\":1}}}\n\n",
+            ))
+            .create();
+        let (_tmp, codex) = signed_in_codex(&server);
+        let p = run(vec![Box::new(codex)]);
+        let (status, _, body) = post(
+            p.port,
+            "/v1/messages",
+            &format!("x-api-key: {KEY}\r\nUser-Agent: claude-cli/2.1.304 (external, cli)\r\n"),
+            &json!({"model": "gpt-5", "max_tokens": 100, "system": "sys", "messages": [{"role": "user", "content": "hi"}]}),
+        );
+        assert_eq!(status, 200, "{body}");
+        upstream.assert();
+        let body: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(body["type"], "message");
+        assert_eq!(body["content"], json!([{"type": "text", "text": "hey"}]));
+        assert_eq!(body["stop_reason"], "end_turn");
+        assert_eq!(body["usage"]["input_tokens"], 5);
+    }
+
+    #[test]
+    fn what_the_proxy_cannot_answer_is_named() {
         let server = mockito::Server::new();
         let (_tmp, claude) = signed_in_claude(&server, HOUR);
         let p = run(vec![Box::new(claude)]);
         let auth = format!("Authorization: Bearer {KEY}\r\n");
-        let (status, _, body) = post(
-            p.port,
-            "/v1/chat/completions",
-            &auth,
-            &json!({"model": "claude-x", "messages": []}),
-        );
-        assert_eq!(status, 400);
-        assert!(body.contains("takes Anthropic messages"), "{body}");
         let (status, _, body) = post(
             p.port,
             "/v1/chat/completions",
@@ -411,7 +519,11 @@ mod tests {
                 json!({"store": false, "stream": true, "instructions": ""}),
             ))
             .with_header("content-type", "text/event-stream")
-            .with_body("data: {}\n\n")
+            .with_body(concat!(
+                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n",
+                "data: {\"type\":\"response.completed\",\"response\":{}}\n\n",
+            ))
+            .expect(2)
             .create();
         let (_tmp, codex) = signed_in_codex(&server);
         let p = run(vec![Box::new(codex)]);
@@ -423,15 +535,19 @@ mod tests {
             &json!({"model": "gpt-5", "input": "hi", "stream": true, "temperature": 1}),
         );
         assert_eq!(status, 200, "{body}");
-        upstream.assert();
+        assert!(body.contains("response.output_text.delta"), "{body}");
         let (status, _, body) = post(
             p.port,
             "/v1/responses",
             &auth,
             &json!({"model": "gpt-5", "input": "hi"}),
         );
-        assert_eq!(status, 400);
-        assert!(body.contains("stream"), "{body}");
+        assert_eq!(status, 200, "{body}");
+        let body: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(body["object"], "response");
+        assert_eq!(body["status"], "completed");
+        assert_eq!(body["output"][0]["content"][0]["text"], "hi");
+        upstream.assert();
     }
 
     #[test]
@@ -494,7 +610,8 @@ mod tests {
             .mock("POST", "/anthropic/v1/messages")
             .match_header("x-api-key", "zk-1")
             .match_header("anthropic-version", "2023-06-01")
-            .with_body("{}")
+            .with_body(CLAUDE_HELLO)
+            .expect(2)
             .create();
         let glm = crate::apikey::ApiKey::glm()
             .with(None, |name| {
@@ -506,12 +623,15 @@ mod tests {
         let model = json!({"model": "glm-4.6", "messages": []});
         assert_eq!(post(p.port, "/v1/chat/completions", &auth, &model).0, 200);
         assert_eq!(post(p.port, "/v1/messages", &auth, &model).0, 200);
-        let (status, _, body) = post(p.port, "/v1/responses", &auth, &model);
-        assert_eq!(status, 400);
-        assert!(
-            body.contains("GLM takes Anthropic messages or OpenAI chat completions"),
-            "{body}"
+        let (status, _, body) = post(
+            p.port,
+            "/v1/responses",
+            &auth,
+            &json!({"model": "glm-4.6", "input": "hi"}),
         );
+        assert_eq!(status, 200, "{body}");
+        let body: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(body["output"][0]["content"][0]["text"], "hello");
         chat.assert();
         messages.assert();
     }

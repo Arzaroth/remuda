@@ -321,14 +321,13 @@ impl Provider for Codex {
     }
 
     /// The ChatGPT backend takes only streamed, unstored responses, and
-    /// refuses the API's sampling and storage fields.
+    /// refuses the API's sampling and storage fields. A client that did not
+    /// ask for a stream gets the whole answer collected from it.
     fn shape(&self, _format: Format, body: &mut Value, _user_agent: Option<&str>) -> Result<()> {
         let Some(fields) = body.as_object_mut() else {
             bail!("the request body is not an object");
         };
-        if fields.get("stream").and_then(Value::as_bool) != Some(true) {
-            bail!("Codex answers only streamed requests; send \"stream\": true");
-        }
+        fields.insert("stream".to_owned(), json!(true));
         fields.insert("store".to_owned(), json!(false));
         fields.entry("instructions").or_insert_with(|| json!(""));
         for drop in [
