@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Combined, Credential, Live, State } from './types';
-import { dropping, dropsLive, inUse, overwrite, planFor, resetsAt, shownFor, taken } from './usage';
+import { carriedSince, dropping, dropsLive, inUse, overwrite, planFor, resetsAt, shownFor, taken } from './usage';
 
 const cred = (name: string, active = false): Credential => ({
   id: `claude/${name}`,
@@ -103,5 +103,26 @@ describe('resetsAt', () => {
     const c = { parts: [part('2026-10-12T00:00:00Z'), part(null), part('2026-10-10T00:00:00Z')] } as unknown as Combined;
     expect(resetsAt(c)).toBe(Date.parse('2026-10-10T00:00:00Z'));
     expect(resetsAt({ parts: [part(null)] } as unknown as Combined)).toBeNull();
+  });
+});
+
+describe('carriedSince', () => {
+  const written = Date.parse('2026-10-21T01:30:22Z');
+  const s = { usage: { updatedAt: written, providers: {} } } as unknown as State;
+  const shown = (askedAt: string | null | undefined) => ({ windows: win(90), askedAt });
+
+  it('dates figures asked before the snapshot they came in', () => {
+    expect(carriedSince(s, shown('2026-10-21T01:23:22Z'))).toBe(Date.parse('2026-10-21T01:23:22Z'));
+  });
+
+  it('says nothing about figures asked with the snapshot', () => {
+    expect(carriedSince(s, shown('2026-10-21T01:30:21Z'))).toBeNull();
+  });
+
+  it('says nothing without a time to go on', () => {
+    expect(carriedSince(s, shown(null))).toBeNull();
+    expect(carriedSince(s, shown(undefined))).toBeNull();
+    expect(carriedSince(s, shown('soon'))).toBeNull();
+    expect(carriedSince({ usage: null } as unknown as State, shown('2026-10-21T01:23:22Z'))).toBeNull();
   });
 });

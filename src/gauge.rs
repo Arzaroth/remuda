@@ -130,6 +130,9 @@ fn provider(p: &Value) -> Value {
         });
     json!({
         "stale": p.get("stale").and_then(Value::as_bool).unwrap_or(false),
+        // TokenGauge carries a login it is not signed into between asks, so
+        // these figures can be older than the snapshot they came in.
+        "askedAt": usage.get("updatedAt").and_then(Value::as_str),
         "staleReason": p.get("staleReason").and_then(Value::as_str),
         "error": p.pointer("/error/message").and_then(Value::as_str),
         "credentialState": p.get("credentialState").and_then(Value::as_str),
@@ -273,6 +276,7 @@ mod tests {
                 "meta": {"updatedAtMs": 1_790_638_810_718_i64},
                 "payloads": [
                     {"provider": "claude", "stale": false, "error": null, "usage": {
+                        "updatedAt": "2026-09-28T23:10:00Z",
                         "primary": {"usedPercent": 16, "resetsAt": "2026-09-29T03:30:00Z", "windowMinutes": 300},
                         "secondary": {"usedPercent": 140, "resetsAt": null, "windowMinutes": 10080},
                         "tertiary": {"usedPercent": null, "windowMinutes": 60},
@@ -313,7 +317,12 @@ mod tests {
                 ("Fable only", 10080, 3)
             ]
         );
+        assert_eq!(
+            usage["providers"]["claude"]["askedAt"],
+            "2026-09-28T23:10:00Z"
+        );
         let codex = &usage["providers"]["codex"];
+        assert_eq!(codex["askedAt"], Value::Null);
         assert_eq!(codex["stale"], true);
         assert_eq!(codex["staleReason"], "timed out");
         assert_eq!(codex["windows"], json!([]));
