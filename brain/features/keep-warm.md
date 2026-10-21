@@ -27,9 +27,13 @@ open until its reset, or why not) and pings nothing.
   limit; that, not a list, is what "a provider with a 5-hour window" means;
 - the window has no reset in the future (a passed `resetsAt` counts as closed,
   as `auto::current` has it);
-- if remuda pinged it before, TokenGauge's snapshot is newer than that ping.
-  Without that last check a ping would repeat every round until TokenGauge
-  fetched again, since the snapshot would still show the window closed.
+- if remuda pinged it before, TokenGauge has asked about this login since that
+  ping (its own `askedAt`, or the snapshot's time when TokenGauge gives none),
+  and at least 5 minutes have passed. TokenGauge carries a login the CLI is not
+  on between asks, so a newer snapshot alone could still show the window
+  closed, and every round would ping again;
+- after a failed ping, 10 minutes have passed. The failure stays on the page
+  until then.
 
 A login with no figures, an error in its figures, or no 5-hour window is not
 pinged, and the page says why.
@@ -42,8 +46,9 @@ proxy can reach can be kept warm with no code of its own: the cheapest model
 output token (Responses has no such cap, so its reasoning is set low), the
 provider's `shape` and `upstream`, a 60 s deadline. It succeeds on a 2xx whose
 stream reaches its end (`translate::finished`). Then TokenGauge is nudged so it
-sees the new window. A provider with no inference endpoint (Cursor) fails with
-the reason.
+sees the new window; a failed ping nudges nothing. A provider with no model to
+ping (Cursor) cannot be kept warm: the page offers it no chips and the config
+check refuses it.
 
 Which credentials (`warm::creds`):
 
@@ -52,16 +57,22 @@ Which credentials (`warm::creds`):
 - any other: the stored copy, refreshed and saved first when it has under five
   minutes left, under the store lock. The lock is never held across the ping.
 
-The live logins are synced back before anything is read
-(`ops::sync_live`), and a CLI whose live login remuda cannot tie to a stored
-one gets no pings: it could be any of them.
+Which login is live is decided again under the lock that reads the
+credentials (`ops::sync_live`), so a switch made during an earlier ping is
+seen. A CLI whose live login remuda cannot tie to a stored one gets no pings:
+it could be any of them. A stored login that does not match its sidecar is
+neither spent nor refreshed.
+
+Pings run one at a time on the watcher's thread, so a slow upstream holds auto
+mode's next round for up to the ping's deadline.
 
 ## What the page shows
 
 `/api/state`'s `warm` has, per `provider/name`, the last round's outcome:
 `pinged` (when, which model), `failed` (the error), `open` (until when) or
 `waiting` (why). A login card shows it as one line. The service's log gets a
-line when a login's outcome changes kind.
+line for each ping that went through, and one for a failure each time its
+error changes.
 
 ## Sources
 

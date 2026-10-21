@@ -278,10 +278,13 @@ but it is a second active login per CLI to manage.
 A ping on the login a CLI is on uses its live credentials and never refreshes
 them, as the proxy does, for the same reason: the CLI holds that refresh token.
 Pinging only inactive logins was turned down, since the active one is the
-login whose window matters most. A login is pinged again only once TokenGauge's
-snapshot is newer than the last ping: remuda has no figures of its own, and
-until TokenGauge fetches, a closed window still looks closed, so without the
-wait every round would ping again.
+login whose window matters most. A login is pinged again only once TokenGauge has asked about
+that login since the last ping: remuda has no figures of its own, and until
+TokenGauge asks, a closed window still looks closed, so without the wait every
+round would ping again. The snapshot's own time is not enough, since
+TokenGauge carries a login the CLI is not on between asks, and a nudge after
+each ping would otherwise turn into a loop. A failed ping waits 10 minutes
+for the same reason.
 
 ## The proxy has its own listener, guarded by its own keys
 
