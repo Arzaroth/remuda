@@ -17,11 +17,12 @@ export const DAYS: [Day, string][] = [
   ['sun', 'Sun'],
 ];
 
-const unset = (v: unknown): boolean =>
+const OPTIONAL_TABLES = new Set(['reserve', 'schedules', 'auto']);
+const unset = (k: string, v: unknown): boolean =>
   v === undefined ||
   v === false ||
   (Array.isArray(v) && !v.length) ||
-  (!!v && typeof v === 'object' && !Array.isArray(v) && !Object.values(v).some((x): boolean => !unset(x)));
+  (OPTIONAL_TABLES.has(k) && !!v && typeof v === 'object' && !Object.keys(v).length);
 
 /** The same text for two configs the server writes the same. */
 export function canonical(v: unknown): string {
@@ -29,7 +30,7 @@ export function canonical(v: unknown): string {
   if (v && typeof v === 'object') {
     const o = v as Record<string, unknown>;
     return `{${Object.keys(o)
-      .filter((k) => !unset(o[k]))
+      .filter((k) => !unset(k, o[k]))
       .sort()
       .map((k) => `${JSON.stringify(k)}:${canonical(o[k])}`)
       .join(',')}}`;

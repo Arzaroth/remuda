@@ -257,7 +257,7 @@ function Now(props: { s: AutoStatus; provider: string }) {
 function ProviderCard(props: { p: Provider; problems: Problem[] }) {
   const status = () => {
     const s = store.s!.auto?.[props.p.id];
-    return s && typeof s === 'object' ? s : null;
+    return s && typeof s === 'object' && 'decision' in s ? s : null;
   };
   const a = () => draft.c.auto?.[props.p.id] ?? {};
   const set = (fn: (a: ReturnType<typeof auto>) => void) => edit((c) => fn(auto(c, props.p.id)));
@@ -483,17 +483,20 @@ export function AutoMode(props: { providers: Provider[] }) {
   if (!saved()) loadConfig();
 
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let checks = 0;
   createEffect(
     on(
       () => text(draft.c),
       () => {
+        clearTimeout(timer);
+        const seq = ++checks;
         if (!saved()) return;
         if (!dirty()) return setProblems(saved()!.problems);
-        clearTimeout(timer);
         const config = structuredClone(unwrap(draft.c));
         timer = setTimeout(async () => {
           try {
-            setProblems((await api<{ problems: Problem[] }>('/api/config/check', { config })).problems);
+            const r = await api<{ problems: Problem[] }>('/api/config/check', { config });
+            if (seq === checks) setProblems(r.problems);
           } catch {}
         }, 250);
       },
@@ -574,7 +577,7 @@ export function AutoMode(props: { providers: Provider[] }) {
               , <span class="late">{problems().length === 1 ? '1 problem' : `${problems().length} problems`}</span>
             </Show>
           </span>
-          <button class="btn" onClick={() => take(saved()!)}>
+          <button class="btn" onClick={reloadFile}>
             Revert
           </button>
           <button class="btn go" disabled={saving() || !!problems().length} onClick={save}>

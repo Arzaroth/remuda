@@ -98,5 +98,5 @@ export type State = {
   health: Health;
   usage: { updatedAt: number | null; providers: Record<string, Usage> } | null;
   shown: Record<string, ProviderShown>;
-  auto?: Record<string, AutoStatus | string>;
+  auto?: Record<string, AutoStatus | { enabled: false } | string>;
 };
