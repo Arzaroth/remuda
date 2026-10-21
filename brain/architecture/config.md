@@ -23,8 +23,8 @@ dwell   = "30m"     # default; h, m, s; 1 minute to 7 days
 margin  = 0.25      # default
 logins  = ["work", "perso"]   # the one tier used when no rule is in force
 ceiling = 97        # a window is full at this %; default 100
-ceilings = { work = 93 }      # per login, for its shortest window
-fallback = "perso"  # where to go when every login is full; default: stay
+ceilings = { work = 93 }      # per login, for the shortest of several windows
+fallback = "perso"  # where to go when every login, the active one too, is full
 
 [[auto.claude.rule]]
 when    = "workday"           # a schedule, or "otherwise"
@@ -57,7 +57,8 @@ a rename and keeps the old one's comments and place; a rename made in the
 same save as adding a table holding the renamed one's old values pairs with
 that one instead. Rules are matched by their values, so a rule removed takes
 its comments with it, and a rule moved keeps them; an edited rule pairs with a
-leftover one in order. A table added goes after
+leftover one in order. A table the file has where the config writes an inline one
+(`[auto.claude.ceilings]`) stays a table. A table added goes after
 the last of its siblings already in the file, so a new schedule follows the
 others and a new rule the provider's last. `save` takes the
 version the caller read, the SHA-256 of the file's bytes, and refuses with

@@ -107,7 +107,7 @@ URL. Installed with `--serve`, `remuda-serve.service` keeps one running (or
 ## Auto mode
 
 While `remuda serve` runs, auto mode keeps each CLI on the most suitable of the
-logins you allow and moves it off one that is maxed, using the usage figures
+logins you allow and moves it off one that is full, using the usage figures
 [TokenGauge](https://github.com/Arzaroth/TokenGauge) reports. It is off by
 default; set it up per CLI in the page's Auto mode section, or in
 `~/.config/remuda/config.toml`:
@@ -120,7 +120,7 @@ hours = "09:00-18:00"
 [auto.claude]
 enabled = true
 
-[[auto.claude.rule]]          # during work hours: work, then perso once work is maxed
+[[auto.claude.rule]]          # during work hours: work, then perso once work is full
 when  = "workday"
 order = [["work"], ["perso"]]
 
@@ -138,8 +138,8 @@ would keep it:
 enabled  = true
 dwell    = "1m"
 ceiling  = 97                        # every window counts as full at 97%
-ceilings = { IDC = 93, Axeo = 88 }   # their 5-hour window, sooner
-fallback = "perso"                   # when every login is full
+ceilings = { IDC = 93, Axeo = 88 }   # their own, for their 5-hour window
+fallback = "perso"                   # when every login is full, the active one too
 
 [[auto.claude.rule]]
 when  = "otherwise"
@@ -147,7 +147,7 @@ order = [["IDC"], ["Axeo"], ["perso"]]
 ```
 
 Within a tier, the login with the most headroom to lose at its next reset goes
-first. Unless the login in use is maxed, a switch waits at least 30 minutes
+first. Unless the login in use is full, a switch waits at least 30 minutes
 after the last one (`dwell`), and one between logins of the same tier needs a
 25% better pick (`margin`). Codex is
 switched only while no Codex session runs. `remuda auto` shows what it would
