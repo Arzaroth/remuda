@@ -19,6 +19,7 @@ from a CLI. `creds` is always the store's shape for that CLI.
 | `env_line` | The `export` line `remuda env` prints, for a key read from the environment |
 | `begin_login` | Start a sign-in, returning a `PendingLogin` |
 | `redeem_reset` | Spend one of the login's banked usage-limit resets (Claude only; the others refuse) |
+| `formats`, `upstream`, `shape` | What the proxy may send a login's inference endpoint, where, and with what ([proxy.md](proxy.md)); none by default, as for Cursor |
 
 Another CLI is one more implementation plus a line in `main.rs` (the
 `PROVIDERS` list for `-p` and the provider arrays) and in `serve`'s list. Token

@@ -112,6 +112,8 @@ access to anything, and it ends when they stop.
 | `POST /api/login` `{provider?, name, force?}` | Begin a sign-in and open it in a private window: `{id, url, needsCode, opened}` |
 | `POST /api/login/finish` `{id, code?}` | Finish it and store the result |
 | `POST /api/login/cancel` `{id}` | Abandon it; a waiting Codex callback stops |
+| `POST /api/proxy/settings` `{enabled?, port?}` | Save the proxy's settings and start, move or stop it to match |
+| `POST /api/proxy/keys` `{name}` / `keys/remove` `{id}` | Make or remove a proxy access key |
 
 Pending sign-ins live in memory, one per provider; starting another cancels the
 previous one. `App::api` takes the store lock once for every route except the
@@ -127,6 +129,12 @@ nothing. TokenGauge still does the fetching ([decisions](../decisions.md)).
 `/api/state` reports each CLI's live login as `signed_out`, `stored` (with
 `confirmed`), `unstored`, `foreign` (an API key; the page says only
 `remuda use --discard` replaces it) or `unreadable` (with the error).
+
+`proxy` is the proxy's settings and state ([proxy.md](proxy.md)): `enabled`,
+`port`, `running` (the bound port, or null), `error` (why it could not bind),
+`baseUrls` (`openai`, `claude`), `keys` (`id`, `name`, `key`, `created`) and
+`routes` (per provider the proxy can spend: `provider`, `models`, `formats`).
+`App::fingerprint` follows `proxy.json` too.
 
 `health` is `timer`, from systemd's user unit search path in its order
 (`paths::systemd_user_units`: the config directory, `/etc`, the runtime

@@ -12,9 +12,13 @@ done.
       stale mark from a crashed session gets cleared.
 - [ ] `remuda run`: which files under `CODEX_HOME` Codex writes during a
       session (sessions, history, logs) and whether symlinking them is safe.
-- [ ] Hub and satellites: hand over credentials or proxy the API. Check
-      first whether Claude Code and Codex accept an OAuth login behind a custom
-      base URL, and how each copes with a credential that has no refresh token.
+- [ ] Hub and satellites: hand over credentials or proxy the API. The local
+      proxy exists; check how each CLI copes with a credential that has no
+      refresh token before ruling the first way out.
+- [ ] Proxy: check against real logins that Claude's endpoint takes a
+      subscription token with Claude Code's identity line alone, which
+      headers Grok's chat endpoint wants beyond the bearer token, and that
+      opencode Go serves each model family on the path the proxy picks.
 - [ ] Hub and satellites: pairing and per-satellite tokens, TLS on a plain LAN.
 - [ ] Banked resets: check Codex's credit fields against a real answer, and
       agree with TokenGauge on adding the credits to its snapshot.

@@ -20,6 +20,7 @@ running.
 | `served.rs` | The files a running page announces itself in, and finding it again for `open` |
 | `units.rs` | The systemd units the binary carries, and rewriting installed ones after an update |
 | `http.rs` | The page's HTTP listener: bounded reads, checks before bodies, a connection limit, the event stream |
+| `proxy/` | The API proxy: its settings and keys, its own listener, model routing, forwarding to each CLI's endpoint |
 | `oauth.rs` | The HTTP client and token requests both providers share |
 | `dirs.rs` | The directories interactive commands used, for the scheduled refresh to check |
 | `runs.rs` | The last scheduled refresh's record, for the page |

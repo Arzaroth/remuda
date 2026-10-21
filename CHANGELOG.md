@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- An API proxy in `remuda serve`, off until switched on from the page's new
+  API proxy card. Point an OpenAI or Anthropic client at
+  `http://127.0.0.1:8317` (`/v1` for OpenAI) with a key made on the card: the
+  model name picks the CLI (`claude-*`, `gpt-*`, `grok-*`, `kimi-*`, `glm-*`,
+  or `provider/model`) and the request spends that CLI's active login, which
+  the proxy never refreshes. Each CLI takes the formats its own endpoint
+  speaks.
+
 ## [0.15.0] - 2026-10-21
 
 ### Added

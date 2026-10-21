@@ -137,6 +137,29 @@ after the last one (`dwell`), and one between logins of the same tier needs a
 switched only while no Codex session runs. `remuda auto` shows what it would
 do and why.
 
+## The proxy
+
+`remuda serve` can also run an API proxy for any OpenAI or Anthropic client,
+switched on from the page's API proxy card, which also makes its access keys.
+
+| Protocol | Base URL |
+| --- | --- |
+| OpenAI | `http://127.0.0.1:8317/v1` |
+| Claude | `http://127.0.0.1:8317` |
+
+```sh
+ANTHROPIC_BASE_URL=http://127.0.0.1:8317 ANTHROPIC_API_KEY=rmd-... claude
+```
+
+The model name picks the CLI whose login answers (`claude-*` Claude Code,
+`gpt-*` Codex, `grok-*`, `kimi-*`, `glm-*`, or `provider/model`, which opencode
+Go needs), and the request spends that CLI's active login: `remuda use`
+switches the proxy too. The proxy never refreshes that login, so once its
+access token expires, run the CLI once or switch. Each CLI takes the formats
+its own endpoint speaks (Claude Code takes Anthropic requests, Codex and Grok
+OpenAI responses, Kimi and GLM both), and a request in another format is
+refused. It listens on `127.0.0.1` only.
+
 ## How a switch works
 
 For Claude Code, a switch rewrites two keys and nothing else: `claudeAiOauth` in
@@ -208,6 +231,12 @@ closed source: its refresh endpoint and sign-in are the ones the open-source
 Cursor clients agree on, and the first to break. Claude's banked resets are
 listed only to a client sending Claude Code's own user agent, which remuda and
 TokenGauge do; Anthropic can stop that at any time.
+
+The proxy sends another client's requests on a Claude subscription as if
+Claude Code had made them, and a ChatGPT subscription's as Codex. Both
+providers' consumer terms allow their subscriptions only in their own CLIs,
+and either can refuse such traffic or act on the account. Using it is your
+call.
 
 ## Development
 
