@@ -62,7 +62,7 @@
   protocol's base URL with a copy button, the access key masked with show and
   copy buttons (a picker when there are several), Manage keys to make and
   remove keys (a second click removes) and change the port, and the models it
-  routes per CLI with the formats each takes. The protocol last picked is
+  routes per CLI with the formats its endpoint speaks. The protocol last picked is
   remembered.
 
 The theme follows the system until the Auto / Light / Dark switch in the

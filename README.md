@@ -171,10 +171,10 @@ The model name picks the CLI whose login answers (`claude-*` Claude Code,
 `gpt-*` Codex, `grok-*`, `kimi-*`, `glm-*`, or `provider/model`, which opencode
 Go needs), and the request spends that CLI's active login: `remuda use`
 switches the proxy too. The proxy never refreshes that login, so once its
-access token expires, run the CLI once or switch. Each CLI takes the formats
-its own endpoint speaks (Claude Code takes Anthropic requests, Codex and Grok
-OpenAI responses, Kimi and GLM both), and a request in another format is
-refused. It listens on `127.0.0.1` only.
+access token expires, run the CLI once or switch. Any format reaches any CLI:
+remuda translates where the CLI's endpoint speaks another, so Claude Code runs
+on a Codex login with `--model gpt-5` and an OpenAI SDK on a Claude login. It
+listens on `127.0.0.1` only.
 
 ## How a switch works
 

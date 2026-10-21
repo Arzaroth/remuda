@@ -286,11 +286,15 @@ work on the roadmap. The keys sit in clear in the store's `.proxy.json`,
 beside the credentials they give access to, so the page can show and copy
 them again.
 
-## The proxy routes by model name, and a Claude token goes out as Claude Code
+## The proxy routes by model name, translates, and a Claude token goes out as Claude Code
 
 One base URL serves every client: the path gives the format, the model's
 prefix gives the provider, as CLIProxyAPI does, and `provider/model` covers a
-name two providers share. A Claude subscription token is accepted for Claude
+name two providers share. Any format reaches any provider: rather than a
+translator per pair of formats, as CLIProxyAPI has, requests go through one
+conversation shape and answers through one stream of events, so three
+parsers, two emitters, two decoders and three encoders cover every pair, and
+a new provider's format is one of each. A Claude subscription token is accepted for Claude
 Code's own requests, so a request from any other client is sent with Claude
 Code's headers and its identity line as the first system block. That is
 against Anthropic's consumer terms for a client that is not Claude Code, and
