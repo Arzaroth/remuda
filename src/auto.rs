@@ -1300,4 +1300,162 @@ reserve = { work = "workday" }
         assert!(text.contains("  -  work"), "{text}");
         assert!(text.ends_with("  stay: perso is the best pick\n"), "{text}");
     }
+
+    /// The quota balancer this replaces: IDC, then Axeo, then perso; the
+    /// 5-hour window full at 93% for IDC and 88% for Axeo, every other at 97%.
+    fn balancer() -> Config {
+        toml_edit::de::from_str(
+            r#"
+[auto.claude]
+enabled  = true
+dwell    = "1m"
+ceiling  = 97
+ceilings = { IDC = 93, Axeo = 88 }
+fallback = "perso"
+
+[[auto.claude.rule]]
+when  = "otherwise"
+order = [["IDC"], ["Axeo"], ["perso"]]
+"#,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_login_over_its_ceiling_is_left_at_once_for_the_next_tier() {
+        let c = balancer();
+        let now = at("10:00");
+        let d = run(
+            &c,
+            &now,
+            Some("IDC"),
+            Some(0),
+            &[
+                ("IDC", login(&now, (93, 2), (40, 100))),
+                ("Axeo", login(&now, (87, 2), (40, 100))),
+                ("perso", login(&now, (0, 2), (0, 100))),
+            ],
+        );
+        assert!(
+            matches!(&d.action, Action::Switch { to, why } if to == "Axeo" && why == "IDC's 5 hours at 93%, full at 93%"),
+            "{:?}",
+            d.action
+        );
+        let axeo = d.logins.iter().find(|s| s.name == "Axeo").unwrap();
+        assert!(axeo.usable, "87% is under Axeo's 88%");
+    }
+
+    #[test]
+    fn the_cli_ceiling_holds_every_other_window() {
+        let c = balancer();
+        let now = at("10:00");
+        let d = run(
+            &c,
+            &now,
+            Some("IDC"),
+            Some(0),
+            &[
+                ("IDC", login(&now, (10, 2), (97, 100))),
+                ("Axeo", login(&now, (10, 2), (40, 100))),
+            ],
+        );
+        assert!(
+            matches!(&d.action, Action::Switch { to, why } if to == "Axeo" && why == "IDC's weekly at 97%, full at 97%")
+        );
+    }
+
+    #[test]
+    fn the_first_tier_comes_back_once_under_its_ceiling() {
+        let c = balancer();
+        let now = at("10:00");
+        let f = [
+            ("IDC", login(&now, (92, 2), (40, 100))),
+            ("Axeo", login(&now, (10, 2), (40, 100))),
+        ];
+        assert!(
+            matches!(
+                run(&c, &now, Some("Axeo"), Some(0), &f).action,
+                Action::Stay { .. }
+            ),
+            "the dwell first"
+        );
+        assert_eq!(
+            switch_to(&run(&c, &now, Some("Axeo"), Some(1), &f)),
+            Some("IDC")
+        );
+    }
+
+    #[test]
+    fn with_every_login_full_the_fallback_takes_the_cli_unless_it_is_maxed() {
+        let c = balancer();
+        let now = at("10:00");
+        let full = |perso: u64| {
+            run(
+                &c,
+                &now,
+                Some("IDC"),
+                Some(0),
+                &[
+                    ("IDC", login(&now, (95, 2), (40, 100))),
+                    ("Axeo", login(&now, (90, 2), (40, 100))),
+                    ("perso", login(&now, (perso, 2), (40, 100))),
+                ],
+            )
+        };
+        assert_eq!(
+            full(98).action,
+            Action::Switch {
+                to: "perso".into(),
+                why: "every login it may pick is full or has no figures; perso is the fallback"
+                    .into()
+            }
+        );
+        assert_eq!(
+            full(100).action,
+            Action::Stay {
+                why: "every login it may pick is full or has no figures".into()
+            }
+        );
+        let d = run(
+            &c,
+            &now,
+            Some("perso"),
+            Some(0),
+            &[
+                ("IDC", login(&now, (95, 2), (40, 100))),
+                ("Axeo", login(&now, (90, 2), (40, 100))),
+                ("perso", login(&now, (98, 2), (40, 100))),
+            ],
+        );
+        assert_eq!(d.action, Action::Stay {
+            why: "every login it may pick is full or has no figures; staying on perso, the fallback".into()
+        });
+    }
+
+    #[test]
+    fn headroom_is_counted_up_to_the_ceiling() {
+        let mut c = balancer();
+        let a = c.auto.get_mut("claude").unwrap();
+        a.rules.clear();
+        a.logins = vec!["IDC".into(), "Axeo".into()];
+        a.ceilings.clear();
+        a.ceiling = 50;
+        let now = at("10:00");
+        let d = run(
+            &c,
+            &now,
+            None,
+            None,
+            &[
+                ("IDC", login(&now, (0, 2), (40, 10))),
+                ("Axeo", login(&now, (0, 2), (0, 100))),
+            ],
+        );
+        let idc = d.logins.iter().find(|s| s.name == "IDC").unwrap();
+        assert_eq!(
+            idc.score,
+            Some(1.0),
+            "10 points to its 50% ceiling over 10 hours"
+        );
+    }
 }

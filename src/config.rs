@@ -192,7 +192,10 @@ pub struct Auto {
     #[serde(default, rename = "rule", skip_serializing_if = "Vec::is_empty")]
     pub rules: Vec<Rule>,
     /// The percentage at which a window counts as full.
-    #[serde(default = "default_ceiling", skip_serializing_if = "is_default_ceiling")]
+    #[serde(
+        default = "default_ceiling",
+        skip_serializing_if = "is_default_ceiling"
+    )]
     pub ceiling: u64,
     /// Login name to the percentage its shortest window counts as full at.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -1156,6 +1159,50 @@ order = [["perso"]]
         );
         let long: Config = toml_edit::de::from_str("[auto.claude]\ndwell = \"169h\"\n").unwrap();
         assert_eq!(long.check(&stored).len(), 1);
+    }
+
+    #[test]
+    fn ceilings_and_a_fallback_are_read_written_checked_and_kept_in_step() {
+        let text = "[auto.claude]\nceiling = 97\nceilings = { work = 93 }\nfallback = \"perso\"\n";
+        let c: Config = toml_edit::de::from_str(text).unwrap();
+        let a = &c.auto["claude"];
+        assert_eq!(
+            (a.ceiling, a.ceilings["work"], a.fallback.as_deref()),
+            (97, 93, Some("perso"))
+        );
+        assert_eq!(c.check(&stored), []);
+        assert_eq!(written(text, &c), text);
+
+        let bad: Config = toml_edit::de::from_str(
+            "[auto.claude]\nceiling = 0\nceilings = { ghost = 101 }\nfallback = \"gone\"\n",
+        )
+        .unwrap();
+        let problems: Vec<String> = bad.check(&stored).iter().map(ToString::to_string).collect();
+        assert_eq!(
+            problems,
+            [
+                "auto.claude.ceiling: a ceiling is a percentage, 1 to 100",
+                "auto.claude.ceilings.ghost: no stored login claude/ghost",
+                "auto.claude.ceilings.ghost: a ceiling is a percentage, 1 to 100",
+                "auto.claude.fallback: no stored login claude/gone",
+            ]
+        );
+
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(&path, text).unwrap();
+        rename_login(&path, "claude", "work", "job").unwrap();
+        rename_login(&path, "claude", "perso", "home").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "[auto.claude]\nceiling = 97\nceilings = { job = 93 }\nfallback = \"home\"\n"
+        );
+        forget_login(&path, "claude", "job").unwrap();
+        forget_login(&path, "claude", "home").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "[auto.claude]\nceiling = 97\n"
+        );
     }
 
     #[test]
