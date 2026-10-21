@@ -22,6 +22,9 @@ enabled = true      # default false
 dwell   = "30m"     # default; h, m, s; 1 minute to 7 days
 margin  = 0.25      # default
 logins  = ["work", "perso"]   # the one tier used when no rule is in force
+ceiling = 97        # a window is full at this %; default 100
+ceilings = { work = 93 }      # per login, for its shortest window
+fallback = "perso"  # where to go when every login is full; default: stay
 
 [[auto.claude.rule]]
 when    = "workday"           # a schedule, or "otherwise"
@@ -39,7 +42,8 @@ it anew, and kept when the file already sets it.
 stored, a schedule that does not exist, `otherwise` used as a schedule name, a
 day named twice, a login twice in one rule, an empty tier, a reservation for a
 login outside its rule's order, a rule after an `otherwise` one (never in
-force), a rule with no tier at all, a dwell under a minute or over seven days,
+force), a rule with no tier at all, a ceiling outside 1 to 100, a ceiling or a
+fallback naming a login not stored, a dwell under a minute or over seven days,
 a negative margin. The page cannot save a config with any of them; a
 file edited by hand is still read, and the page shows them.
 
@@ -61,8 +65,8 @@ version the caller read, the SHA-256 of the file's bytes, and refuses with
 serialises writers.
 
 `remuda rename` and `remuda rm` (and the page's) keep the names in step: a
-renamed login keeps its place in every tier and reservation, and a removed one
-leaves them, taking a tier it empties with it (a rule left with no tier is then
+renamed login keeps its place in every tier, reservation, ceiling and the
+fallback, and a removed one leaves them, taking a tier it empties with it (a rule left with no tier is then
 a problem the page shows). They write nothing when there is
 no file, and a config that cannot be updated leaves the store change standing,
 with a warning.

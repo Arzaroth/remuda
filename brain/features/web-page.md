@@ -122,7 +122,8 @@ switch auto mode made.
 
 Below the logins, the page edits `config.toml`
 ([architecture/config.md](../architecture/config.md)): one card per CLI shown,
-with auto mode's switch, the minimum time on a login and the margin, the
+with auto mode's switch, the minimum time on a login, the margin and the
+ceiling, each login's own ceiling, the fallback, the
 logins it may pick when no rule is in force, and its rules, each with a
 schedule, its tiers and which logins it keeps for a schedule; and a card of
 schedules, whose days and hours are shared by every CLI. A schedule a rule
