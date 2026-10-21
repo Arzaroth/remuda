@@ -22,6 +22,12 @@ done.
       third-party classifier), that
       Grok's chat proxy takes the grok 1.0.46 headers, and that
       opencode Go serves each model family on the path the proxy picks.
+- [ ] Proxy: a client that asked for a whole answer is written to only at the
+      end, so one that gave up is not noticed and the provider keeps
+      generating; and an upstream that stalls holds its slot. Check the client
+      while collecting, and time out a silent upstream.
+- [ ] Proxy: a chat upstream that interleaves parallel tool calls' argument
+      deltas by index is read as if each call came whole, in turn.
 - [ ] Hub and satellites: pairing and per-satellite tokens, TLS on a plain LAN.
 - [ ] Banked resets: check Codex's credit fields against a real answer, and
       agree with TokenGauge on adding the credits to its snapshot.

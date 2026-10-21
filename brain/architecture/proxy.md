@@ -101,9 +101,8 @@ it arrives and flushed after every read, with `Connection: close`. A client
 that goes away ends the copy and drops the upstream connection.
 
 `GET /v1/models` lists `route::models` for every provider with a live login,
-keeping for an Anthropic client the models that take Anthropic requests and
-for an OpenAI client the others. Those are examples; any name with the
-provider's prefix routes the same way.
+to every client, since translation lets any of them reach any model. Those
+are examples; any name with the provider's prefix routes the same way.
 
 Tests run the listener on port 0 against `mockito` upstreams, through each
 provider's `Api::local`; `ApiKey::inferring_at` does the same for GLM and
@@ -117,43 +116,57 @@ provider's first format instead and puts `translate` on both sides.
 - **Request**: `parse` reads the client's body into a `Conversation` (system
   text, user and assistant turns of `Part`s: text, images, tool calls, tool
   results, thinking; tools, tool choice, limits, reasoning effort, whether it
-  streams), and `emit` writes it out as an Anthropic or a Responses request,
-  always streamed. Turns of the same role are merged, tool results lead
-  their Anthropic turn and become `function_call_output` items for
-  Responses. Anthropic thinking budgets and OpenAI reasoning efforts map onto
-  each other (under 4096 tokens low, under 16384 medium, else high; back as
-  2048, 8192 and 24576), and `max_tokens` is raised past the budget when it
-  must be. Anthropic's server tools, which carry no schema, are dropped.
+  streams), and `emit` writes it out as an Anthropic, a Responses or a chat
+  request, always streamed (chat asks for its usage chunk). Turns of the same
+  role are merged; tool results lead their Anthropic turn, become
+  `function_call_output` items for Responses and `tool` messages for chat.
+  Anthropic's server tools and their calls, which carry no schema, are
+  dropped.
+- **Thinking**: an Anthropic thinking budget (under 4096 tokens low, under
+  16384 medium, else high) or adaptive effort and an OpenAI reasoning effort
+  map onto each other. Bound for Claude, a model from 4.6 on (read off the
+  name, and any name without a version) gets `thinking: {type: "adaptive"}`
+  and `output_config.effort`, which is all 4.7 and later take; an older one a
+  budget of 2048, 8192 or 24576 with `max_tokens` raised past it. Thinking is
+  left off when Claude would refuse it: a forced tool choice, or a last
+  assistant turn with a tool call that does not open with Claude's own
+  signed thinking.
 - **Tool names**: Codex takes at most 64 characters. A longer name is cut and
   tagged with 8 hex digits of its SHA-256 (`Names`), and the answer's calls
   get the original back.
-- **Reasoning**: an OpenAI reasoning item's `encrypted_content` reaches an
-  Anthropic client as a thinking block's signature, prefixed
-  `remuda-reasoning:`. When the client sends that block back, it goes to a
-  Responses endpoint as a reasoning item again, with
-  `include: ["reasoning.encrypted_content"]`; any other signature, and any
-  thinking bound for Claude, is dropped, since neither provider takes the
-  other's.
-- **Answer**: `decode` reads the upstream's server-sent events into `Event`s
-  (start, text, thinking, signature, tool call, its arguments, usage, stop,
-  error), and `encode` writes them in the client's format as they arrive:
-  Anthropic's `message_start` / `content_block_*` / `message_delta` events,
-  chat completion chunks ending in `[DONE]` (and a usage chunk when
-  `stream_options.include_usage` asked for one), or the Responses events with
-  their sequence numbers. A client that did not ask to stream gets one JSON
-  body built from the same events. Usage counts every prompt token as input
-  on the OpenAI side and splits off cache reads and writes on Anthropic's.
-  Stop reasons map end turn and stop sequence to `stop`, max tokens to
-  `length`, tool use to `tool_calls`; a Responses answer stops on tool use
-  when it made a call.
-- **Errors**: an upstream error status comes back with the provider's message
-  in the client's error shape. A stream that fails, or ends before saying how
-  the answer stopped, ends with an error event in the client's format (a 502
-  when it was not streamed).
+- **Signatures**: each provider refuses the other's, so a signature handed to
+  a client in another format is tagged with its maker. An OpenAI reasoning
+  item's `encrypted_content` reaches an Anthropic client as a signature
+  prefixed `remuda-reasoning:`; Claude's reaches a Responses client as
+  `encrypted_content` prefixed `remuda-claude:`. Sent back, each goes only to
+  its maker, untagged (to a Responses endpoint with
+  `include: ["reasoning.encrypted_content"]`), and is dropped anywhere else.
+  A chat client has no field for either.
+- **Answer**: `decode` reads the upstream's server-sent events, Anthropic,
+  Responses or chat chunks, into `Event`s (start, text, thinking, signature,
+  tool call, its arguments, usage, stop, error), and `encode` writes them in
+  the client's format as they arrive: Anthropic's `message_start` /
+  `content_block_*` / `message_delta` events, chat completion chunks ending in
+  `[DONE]` (and a usage chunk when `stream_options.include_usage` asked for
+  one), or the Responses events with their sequence numbers. A client that
+  did not ask to stream gets one JSON body built from the same events. Usage
+  counts every prompt token as input on the OpenAI side and splits off cache
+  reads and writes on Anthropic's. Stop reasons map end turn and stop
+  sequence to `stop`, max tokens to `length`, tool use to `tool_calls`; a
+  Responses answer stops on tool use when it made a call. A summary part
+  after the first opens with a blank line. A line of more than 16 MiB ends
+  the stream.
+- **Errors**: an upstream error status comes back with the provider's message,
+  at most 500 characters, in the client's error shape. A stream that fails, or
+  ends before saying how the answer stopped, ends with an error event in the
+  client's format; for a whole answer, with the status its kind would have had
+  (429 for a rate limit, 529 overloaded, 400 a bad request, else 502).
 
-The same decoding and encoding serve a client that asked Codex for a whole
-answer in Codex's own format: Codex is sent a stream, and the client gets the
-answer collected from it.
+A client that asked Codex for a whole answer in Codex's own format is not
+translated: Codex is sent a stream, and `translate::collect` returns the
+completed response with the items Codex streamed, as it sent them, since the
+completed event's own `output` can be empty. The client's session headers go
+with it.
 
 ## Sources
 
