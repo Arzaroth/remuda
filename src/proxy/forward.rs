@@ -5,10 +5,10 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 use super::Backend;
-use super::listen::write_head;
 use super::route;
 use crate::fsx::now_ms;
 use crate::http::Head;
+use crate::http::write_head;
 use crate::provider::{Format, Provider};
 
 /// A request the proxy has read and accepted, about to be sent on.
@@ -41,6 +41,7 @@ fn client() -> Option<&'static reqwest::blocking::Client> {
             reqwest::blocking::Client::builder()
                 .connect_timeout(Duration::from_secs(15))
                 .timeout(None)
+                .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .ok()
         })
