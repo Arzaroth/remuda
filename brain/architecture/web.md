@@ -131,10 +131,12 @@ nothing. TokenGauge still does the fetching ([decisions](../decisions.md)).
 `remuda use --discard` replaces it) or `unreadable` (with the error).
 
 `proxy` is the proxy's settings and state ([proxy.md](proxy.md)): `enabled`,
-`port`, `running` (the bound port, or null), `error` (why it could not bind),
+`port`, `running` (the bound port, or null), `error` (why it could not bind,
+or why `.proxy.json` could not be read),
 `baseUrls` (`openai`, `claude`), `keys` (`id`, `name`, `key`, `created`) and
 `routes` (per provider the proxy can spend: `provider`, `models`, `formats`).
-`App::fingerprint` follows `proxy.json` too.
+`.proxy.json` sits at the store's root, so `App::fingerprint` follows it
+already.
 
 `health` is `timer`, from systemd's user unit search path in its order
 (`paths::systemd_user_units`: the config directory, `/etc`, the runtime

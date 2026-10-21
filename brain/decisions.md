@@ -282,8 +282,9 @@ reusing only the head reader and the connection slots. Its guard is an access
 key the client sends as an API key, checked before any body is read, not the
 page's token, `Host` and `Origin`: proxy clients are SDKs and CLIs that know
 nothing of the page. It binds `127.0.0.1` only; listening further is the hub
-work on the roadmap. The keys sit in clear in `proxy.json`, beside the
-credentials they give access to, so the page can show and copy them again.
+work on the roadmap. The keys sit in clear in the store's `.proxy.json`,
+beside the credentials they give access to, so the page can show and copy
+them again.
 
 ## The proxy routes by model name, and a Claude token goes out as Claude Code
 

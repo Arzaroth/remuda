@@ -76,7 +76,9 @@ that if the credential cannot follow.
 `<store>/.dirs.json` records where the last interactive command found each
 CLI's login; see [distribution.md](distribution.md). `<store>/.last-refresh.json`
 records the last scheduled refresh for the page; see
-[../features/refresh.md](../features/refresh.md). `<store>/.last-switch.json`
+[../features/refresh.md](../features/refresh.md). `<store>/.proxy.json` holds
+the proxy's settings and access keys; see [proxy.md](proxy.md).
+`<store>/.last-switch.json`
 records when each provider was last switched; see
 [../features/switching.md](../features/switching.md). None is under a
 provider directory, and all are dot-files, so none is a credential to
