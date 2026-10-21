@@ -38,8 +38,10 @@ a new patch release.
   TokenGauge's `docs/adr/0003-credentials-under-a-provider.md` must say the
   same. A mismatch there breaks TokenGauge's reader without any error.
 - **Dependencies**: `git diff v<last>..HEAD -- Cargo.toml`. A new dependency
-  needs no docs entry, but check it builds on both release runners (anything
-  linking C is the risk; rustls is fine, native-tls is not).
+  needs no docs entry, but check it builds on both release runners as a static
+  musl binary (anything linking C is the risk; rustls is fine, native-tls is
+  not). A pull request touching `Cargo.toml` or `Cargo.lock` rehearses the
+  release, so its Release run is the check.
 - Commit the sweep as `[master] docs(release): ...` (the script needs a clean
   tree).
 
@@ -64,7 +66,12 @@ gh run watch "$run" -R Arzaroth/remuda --exit-status
 gh release view v<x.y.z> -R Arzaroth/remuda --json assets --jq '.assets[].name'
 ```
 
-Expect `remuda-v<x.y.z>-linux-x86_64.tar.gz` and `...-linux-aarch64.tar.gz`. A
+Expect, per architecture, `remuda-v<x.y.z>-linux-<arch>.tar.gz`,
+`remuda_<x.y.z>_<amd64|arm64>.deb`, `remuda-<x.y.z>-1.<arch>.rpm` and
+`remuda-bin-<x.y.z>-1-<arch>.pkg.tar.zst` with its `.sig`; then
+`remuda-v<x.y.z>-pkgbuild.tar.gz`, `remuda-release-key.asc`, `SHA256SUMS` and
+`SHA256SUMS.asc`. The verify job has already installed every package on a
+clean distribution before publish ran. A
 failed run leaves a pushed tag without a release: read the failing job
 (`gh run view "$run" --log-failed`), fix on `master`, and re-run the workflow
 for the same tag with
@@ -89,6 +96,6 @@ If the user wants their own install upgraded: `remuda --update`, then
 
 ## Done when
 
-The tag is pushed, the release has both archives, the throwaway install reports
+The tag is pushed, the release has every asset above, the throwaway install reports
 the new version, and `CHANGELOG.md` has a dated section for it. Report the
 version and the release URL.

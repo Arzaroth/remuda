@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+### Added
+
+- Packages: each release has a `.deb`, an `.rpm` and Arch packages
+  (`remuda-bin`, and a PKGBUILD that builds from source) for x86_64 and
+  aarch64, with the binary in `/usr/bin`, the completions and the systemd
+  units. `remuda --update` leaves a packaged binary to its package manager.
+- Releases are signed: the `.rpm`s, the Arch packages and `SHA256SUMS` carry
+  signatures from the key in `packaging/remuda.asc`.
+
+### Changed
+
+- `install.sh` checks the archive against the release's `SHA256SUMS` before
+  running anything from it, and refuses a release that has none (anything
+  before this one).
+
+### Fixed
+
+- The release binary is static, so it runs on Debian 12 and Ubuntu 22.04: it
+  needed glibc 2.39 before.
+
 ## [0.18.0] - 2026-10-21
 
 ### Added

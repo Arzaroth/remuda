@@ -1,0 +1,33 @@
+# Maintainer: Marc-Etienne Barrut <lekva+github@arzaroth.com>
+#
+# Repackages the static binary, units and completions of a GitHub release
+# archive. The release workflow attaches a copy of this file with pkgver and
+# sha256sums filled in, and the packages it builds from it.
+
+pkgname=remuda-bin
+pkgver=0.15.0
+pkgrel=1
+pkgdesc="Keep several Claude Code, Codex, Grok, Kimi and Cursor logins and switch the one each CLI uses (release binary)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/Arzaroth/remuda"
+license=('MIT OR WTFPL')
+provides=("remuda=$pkgver")
+conflicts=('remuda')
+options=('!strip' '!debug')
+source_x86_64=("$url/releases/download/v$pkgver/remuda-v$pkgver-linux-x86_64.tar.gz")
+source_aarch64=("$url/releases/download/v$pkgver/remuda-v$pkgver-linux-aarch64.tar.gz")
+sha256sums_x86_64=('SKIP')
+sha256sums_aarch64=('SKIP')
+
+package() {
+  install -Dm755 remuda "$pkgdir/usr/bin/remuda"
+  install -d "$pkgdir/usr/lib/systemd/user"
+  for unit in systemd/*; do
+    sed 's|^ExecStart=%h/\.local/bin/remuda |ExecStart=/usr/bin/remuda |' "$unit" \
+      >"$pkgdir/usr/lib/systemd/user/${unit##*/}"
+  done
+  install -Dm644 completions/remuda.bash "$pkgdir/usr/share/bash-completion/completions/remuda"
+  install -Dm644 completions/_remuda "$pkgdir/usr/share/zsh/site-functions/_remuda"
+  install -Dm644 completions/remuda.fish "$pkgdir/usr/share/fish/vendor_completions.d/remuda.fish"
+  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE LICENSE-MIT LICENSE-WTFPL
+}
