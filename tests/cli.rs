@@ -393,6 +393,53 @@ fn only_import_and_login_start_a_missing_store() {
 }
 
 #[test]
+fn auto_says_where_it_would_move_a_cli_and_moves_nothing() {
+    let home = Home::new();
+    home.sign_in("a-work", "r-work", "u-work");
+    home.ok(&["import", "work"]);
+    home.sign_in("a-perso", "r-perso", "u-perso");
+    home.ok(&["import", "perso"]);
+    assert!(
+        home.ok(&["auto"])
+            .starts_with("auto mode is set up for no CLI")
+    );
+
+    std::fs::create_dir_all(home.path(".config/remuda")).unwrap();
+    std::fs::write(
+        home.path(".config/remuda/config.toml"),
+        "[auto.claude]\nlogins = [\"work\", \"perso\"]\n",
+    )
+    .unwrap();
+    let window = |used: u64| json!({"primary": {"usedPercent": used, "windowMinutes": 300}});
+    write(
+        &home.path(".local/state/tokengauge/tokengauge-usage.json"),
+        &json!({
+            "meta": {"schemaVersion": 2, "updatedAtMs": now_ms()},
+            "payloads": [
+                {"provider": "claude", "credential": "work", "usage": window(20)},
+                {"provider": "claude", "credential": "perso", "usage": window(100)},
+            ],
+        }),
+    );
+
+    let out = home.ok(&["auto"]);
+
+    assert!(
+        out.starts_with("Claude Code: auto mode off, no rule in force\n"),
+        "{out}"
+    );
+    assert!(out.contains("perso"), "{out}");
+    assert!(
+        out.ends_with("  would switch to work: perso's 5-hour window maxed\n"),
+        "{out}"
+    );
+    assert_eq!(
+        read(&home.creds())["claudeAiOauth"]["refreshToken"],
+        "r-perso"
+    );
+}
+
+#[test]
 fn completions_cover_every_command() {
     let home = Home::new();
     let zsh = home.ok(&["completions", "zsh"]);
@@ -402,6 +449,7 @@ fn completions_cover_every_command() {
         "use",
         "label",
         "rename",
+        "auto",
         "serve",
         "open",
         "--update",
