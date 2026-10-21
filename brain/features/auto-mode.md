@@ -13,33 +13,40 @@ TokenGauge's snapshot or the config changes (looked at every 5 s), and at least
 once a minute so a schedule takes effect on time. Auto mode works only while
 `serve` runs; `remuda-serve.service` keeps it running.
 
-`remuda auto` prints, for every CLI the config sets up, what a round would
-decide now and why, and switches nothing.
+A CLI whose auto mode is off is not looked at, so a round costs it nothing.
+`remuda auto` prints, for every CLI the config sets up, on or off, what a round
+would decide now and why, and switches nothing.
 
 ## A round
 
-For each CLI with a section (`App::auto_round`), under the store lock:
+For each CLI whose auto mode is on (`App::auto_round`), under the store lock:
 
 1. Sync the live login back (`ops::sync_live`). A live login remuda could not
    keep makes the round hold: one not stored, an API key or other login it
    cannot store, one it could not confirm, unreadable files.
 2. Read the figures from TokenGauge's snapshot (`auto::figures`). It holds when
-   there is no snapshot, none for this CLI, or the snapshot is older than the
-   CLI's last switch (by hand or by auto mode): it waits for TokenGauge to
-   fetch again. A login whose figures carry an error, are stale or are missing
+   there is no snapshot, none for this CLI, a snapshot over 30 minutes old (the
+   daemon has likely stopped), or one older than the CLI's last switch (by hand
+   or by auto mode): it waits for TokenGauge to fetch again. A login whose figures carry an error, are stale or are missing
    cannot be picked this round. A snapshot that names no credential (before
    TokenGauge 0.37) holds the active login's figures only.
 3. Decide (`auto::decide`, below).
-4. If auto mode is on and the decision is a switch, switch through
-   `ops::switch` exactly as `remuda use` does, never discarding, then nudge
-   TokenGauge. For Codex, a switch waits while any `codex` process runs
-   (`auto::sessions_open`): Codex never takes up a new login while it runs, and
-   a refresh it has in flight writes the old account's tokens into the new
-   file.
+4. If the decision is a switch, switch as `remuda use` does, never
+   discarding (`ops::switch_when`), then nudge TokenGauge. A CLI whose running
+   sessions keep the old login (`Provider::sessions`: Codex) holds instead
+   while one runs (`auto::sessions_open`): Codex never takes up a new login
+   while it runs, and a refresh it has in flight writes the old account's
+   tokens into the new file. The check runs in the decision and again once the
+   live login is locked, right before the write, so a session started during
+   the switch's own sync and refresh is caught. A process counts by name, by a
+   release binary named after its target (`codex-x86_64-...`), or as a
+   `codex.js` script under node, bun or deno; not being able to read `/proc`
+   counts as a session running.
 
 What each CLI's round decided, and the last switch auto mode made, are kept in
 memory and sent to the page with the state. The service's log gets a line for
-each switch, each failed switch (once per error), and each change of decision.
+each switch, each failed switch (once per error), and each change of decision
+(its kind or target, not its reasons, whose figures move every round).
 
 ## The decision
 
@@ -49,16 +56,21 @@ each switch, each failed switch (once per error), and each change of decision.
    in force, the `logins` list is the only tier; with none set, the round holds.
 2. **Reservations.** Outside its schedule, a reserved login is kept for it,
    unless its longest window resets before the schedule next starts: then its
-   headroom would be lost anyway, so it moves to the first tier and is spent
-   first. Inside its schedule a reservation does nothing.
+   headroom would be lost anyway, so it gets a tier of its own ahead of the
+   others and is spent first. Inside its schedule a reservation does nothing.
 3. **Tiers.** The first tier holding a usable login wins. A login is usable
-   when it has figures and none of its windows is at 100%.
+   when it has figures and none of its account's windows is at 100%. A
+   model's or feature's own limit (TokenGauge's extra windows, such as Claude's
+   "Fable only") does not count, unless the login has no other window, as
+   Codex's monthly one. A window whose reset has passed since TokenGauge read
+   it counts as empty.
 4. **The score**, within a tier: the headroom left in the login's longest
    window divided by the hours until it resets (at least one). A login close to
    its weekly reset with headroom left beats one whose week has just started.
 5. **Against the active login.**
    - Already on the best pick: stay.
-   - The active login is maxed: switch now, whatever the dwell.
+   - The active login is maxed, in the rule or not: switch now, whatever the
+     dwell.
    - The active login has no figures: stay, rather than move blind.
    - Switched less than `dwell` ago (default 30 min): stay.
    - The active login is not one the rule allows now: switch.
@@ -77,4 +89,6 @@ wait for one. Claude Code takes up the new login on its next request.
 - [src/serve.rs](../../src/serve.rs) `watch`, `App::auto_round`
 - [src/commands.rs](../../src/commands.rs) `auto`
 - [src/config.rs](../../src/config.rs)
+- [src/ops.rs](../../src/ops.rs) `switch_when`
+- [src/codex.rs](../../src/codex.rs) `sessions`
 - [web/src/components/AutoMode.tsx](../../web/src/components/AutoMode.tsx)

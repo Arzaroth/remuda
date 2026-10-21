@@ -99,7 +99,7 @@ access to anything, and it ends when they stop.
 
 | Route | Does |
 | --- | --- |
-| `GET /api/state` | Same JSON as `ls --json`, plus `providers`, `health`, `usage` and `auto` (each CLI's last auto mode round, or `error` for a config it cannot read) |
+| `GET /api/state` | Same JSON as `ls --json`, plus `providers`, `health`, `usage` and `auto` (each CLI's last auto mode round, `{enabled: false}` for one it is off for, or `error` for a config it cannot read) |
 | `GET /api/events` | A server-sent event stream: `data: changed` when the page should reload the state |
 | `GET /api/config` | `{config, version, problems, path}`: the config as JSON, the version to save against, what auto mode cannot act on |
 | `POST /api/config/check` `{config}` | `{problems}` for a config the page has not saved, a malformed one reported `at: "config"` |
