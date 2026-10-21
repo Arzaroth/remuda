@@ -535,6 +535,58 @@ fn plan_shown(p: &dyn Provider, e: &Entry) -> String {
     }
 }
 
+pub fn auto(
+    store: &Store,
+    lives: &[Live],
+    config: &Path,
+    snapshot: &Path,
+    out: &mut dyn Write,
+) -> Result<()> {
+    let config = crate::config::load(config)?.config;
+    if config.auto.is_empty() {
+        writeln!(
+            out,
+            "auto mode is set up for no CLI: open the page, or add an [auto.<cli>] section to {}",
+            crate::paths::config_file().display()
+        )?;
+        return Ok(());
+    }
+    let usage = crate::gauge::read(snapshot);
+    let switches = crate::runs::switches(store);
+    let now = jiff::Zoned::now();
+    let cx = |id: &str| crate::auto::Context {
+        schedules: &config.schedules,
+        usage: usage.as_ref(),
+        switched_at: switches.get(id).copied(),
+        now: &now,
+    };
+    let mut first = true;
+    for (id, auto) in &config.auto {
+        let Some(live) = lives.iter().find(|l| l.provider.id() == id) else {
+            continue;
+        };
+        if !first {
+            writeln!(out)?;
+        }
+        first = false;
+        let decision = crate::auto::assess(
+            auto,
+            id,
+            &live.state,
+            &cx(id),
+            crate::auto::sessions_open(id),
+        );
+        crate::auto::describe(
+            live.provider.name(),
+            auto,
+            live.state.active_name(),
+            &decision,
+            out,
+        )?;
+    }
+    Ok(())
+}
+
 pub fn rename(
     store: &Store,
     config: &Path,
