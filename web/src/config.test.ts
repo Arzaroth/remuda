@@ -58,6 +58,11 @@ describe('canonical', () => {
     expect(canonical(a)).not.toBe(canonical(b));
   });
 
+  it('keeps an every-day, all-day schedule, which the server keeps', () => {
+    expect(canonical({ schedules: { always: {} } })).not.toBe(canonical({}));
+    expect(canonical({ schedules: {} })).toBe(canonical({}));
+  });
+
   it('keeps an empty tier, which means something', () => {
     const a = sample();
     const b = sample();

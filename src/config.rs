@@ -1015,6 +1015,87 @@ order = [["perso"]]
     }
 
     #[test]
+    fn a_removed_rule_takes_its_comments_and_the_others_keep_theirs() {
+        let text = SAMPLE
+            .replace(
+                "[[auto.claude.rule]]\nwhen  = \"workday\"",
+                "# first\n[[auto.claude.rule]]\nwhen  = \"workday\"",
+            )
+            .replace(
+                "[[auto.claude.rule]]\nwhen    = \"otherwise\"",
+                "# second\n[[auto.claude.rule]]\nwhen    = \"otherwise\"",
+            );
+        let mut c = sample();
+        c.auto.get_mut("claude").unwrap().rules.remove(0);
+
+        let out = written(&text, &c);
+
+        assert!(!out.contains("# first"), "{out}");
+        assert!(
+            out.contains("# second\n[[auto.claude.rule]]\nwhen    = \"otherwise\""),
+            "{out}"
+        );
+        assert_eq!(toml_edit::de::from_str::<Config>(&out).unwrap(), c);
+    }
+
+    #[test]
+    fn moved_rules_keep_their_comments_and_order() {
+        let text = SAMPLE.replace(
+            "[[auto.claude.rule]]\nwhen  = \"workday\"",
+            "# first\n[[auto.claude.rule]]\nwhen  = \"workday\"",
+        );
+        let mut c = sample();
+        c.auto.get_mut("claude").unwrap().rules.swap(0, 1);
+
+        let out = written(&text, &c);
+
+        assert_eq!(toml_edit::de::from_str::<Config>(&out).unwrap(), c);
+        let first = out.find("# first").unwrap();
+        assert!(
+            out[first..].starts_with("# first\n[[auto.claude.rule]]\nwhen  = \"workday\""),
+            "{out}"
+        );
+        assert!(
+            out.find("when    = \"otherwise\"").unwrap() < first,
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn keys_written_at_their_default_stay_with_their_comments() {
+        let text = "[auto.claude]\nenabled = false\ndwell = \"30m\" # default\nmargin = 0.25 # default\nlogins = [\"work\"]\n";
+        let mut c: Config = toml_edit::de::from_str(text).unwrap();
+        assert_eq!(written(text, &c), text);
+        c.auto
+            .get_mut("claude")
+            .unwrap()
+            .logins
+            .push("perso".into());
+        assert_eq!(
+            written(text, &c),
+            text.replace("[\"work\"]", "[\"work\", \"perso\"]")
+        );
+    }
+
+    #[test]
+    fn a_rule_with_no_tiers_and_a_dwell_out_of_range_are_problems() {
+        let c: Config = toml_edit::de::from_str(
+            "[auto.claude]\ndwell = \"30s\"\n[[auto.claude.rule]]\nwhen = \"otherwise\"\norder = []\n",
+        )
+        .unwrap();
+        let problems: Vec<String> = c.check(&stored).iter().map(ToString::to_string).collect();
+        assert_eq!(
+            problems,
+            [
+                "auto.claude.rule[1].order: the rule names no login",
+                "auto.claude.dwell: the least time on a login is between 1 minute and 7 days",
+            ]
+        );
+        let long: Config = toml_edit::de::from_str("[auto.claude]\ndwell = \"169h\"\n").unwrap();
+        assert_eq!(long.check(&stored).len(), 1);
+    }
+
+    #[test]
     fn a_new_file_is_written_from_nothing() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("remuda/config.toml");
