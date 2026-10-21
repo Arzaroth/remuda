@@ -23,6 +23,11 @@ fn load(snapshot: &Path) -> Option<Value> {
     serde_json::from_str(&text).ok()
 }
 
+fn modified_ms(path: &Path) -> Option<i64> {
+    let at = fs::metadata(path).ok()?.modified().ok()?;
+    i64::try_from(at.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis()).ok()
+}
+
 /// Asks TokenGauge's daemon, on the socket beside its snapshot, to fetch now
 /// rather than at its next poll, waiting a second at most. No daemon, no fetch.
 pub fn nudge(snapshot: &Path) {
@@ -70,7 +75,11 @@ pub fn read(snapshot: &Path) -> Option<Value> {
         slot(&mut providers, id, e.get("credential"))["error"] = message.into();
     }
     Some(json!({
-        "updatedAt": data.pointer("/meta/updatedAtMs").and_then(Value::as_i64),
+        // A snapshot from before TokenGauge stamped it is as old as the file.
+        "updatedAt": data
+            .pointer("/meta/updatedAtMs")
+            .and_then(Value::as_i64)
+            .or_else(|| modified_ms(snapshot)),
         "providers": providers,
     }))
 }
