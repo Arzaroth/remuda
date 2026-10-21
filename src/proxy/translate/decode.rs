@@ -18,6 +18,9 @@ pub fn decode(from: Format, upstream: impl BufRead) -> impl Iterator<Item = Even
         tools: HashSet::new(),
         calling: None,
         argued: HashSet::new(),
+        calls: HashSet::new(),
+        finish: None,
+        started: false,
         done: false,
     }
 }
@@ -33,6 +36,11 @@ struct Decoder<R> {
     calling: Option<String>,
     /// Responses: the calls whose arguments came in deltas.
     argued: HashSet<String>,
+    /// Chat: the tool call indices already started.
+    calls: HashSet<u64>,
+    /// Chat: how the answer stopped, said before its usage chunk.
+    finish: Option<Stop>,
+    started: bool,
     done: bool,
 }
 
@@ -48,9 +56,13 @@ impl<R: BufRead> Iterator for Decoder<R> {
                 return None;
             }
             let Some(sse) = self.sse.next() else {
-                self.done = true;
+                self.end();
                 continue;
             };
+            if sse.data.trim() == "[DONE]" {
+                self.end();
+                continue;
+            }
             let Ok(data) = serde_json::from_str::<Value>(&sse.data) else {
                 continue;
             };
@@ -61,7 +73,7 @@ impl<R: BufRead> Iterator for Decoder<R> {
             match self.from {
                 Format::Messages => self.messages(&kind, &data),
                 Format::Responses => self.responses(&kind, &data),
-                Format::Chat => self.done = true,
+                Format::Chat => self.chat(&data),
             }
         }
     }
@@ -88,9 +100,91 @@ fn anthropic_stop(reason: &str) -> Stop {
     }
 }
 
+fn chat_stop(reason: &str) -> Stop {
+    match reason {
+        "length" => Stop::MaxTokens,
+        "tool_calls" | "function_call" => Stop::ToolUse,
+        "content_filter" => Stop::Refusal,
+        _ => Stop::End,
+    }
+}
+
 impl<R> Decoder<R> {
     fn push(&mut self, e: Event) {
         self.pending.push_back(e);
+    }
+
+    /// A chat stream says how it stopped before its usage, and ends with
+    /// `[DONE]` or by closing.
+    fn end(&mut self) {
+        if let Some(stop) = self.finish.take() {
+            self.push(Event::Usage(self.usage));
+            self.push(Event::Stop(stop));
+        }
+        self.done = true;
+    }
+
+    fn chat(&mut self, d: &Value) {
+        if let Some(e) = d.get("error") {
+            self.push(Event::Error {
+                kind: text(e, "/type"),
+                message: text(e, "/message"),
+            });
+            self.done = true;
+            return;
+        }
+        if !self.started {
+            self.started = true;
+            self.push(Event::Start { id: text(d, "/id") });
+        }
+        if let Some(u) = d.get("usage").filter(|u| u.is_object()) {
+            self.usage = Usage {
+                input: count(u, "/prompt_tokens"),
+                output: count(u, "/completion_tokens"),
+                cache_read: count(u, "/prompt_tokens_details/cached_tokens"),
+                cache_write: 0,
+                reasoning: count(u, "/completion_tokens_details/reasoning_tokens"),
+            };
+        }
+        let Some(choice) = d.pointer("/choices/0") else {
+            return;
+        };
+        let delta = &choice["delta"];
+        for key in ["/reasoning_content", "/reasoning"] {
+            let t = text(delta, key);
+            if !t.is_empty() {
+                self.push(Event::Thinking(t));
+            }
+        }
+        let t = text(delta, "/content");
+        if !t.is_empty() {
+            self.push(Event::Text(t));
+        }
+        for (i, call) in delta
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .enumerate()
+        {
+            let index = call
+                .get("index")
+                .and_then(Value::as_u64)
+                .unwrap_or(i as u64);
+            if self.calls.insert(index) {
+                self.push(Event::ToolCall {
+                    id: text(call, "/id"),
+                    name: text(call, "/function/name"),
+                });
+            }
+            let args = text(call, "/function/arguments");
+            if !args.is_empty() {
+                self.push(Event::ToolArguments(args));
+            }
+        }
+        if let Some(reason) = choice.get("finish_reason").and_then(Value::as_str) {
+            self.finish = Some(chat_stop(reason));
+        }
     }
 
     fn messages(&mut self, kind: &str, d: &Value) {
@@ -103,10 +197,7 @@ impl<R> Decoder<R> {
                     + self.usage.cache_read
                     + self.usage.cache_write;
                 self.usage.output = count(m, "/usage/output_tokens");
-                self.push(Event::Start {
-                    id: text(m, "/id"),
-                    model: text(m, "/model"),
-                });
+                self.push(Event::Start { id: text(m, "/id") });
             }
             "content_block_start" => {
                 let b = &d["content_block"];
@@ -123,7 +214,7 @@ impl<R> Decoder<R> {
                             self.push(Event::Thinking(t));
                         }
                     }
-                    Some("tool_use" | "server_tool_use") => self.push(Event::ToolCall {
+                    Some("tool_use") => self.push(Event::ToolCall {
                         id: text(b, "/id"),
                         name: text(b, "/name"),
                     }),
@@ -169,7 +260,6 @@ impl<R> Decoder<R> {
         match kind {
             "response.created" => self.push(Event::Start {
                 id: text(d, "/response/id"),
-                model: text(d, "/response/model"),
             }),
             "response.output_item.added" => {
                 let item = &d["item"];
@@ -184,6 +274,11 @@ impl<R> Decoder<R> {
                 }
             }
             "response.output_text.delta" => self.push(Event::Text(text(d, "/delta"))),
+            "response.reasoning_summary_part.added"
+                if d.get("summary_index").and_then(Value::as_u64) > Some(0) =>
+            {
+                self.push(Event::Thinking("\n\n".to_owned()))
+            }
             "response.reasoning_summary_text.delta" | "response.reasoning_text.delta" => {
                 self.push(Event::Thinking(text(d, "/delta")))
             }

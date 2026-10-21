@@ -1,4 +1,7 @@
-use std::io::{BufRead, Write};
+use std::io::{BufRead, Read, Write};
+
+/// A line longer than this ends the stream rather than the memory.
+pub const MAX_LINE: u64 = 16 * 1024 * 1024;
 
 /// One server-sent event: its name, when it has one, and its data lines
 /// joined.
@@ -10,12 +13,27 @@ pub struct Sse {
 
 /// The events of a stream, ending where the stream ends or breaks.
 pub struct Reader<R> {
-    lines: std::io::Lines<R>,
+    r: R,
 }
 
 impl<R: BufRead> Reader<R> {
     pub fn new(r: R) -> Self {
-        Reader { lines: r.lines() }
+        Reader { r }
+    }
+
+    fn line(&mut self) -> Option<String> {
+        let mut buf = Vec::new();
+        let n = (&mut self.r)
+            .take(MAX_LINE)
+            .read_until(b'\n', &mut buf)
+            .ok()?;
+        if n == 0 || (n as u64 == MAX_LINE && !buf.ends_with(b"\n")) {
+            return None;
+        }
+        if buf.ends_with(b"\n") {
+            buf.pop();
+        }
+        Some(String::from_utf8_lossy(&buf).into_owned())
     }
 }
 
@@ -26,8 +44,8 @@ impl<R: BufRead> Iterator for Reader<R> {
         let mut event = None;
         let mut data: Vec<String> = Vec::new();
         loop {
-            let line = match self.lines.next() {
-                Some(Ok(line)) => line,
+            let line = match self.line() {
+                Some(line) => line,
                 _ if !data.is_empty() => {
                     return Some(Sse {
                         event,

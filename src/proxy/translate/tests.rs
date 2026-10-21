@@ -1,5 +1,7 @@
 use serde_json::{Value, json};
 
+use std::io::Read;
+
 use super::*;
 
 fn events(raw: &str) -> Vec<Value> {
@@ -206,9 +208,9 @@ fn a_responses_request_becomes_an_anthropic_one() {
     );
     assert_eq!(
         out["thinking"],
-        json!({"type": "enabled", "budget_tokens": 2048})
+        Value::Null,
+        "an unsigned tool call cannot think"
     );
-    assert!(out["max_tokens"].as_u64().unwrap() > 2048);
     let m = out["messages"].as_array().unwrap();
     assert_eq!(m[1]["content"][0]["type"], "tool_use");
     assert_eq!(
@@ -430,4 +432,241 @@ fn an_upstream_error_message_is_found() {
     assert_eq!(error_message(r#"{"error":{"message":"bad"}}"#), "bad");
     assert_eq!(error_message(r#"{"detail":"nope"}"#), "nope");
     assert_eq!(error_message("plain"), "plain");
+}
+
+#[test]
+fn thinking_takes_the_shape_the_model_wants() {
+    let ask = |model: &str, extra: Value| {
+        let mut body = json!({"model": model, "messages": [{"role": "user", "content": "hi"}], "reasoning_effort": "low"});
+        for (k, v) in extra.as_object().unwrap() {
+            body[k] = v.clone();
+        }
+        request(Format::Chat, Format::Messages, &body).unwrap().0
+    };
+    let old = ask("claude-sonnet-4-5", json!({}));
+    assert_eq!(
+        old["thinking"],
+        json!({"type": "enabled", "budget_tokens": 2048})
+    );
+    assert!(old["max_tokens"].as_u64().unwrap() > 2048);
+    assert_eq!(
+        ask("claude-3-7-sonnet-20250219", json!({}))["thinking"]["type"],
+        "enabled"
+    );
+    for new in [
+        "claude-opus-4-6",
+        "claude-opus-5-5",
+        "claude-fable-5-1",
+        "claude-x",
+    ] {
+        let out = ask(new, json!({}));
+        assert_eq!(out["thinking"], json!({"type": "adaptive"}), "{new}");
+        assert_eq!(out["output_config"], json!({"effort": "low"}), "{new}");
+    }
+    let forced = ask(
+        "claude-opus-5-5",
+        json!({"tools": [{"type": "function", "function": {"name": "f"}}], "tool_choice": "required"}),
+    );
+    assert_eq!(forced["thinking"], Value::Null);
+    assert_eq!(forced["tool_choice"], json!({"type": "any"}));
+}
+
+#[test]
+fn claudes_signature_survives_a_responses_client() {
+    let (_, out) = run(Format::Messages, Format::Responses, false, CLAUDE_STREAM);
+    let v: Value = serde_json::from_str(&out).unwrap();
+    let reasoning = &v["output"][0];
+    assert_eq!(reasoning["encrypted_content"], "remuda-claude:sig");
+    let body = json!({
+        "model": "claude-opus-5-5",
+        "reasoning": {"effort": "high"},
+        "input": [
+            {"type": "message", "role": "user", "content": "hi"},
+            reasoning,
+            {"type": "function_call", "call_id": "toolu_1", "name": "read", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "toolu_1", "output": "x"},
+        ],
+    });
+    let (out, _, _) = request(Format::Responses, Format::Messages, &body).unwrap();
+    assert_eq!(out["thinking"], json!({"type": "adaptive"}));
+    assert_eq!(
+        out["messages"][1]["content"][0],
+        json!({"type": "thinking", "thinking": "hmm", "signature": "sig"})
+    );
+    let openai = json!({"model": "claude-x", "input": [
+        {"type": "reasoning", "summary": [], "encrypted_content": "OPENAI"},
+        {"type": "message", "role": "user", "content": "hi"},
+    ]});
+    let (out, _, _) = request(Format::Responses, Format::Messages, &openai).unwrap();
+    assert!(
+        !out.to_string().contains("OPENAI"),
+        "an OpenAI signature never reaches Claude"
+    );
+}
+
+#[test]
+fn a_chat_only_provider_takes_any_client() {
+    let body = json!({
+        "model": "glm-4.6",
+        "system": "rules",
+        "max_tokens": 50,
+        "messages": [
+            {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "f", "input": {"a": 1}}]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "done"}]},
+        ],
+        "tools": [{"name": "f", "input_schema": {"type": "object"}}],
+    });
+    let (out, _, _) = request(Format::Messages, Format::Chat, &body).unwrap();
+    assert_eq!(out["stream"], true);
+    assert_eq!(out["stream_options"], json!({"include_usage": true}));
+    let m = out["messages"].as_array().unwrap();
+    assert_eq!(m[0], json!({"role": "system", "content": "rules"}));
+    assert_eq!(
+        m[2]["tool_calls"][0]["function"],
+        json!({"name": "f", "arguments": "{\"a\":1}"})
+    );
+    assert_eq!(
+        m[3],
+        json!({"role": "tool", "tool_call_id": "t1", "content": "done"})
+    );
+    assert_eq!(out["tools"][0]["function"]["name"], "f");
+
+    let chunks = [
+        json!({"id": "c1", "choices": [{"delta": {"role": "assistant", "content": "He"}}]}),
+        json!({"id": "c1", "choices": [{"delta": {"reasoning_content": "think"}}]}),
+        json!({"id": "c1", "choices": [{"delta": {"content": "llo"}}]}),
+        json!({"id": "c1", "choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call_a", "function": {"name": "f", "arguments": "{\"x\""}}]}}]}),
+        json!({"id": "c1", "choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": ":1}"}}]}}]}),
+        json!({"id": "c1", "choices": [{"delta": {"tool_calls": [{"index": 1, "id": "call_b", "function": {"name": "g", "arguments": "{}"}}]}}]}),
+        json!({"id": "c1", "choices": [{"delta": {}, "finish_reason": "tool_calls"}]}),
+        json!({"id": "c1", "choices": [], "usage": {"prompt_tokens": 9, "completion_tokens": 4, "prompt_tokens_details": {"cached_tokens": 2}}}),
+    ];
+    let mut upstream: String = chunks.iter().map(|c| format!("data: {c}\n\n")).collect();
+    upstream.push_str("data: [DONE]\n\n");
+    let (status, out) = run(Format::Chat, Format::Messages, false, &upstream);
+    assert_eq!(status, 200, "{out}");
+    let v: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["stop_reason"], "tool_use");
+    let content = v["content"].as_array().unwrap();
+    assert_eq!(content[0], json!({"type": "text", "text": "He"}));
+    assert_eq!(content[1]["type"], "thinking");
+    assert_eq!(content[2], json!({"type": "text", "text": "llo"}));
+    assert_eq!(
+        content[3],
+        json!({"type": "tool_use", "id": "call_a", "name": "f", "input": {"x": 1}})
+    );
+    assert_eq!(content[4]["id"], "call_b");
+    assert_eq!(v["usage"]["input_tokens"], 7);
+    assert_eq!(v["usage"]["cache_read_input_tokens"], 2);
+
+    let (_, out) = run(Format::Chat, Format::Responses, true, &upstream);
+    assert!(out.contains("response.completed"), "{out}");
+}
+
+#[test]
+fn two_tool_calls_reach_a_chat_client_on_their_own_indices() {
+    let upstream = [
+        json!({"type": "response.output_item.added", "item": {"type": "function_call", "call_id": "a", "name": "f"}}),
+        json!({"type": "response.function_call_arguments.delta", "delta": "{}"}),
+        json!({"type": "response.output_item.added", "item": {"type": "function_call", "call_id": "b", "name": "g"}}),
+        json!({"type": "response.function_call_arguments.delta", "delta": "{\"y\":2}"}),
+        json!({"type": "response.incomplete", "response": {"incomplete_details": {"reason": "max_output_tokens"}}}),
+    ]
+    .iter()
+    .map(|e| format!("data: {e}\n\n"))
+    .collect::<String>();
+    let (_, out) = run(Format::Responses, Format::Chat, true, &upstream);
+    let calls: Vec<Value> = events(&out)
+        .iter()
+        .filter_map(|c| c.pointer("/choices/0/delta/tool_calls/0").cloned())
+        .collect();
+    assert_eq!(calls[0]["index"], 0);
+    assert_eq!(calls[1]["index"], 0);
+    assert_eq!(calls[2]["index"], 1);
+    assert_eq!(
+        calls[3],
+        json!({"index": 1, "function": {"arguments": "{\"y\":2}"}})
+    );
+    assert!(out.contains(r#""finish_reason":"length""#), "{out}");
+}
+
+#[test]
+fn an_error_in_a_stream_keeps_its_kind_for_a_whole_answer() {
+    let limited = "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"slow down\"}}}\n\n";
+    let (status, out) = run(Format::Responses, Format::Messages, false, limited);
+    assert_eq!(status, 429);
+    assert!(out.contains("slow down"), "{out}");
+    let overloaded = "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"busy\"}}\n\n";
+    assert_eq!(
+        run(Format::Messages, Format::Chat, false, overloaded).0,
+        529
+    );
+}
+
+#[test]
+fn codex_answers_are_collected_as_codex_sent_them() {
+    let upstream = [
+        json!({"type": "response.output_item.done", "output_index": 1, "item": {"type": "message", "content": [{"type": "output_text", "text": "hi"}]}}),
+        json!({"type": "response.output_item.done", "output_index": 0, "item": {"type": "reasoning", "encrypted_content": "ENC", "summary": []}}),
+        json!({"type": "response.output_item.done", "output_index": 2, "item": {"type": "custom_tool_call", "name": "x"}}),
+        json!({"type": "response.completed", "response": {"id": "resp_1", "object": "response", "status": "completed", "output": []}}),
+    ]
+    .iter()
+    .map(|e| format!("data: {e}\n\n"))
+    .collect::<String>();
+    let v = collect(upstream.as_bytes()).unwrap();
+    assert_eq!(v["id"], "resp_1");
+    let kinds: Vec<&str> = v["output"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["type"].as_str().unwrap())
+        .collect();
+    assert_eq!(kinds, ["reasoning", "message", "custom_tool_call"]);
+    assert_eq!(v["output"][0]["encrypted_content"], "ENC");
+    let failed =
+        "data: {\"type\":\"error\",\"code\":\"rate_limit_exceeded\",\"message\":\"no\"}\n\n";
+    assert_eq!(
+        collect(failed.as_bytes()).unwrap_err().0,
+        "rate_limit_exceeded"
+    );
+}
+
+#[test]
+fn a_stream_line_with_no_end_is_not_held_whole() {
+    let mut reader = sse::Reader::new(std::io::BufReader::new(
+        std::io::repeat(b'x').take(super::sse::MAX_LINE + 10),
+    ));
+    assert!(reader.next().is_none());
+    let bad = b"data: {\"a\":\"\xff\"}\n\n";
+    assert_eq!(sse::Reader::new(&bad[..]).count(), 1);
+}
+
+#[test]
+fn reasoning_items_keep_their_own_signatures_and_summary_parts_their_breaks() {
+    let upstream = [
+        json!({"type": "response.reasoning_summary_text.delta", "delta": "one"}),
+        json!({"type": "response.reasoning_summary_part.added", "summary_index": 1}),
+        json!({"type": "response.reasoning_summary_text.delta", "delta": "two"}),
+        json!({"type": "response.output_item.done", "item": {"type": "reasoning", "encrypted_content": "E1"}}),
+        json!({"type": "response.output_item.done", "item": {"type": "reasoning", "encrypted_content": "E2"}}),
+        json!({"type": "response.completed", "response": {}}),
+    ]
+    .iter()
+    .map(|e| format!("data: {e}\n\n"))
+    .collect::<String>();
+    let (_, out) = run(Format::Responses, Format::Messages, false, &upstream);
+    let v: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        v["content"][0],
+        json!({"type": "thinking", "thinking": "one\n\ntwo", "signature": "remuda-reasoning:E1"})
+    );
+    assert_eq!(v["content"][1]["signature"], "remuda-reasoning:E2");
+}
+
+#[test]
+fn an_id_keeps_a_prefix_it_already_has() {
+    assert_eq!(encode::id_or("resp_1", "resp_"), "resp_1");
+    assert_eq!(encode::id_or("1", "resp_"), "resp_1");
 }
