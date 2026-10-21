@@ -449,10 +449,10 @@ mod tests {
         assert_eq!(status, 200);
         let body: Value = serde_json::from_str(&body).unwrap();
         assert_eq!(body["object"], "list");
-        assert_eq!(body["data"][0]["owned_by"], "claude");
         let (_, _, body) = get("anthropic-version: 2023-06-01\r\n");
         let body: Value = serde_json::from_str(&body).unwrap();
         assert_eq!(body["data"][0]["type"], "model");
+        assert_eq!(body["data"][0]["id"], "claude-opus-4-5");
         assert_eq!(body["has_more"], false);
     }
 
@@ -535,5 +535,199 @@ mod tests {
             route::route("opencode/claude-sonnet-4-5", &["claude", "opencode"]),
             Some(("opencode".to_owned(), "claude-sonnet-4-5"))
         );
+    }
+
+    #[test]
+    fn grok_goes_out_as_the_grok_cli() {
+        let mut server = mockito::Server::new();
+        let upstream = server
+            .mock("POST", "/responses")
+            .match_header("authorization", Matcher::Regex("^Bearer ey".into()))
+            .match_header("x-xai-token-auth", "xai-grok-cli")
+            .match_header("x-grok-client-identifier", "grok-shell")
+            .match_header(
+                "x-grok-client-version",
+                Matcher::Regex(r"^\d+\.\d+\.\d+$".into()),
+            )
+            .match_header("user-agent", Matcher::Regex("^xai-grok-workspace/".into()))
+            .with_body("{}")
+            .create();
+        let tmp = tempfile::tempdir().unwrap();
+        let exp = crate::fsx::now_ms() / 1000 + 3600;
+        crate::fsx::write_json(
+            &tmp.path().join("auth.json"),
+            &json!({"https://auth.x.ai::client": {"key": fake_jwt(json!({"exp": exp, "sub": "u"})), "refresh_token": "r"}}),
+        )
+        .unwrap();
+        let grok = crate::grok::Grok::at(tmp.path(), crate::grok::Api::local(&server.url()));
+        let p = run(vec![Box::new(grok)]);
+        let (status, _, body) = post(
+            p.port,
+            "/v1/responses",
+            &format!("Authorization: Bearer {KEY}\r\n"),
+            &json!({"model": "grok-4", "input": "hi"}),
+        );
+        assert_eq!(status, 200, "{body}");
+        upstream.assert();
+    }
+
+    #[test]
+    fn kimi_takes_every_format_on_its_own_path() {
+        let mut server = mockito::Server::new();
+        let mocks: Vec<_> = ["/chat/completions", "/responses", "/messages"]
+            .iter()
+            .map(|path| {
+                server
+                    .mock("POST", *path)
+                    .match_header("authorization", "Bearer k-live")
+                    .match_header("x-msh-platform", "kimi_code_cli")
+                    .with_body("{}")
+                    .create()
+            })
+            .collect();
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("credentials")).unwrap();
+        crate::fsx::write_json(
+            &tmp.path().join("credentials/kimi-code.json"),
+            &json!({"access_token": "k-live", "refresh_token": "r", "expires_at": crate::fsx::now_ms() / 1000 + 3600}),
+        )
+        .unwrap();
+        let kimi = crate::kimi::Kimi::at(tmp.path(), crate::kimi::Api::local(&server.url()));
+        let p = run(vec![Box::new(kimi)]);
+        let auth = format!("Authorization: Bearer {KEY}\r\n");
+        for path in ["/v1/chat/completions", "/v1/responses", "/v1/messages"] {
+            let (status, _, body) = post(p.port, path, &auth, &json!({"model": "kimi-for-coding"}));
+            assert_eq!(status, 200, "{path}: {body}");
+        }
+        for m in mocks {
+            m.assert();
+        }
+    }
+
+    #[test]
+    fn opencode_sends_each_family_to_its_makers_path() {
+        let mut server = mockito::Server::new();
+        let mocks = [
+            server
+                .mock("POST", "/anthropic/v1/messages")
+                .match_header("x-api-key", "oc-1")
+                .with_body("{}")
+                .create(),
+            server
+                .mock("POST", "/openai/v1/responses")
+                .match_header("authorization", "Bearer oc-1")
+                .with_body("{}")
+                .create(),
+            server
+                .mock("POST", "/openai/v1/chat/completions")
+                .match_header("authorization", "Bearer oc-1")
+                .with_body("{}")
+                .create(),
+        ];
+        let opencode = crate::apikey::ApiKey::opencode()
+            .with(None, |name| {
+                (name == "OPENCODE_API_KEY").then(|| "oc-1".to_owned())
+            })
+            .inferring_at(&server.url());
+        let p = run(vec![Box::new(opencode)]);
+        let auth = format!("Authorization: Bearer {KEY}\r\n");
+        let send = |path: &str, model: &str| post(p.port, path, &auth, &json!({"model": model})).0;
+        assert_eq!(send("/v1/messages", "opencode/claude-sonnet-4-5"), 200);
+        assert_eq!(send("/v1/responses", "opencode/gpt-5"), 200);
+        assert_eq!(send("/v1/chat/completions", "opencode/glm-4.6"), 200);
+        assert_eq!(send("/v1/chat/completions", "opencode/gemini-3-pro"), 400);
+        for m in mocks {
+            m.assert();
+        }
+    }
+
+    #[test]
+    fn codex_is_sent_none_of_the_fields_it_refuses() {
+        let mut server = mockito::Server::new();
+        let upstream = server
+            .mock("POST", "/responses")
+            .match_request(|req| {
+                let body: Value = serde_json::from_slice(req.body().unwrap()).unwrap();
+                [
+                    "temperature",
+                    "top_p",
+                    "max_output_tokens",
+                    "previous_response_id",
+                    "stream_options",
+                ]
+                .iter()
+                .all(|f| body.get(f).is_none())
+                    && req.header("chatgpt-account-id").is_empty()
+            })
+            .with_body("data: {}\n\n")
+            .create();
+        let tmp = tempfile::tempdir().unwrap();
+        let exp = crate::fsx::now_ms() / 1000 + 3600;
+        let claims = json!({"exp": exp, "https://api.openai.com/auth": {"chatgpt_account_user_id": "user-1"}});
+        crate::fsx::write_json(
+            &tmp.path().join("auth.json"),
+            &json!({"tokens": {"access_token": fake_jwt(claims.clone()), "id_token": fake_jwt(claims), "refresh_token": "r"}}),
+        )
+        .unwrap();
+        let codex = Codex::at(tmp.path(), codex::Api::local(&server.url()), 0);
+        let p = run(vec![Box::new(codex)]);
+        let (status, _, body) = post(
+            p.port,
+            "/v1/responses",
+            &format!("Authorization: Bearer {KEY}\r\nsession_id: s-1\r\n"),
+            &json!({"model": "gpt-5", "input": "hi", "stream": true, "temperature": 1, "top_p": 1,
+                    "max_output_tokens": 9, "previous_response_id": "r0", "stream_options": {}}),
+        );
+        assert_eq!(status, 200, "{body}");
+        upstream.assert();
+    }
+
+    #[test]
+    fn claude_counts_tokens_on_its_own_endpoint() {
+        let mut server = mockito::Server::new();
+        let upstream = server
+            .mock("POST", "/v1/messages/count_tokens")
+            .match_query(Matcher::UrlEncoded("beta".into(), "true".into()))
+            .with_body(r#"{"input_tokens":3}"#)
+            .create();
+        let (_tmp, claude) = signed_in_claude(&server, HOUR);
+        let p = run(vec![Box::new(claude)]);
+        let (status, _, body) = post(
+            p.port,
+            "/v1/messages/count_tokens",
+            &format!("x-api-key: {KEY}\r\n"),
+            &json!({"model": "claude-x", "messages": []}),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(body, r#"{"input_tokens":3}"#);
+        upstream.assert();
+    }
+
+    #[test]
+    fn an_anthropic_client_is_offered_only_models_it_can_reach() {
+        let server = mockito::Server::new();
+        let (_tmp, claude) = signed_in_claude(&server, HOUR);
+        let (_ctmp, codex) = signed_in_codex(&server);
+        let p = run(vec![Box::new(claude), Box::new(codex)]);
+        let get = |extra: &str| {
+            let (_, _, body) = send(
+                p.port,
+                &format!("GET /v1/models HTTP/1.1\r\nAuthorization: Bearer {KEY}\r\n{extra}\r\n"),
+            );
+            let v: Value = serde_json::from_str(&body).unwrap();
+            v["data"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|m| m["id"].as_str().unwrap().to_owned())
+                .collect::<Vec<_>>()
+        };
+        let anthropic = get("anthropic-version: 2023-06-01\r\n");
+        assert!(
+            anthropic.iter().all(|m| m.starts_with("claude-")),
+            "{anthropic:?}"
+        );
+        let openai = get("");
+        assert!(openai.iter().all(|m| m.starts_with("gpt-")), "{openai:?}");
     }
 }

@@ -13,6 +13,9 @@ use crate::store::Entry;
 // Mirrors xai-org/grok-build's `xai-grok-login`.
 const ISSUER: &str = "https://auth.x.ai";
 const INFERENCE: &str = "https://cli-chat-proxy.grok.com/v1";
+/// The chat proxy refuses a client older than its floor with a 426; this is
+/// the grok CLI release its headers are copied from.
+const CLI_VERSION: &str = "1.0.46";
 const CLIENT_ID: &str = "b1a00492-073a-47ea-816f-4c329264a828";
 const OIDC_SCOPE: &str = "https://auth.x.ai::";
 const LOGIN_SCOPE: &str = "openid profile email offline_access grok-cli:access api:access conversations:read conversations:write workspaces:read workspaces:write";
@@ -289,10 +292,17 @@ impl Provider for Grok {
         }
         Some(Upstream {
             url: format!("{}/responses", self.api.inference),
-            headers: vec![(
-                "authorization",
-                format!("Bearer {}", self.access_token(creds)?),
-            )],
+            headers: vec![
+                (
+                    "authorization",
+                    format!("Bearer {}", self.access_token(creds)?),
+                ),
+                ("x-xai-token-auth", "xai-grok-cli".to_owned()),
+                ("x-grok-client-version", CLI_VERSION.to_owned()),
+                ("x-grok-client-identifier", "grok-shell".to_owned()),
+                ("x-authenticateresponse", "authenticate-response".to_owned()),
+                ("user-agent", format!("xai-grok-workspace/{CLI_VERSION}")),
+            ],
         })
     }
 }
