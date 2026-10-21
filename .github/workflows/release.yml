@@ -14,6 +14,8 @@ permissions:
   contents: write
 
 jobs:
+  # Static musl: the C rustls compiles against the runner's glibc asked for
+  # 2.39, and the binary would not start on Debian 12 or Ubuntu 22.04.
   binary:
     strategy:
       matrix:
@@ -23,6 +25,8 @@ jobs:
           - arch: aarch64
             runs-on: ubuntu-24.04-arm
     runs-on: ${{ matrix.runs-on }}
+    env:
+      TARGET: ${{ matrix.arch }}-unknown-linux-musl
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -33,14 +37,26 @@ jobs:
       - name: Test
         run: cargo test --locked
 
-      - name: Build
-        run: cargo build --release --locked
+      - name: musl
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools
+          rustup target add "$TARGET"
 
-      - name: Check the binary runs and agrees with the tag
+      - name: Build
+        run: cargo build --release --locked --target "$TARGET"
+
+      - name: Check the binary is static, runs and agrees with the tag
         env:
           REF_NAME: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
-          printed=$(target/release/remuda --version)
+          binary="target/$TARGET/release/remuda"
+          if readelf -d "$binary" | grep -q NEEDED; then
+            readelf -d "$binary"
+            echo "::error::the binary links a shared library"
+            exit 1
+          fi
+          printed=$("$binary" --version)
           echo "$printed"
           if [[ $printed != "remuda ${REF_NAME#v}" ]]; then
             echo "::error::tag $REF_NAME does not match the binary's version ($printed)"
@@ -51,7 +67,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: remuda-${{ matrix.arch }}
-          path: target/release/remuda
+          path: target/${{ env.TARGET }}/release/remuda
           if-no-files-found: error
 
   release:
