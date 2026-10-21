@@ -35,6 +35,8 @@ shared.
 | Which OAuth endpoints and client ids, and where did they come from? | [architecture/providers.md](architecture/providers.md) |
 | Is the local page safe to leave running? | [architecture/web.md](architecture/web.md) |
 | How does `remuda open` find the page, and what runs it as a service? | [architecture/web.md](architecture/web.md) |
+| How do I point an OpenAI or Anthropic client at my logins? | [features/proxy.md](features/proxy.md) |
+| Which login does a proxied request spend, and what is it sent with? | [architecture/proxy.md](architecture/proxy.md) |
 | How is a release built, installed and updated? | [architecture/distribution.md](architecture/distribution.md) |
 | How do tests avoid real logins and the network? | [architecture/testing.md](architecture/testing.md) |
 | What does `claude/work` mean vs `work`? | [features/names-and-labels.md](features/names-and-labels.md) |
@@ -50,4 +52,5 @@ shared.
 | Names and labels | [features/names-and-labels.md](features/names-and-labels.md) |
 | Auto mode | [features/auto-mode.md](features/auto-mode.md) |
 | The local page | [features/web-page.md](features/web-page.md) |
+| The proxy | [features/proxy.md](features/proxy.md) |
 | Completions and self-update | [features/completions-and-update.md](features/completions-and-update.md) |

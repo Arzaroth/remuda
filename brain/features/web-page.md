@@ -1,6 +1,6 @@
 # The local page
 
-`remuda serve` opens a page in four parts:
+`remuda serve` opens a page in five parts:
 
 - A health line: whether the refresh timer is enabled, when it last ran, how
   many credentials it refreshed and, behind a toggle that opens a list under
@@ -57,6 +57,13 @@
   cancels, asking for a second click ("Discard?") when the value was changed.
   An open editor, and what was typed in it, survives the cards being
   redrawn after another action.
+- The API proxy card, under Add an account ([proxy.md](proxy.md)): an on/off
+  switch and whether it listens, an OpenAI / Claude switch that shows that
+  protocol's base URL with a copy button, the access key masked with show and
+  copy buttons (a picker when there are several), Manage keys to make and
+  remove keys (a second click removes) and change the port, and the models it
+  routes per CLI with the formats each takes. The protocol last picked is
+  remembered.
 
 The theme follows the system until the Auto / Light / Dark switch in the
 header overrides it; the choice is kept in `localStorage` and applied in

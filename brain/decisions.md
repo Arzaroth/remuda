@@ -261,6 +261,40 @@ tokens into the new file (codex-cli 0.162.1,
 `codex-rs/login/src/auth/manager.rs`). So auto mode switches Codex only while
 no `codex` process runs.
 
+## The proxy spends the active login and never refreshes it
+
+A request through the proxy uses the login `remuda use` made live, read again
+on every request, so switching a CLI switches its clients too and there is no
+second "active" login to keep in step. Refreshing it is the CLI's job, as
+everywhere else in remuda ("Never refresh the active credential"): the CLI
+holds that refresh token, and a refresh behind its back would leave it
+holding a dead one. So an expired access token is refused with a 401 that
+says to run the CLI or switch, rather than renewed. Pinning the proxy to a
+stored, inactive login it could refresh was turned down: it never stalls,
+but it is a second active login per CLI to manage.
+
+## The proxy has its own listener, guarded by its own keys
+
+The page's listener reads bodies of at most 64 KiB, refuses chunked ones and
+buffers every answer, which its guarantees rest on; a proxy streams
+multi-megabyte requests and long answers. So the proxy runs a second listener,
+reusing only the head reader and the connection slots. Its guard is an access
+key the client sends as an API key, checked before any body is read, not the
+page's token, `Host` and `Origin`: proxy clients are SDKs and CLIs that know
+nothing of the page. It binds `127.0.0.1` only; listening further is the hub
+work on the roadmap. The keys sit in clear in `proxy.json`, beside the
+credentials they give access to, so the page can show and copy them again.
+
+## The proxy routes by model name, and a Claude token goes out as Claude Code
+
+One base URL serves every client: the path gives the format, the model's
+prefix gives the provider, as CLIProxyAPI does, and `provider/model` covers a
+name two providers share. A Claude subscription token is accepted for Claude
+Code's own requests, so a request from any other client is sent with Claude
+Code's headers and its identity line as the first system block. That is
+against Anthropic's consumer terms for a client that is not Claude Code, and
+the README says so; Claude Code's own requests pass untouched.
+
 ## Sources
 
 - [src/ops.rs](../src/ops.rs)
@@ -272,3 +306,4 @@ no `codex` process runs.
 - [src/served.rs](../src/served.rs)
 - [web/](../web/)
 - [src/project.rs](../src/project.rs)
+- [src/proxy/](../src/proxy/)

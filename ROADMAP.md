@@ -65,6 +65,12 @@ today: it needs a bind address the user chooses, a pairing step that gives each
 satellite its own token (revocable, never on a command line), and, on a plain
 LAN with no tailnet, TLS or a warning that traffic is in clear.
 
+The proxy on `127.0.0.1` exists ([brain/features/proxy.md](brain/features/proxy.md)):
+it spends the active login of whichever CLI a model names, with per-client
+keys made on the page. What the second way still needs is the bind address,
+pairing and TLS above, and translation between formats, so that a client
+speaking one format can reach a provider that takes another.
+
 ## Banked resets: what is left
 
 A Claude login's banked resets are on its card, and the page spends one

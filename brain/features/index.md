@@ -10,4 +10,5 @@
 | Team seats | [team-seats.md](team-seats.md) | `ls` |
 | Auto mode | [auto-mode.md](auto-mode.md) | `auto`, `serve`, `config.toml` |
 | The local page | [web-page.md](web-page.md) | `serve`, `open`, the service |
+| The proxy | [proxy.md](proxy.md) | `serve`, the page's API proxy card |
 | Completions and self-update | [completions-and-update.md](completions-and-update.md) | `completions`, `--update`, `--check-update` |
