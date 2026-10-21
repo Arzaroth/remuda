@@ -419,6 +419,9 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
           >
             <option value="">stay where it is</option>
             <For each={loginsOf(props.p.id)}>{(n) => <option value={n}>go to {n}</option>}</For>
+            <Show when={a().fallback && !loginsOf(props.p.id).includes(a().fallback!)}>
+              <option value={a().fallback}>go to {a().fallback} (missing)</option>
+            </Show>
           </select>
         </label>
       </Show>
