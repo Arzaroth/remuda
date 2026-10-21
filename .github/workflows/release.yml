@@ -86,6 +86,13 @@ jobs:
           done
           ls -l dist
 
+      # What scripts/install.sh checks a download against before running it.
+      - name: SHA256SUMS
+        run: |
+          cd dist
+          sha256sum -- * >SHA256SUMS
+          cat SHA256SUMS
+
       - name: Extract release notes from CHANGELOG
         env:
           REF_NAME: ${{ github.event.inputs.tag || github.ref_name }}
@@ -108,3 +115,4 @@ jobs:
           generate_release_notes: true
           files: |
             dist/*.tar.gz
+            dist/SHA256SUMS
