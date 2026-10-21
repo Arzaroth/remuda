@@ -1,4 +1,5 @@
 mod apikey;
+mod auto;
 mod browser;
 mod claude;
 mod codex;
@@ -121,6 +122,8 @@ enum Cmd {
     /// Delete a stored credential. NAME or PROVIDER/NAME.
     #[command(alias = "rm")]
     Remove { name: String },
+    /// Say which login auto mode puts each CLI on now, and why, without switching.
+    Auto,
     /// Serve a local page to list, switch and sign in credentials from the browser.
     Serve {
         #[arg(long, default_value_t = 7429)]
@@ -153,6 +156,7 @@ impl Cmd {
             Cmd::Env { .. } => Some("printing a key"),
             Cmd::Rename { .. } => Some("renaming"),
             Cmd::Remove { .. } => Some("removing"),
+            Cmd::Auto => Some("checking auto mode"),
             Cmd::Serve { .. } => Some("serving"),
             Cmd::Import { .. }
             | Cmd::Login { .. }
@@ -453,6 +457,16 @@ fn main() -> Result<()> {
                 bail!("{skipped} CLI(s) skipped");
             }
             Ok(())
+        }
+        Cmd::Auto => {
+            let lives = commands::sync_all(&store, &providers)?;
+            commands::auto(
+                &store,
+                &lives,
+                &paths::config_file(),
+                &paths::tokengauge_snapshot(),
+                out,
+            )
         }
         Cmd::Remove { name } => {
             let (p, name) = commands::resolve(&store, &providers, &name)?;
