@@ -14,6 +14,17 @@ use crate::store::Store;
 const WINDOW_MINUTES: u64 = 300;
 /// An inactive login's token is renewed first when it has less than this left.
 const FRESH_FOR_MS: i64 = 5 * 60_000;
+/// The least time between two pings of one login, whatever TokenGauge says.
+const MIN_GAP_MS: i64 = 5 * 60_000;
+/// How long a failed ping waits before it is tried again.
+const RETRY_MS: i64 = 10 * 60_000;
+
+/// When a login was last pinged, and whether that ping went through.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Last {
+    pub at: i64,
+    pub ok: bool,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Due {
@@ -23,14 +34,15 @@ pub enum Due {
 }
 
 /// Whether `name`'s 5-hour window is closed, from TokenGauge's figures. A
-/// login already pinged waits for a snapshot newer than its ping, so it is
-/// never pinged twice before TokenGauge has looked again.
+/// login pinged before waits until TokenGauge has asked about it since
+/// (`asked`), so it is never pinged twice on the same figures; a failed ping
+/// is tried again after a while.
 pub fn due(
     figures: &Result<BTreeMap<String, Figures>, String>,
     name: &str,
     now: Timestamp,
-    last_ping: Option<i64>,
-    updated: Option<i64>,
+    last: Option<Last>,
+    asked: Option<i64>,
 ) -> Due {
     let figures = match figures {
         Ok(f) => f,
@@ -50,10 +62,17 @@ pub fn due(
     if let Some(resets_at) = window.resets_at.filter(|at| *at > now) {
         return Due::Open { resets_at };
     }
-    if let Some(ping) = last_ping
-        && updated.is_none_or(|u| u <= ping)
-    {
-        return Due::Not("waiting for TokenGauge to see the last ping".into());
+    if let Some(last) = last {
+        let since = now.as_millisecond() - last.at;
+        if !last.ok && since < RETRY_MS {
+            let minutes = (RETRY_MS - since + 59_999) / 60_000;
+            return Due::Not(format!(
+                "the last ping failed; trying again in {minutes} min"
+            ));
+        }
+        if last.ok && (since < MIN_GAP_MS || asked.is_none_or(|a| a <= last.at)) {
+            return Due::Not("waiting for TokenGauge to see the last ping".into());
+        }
     }
     Due::Now
 }
@@ -69,13 +88,15 @@ pub struct Planned {
 /// Every login named in `[warm]`. `active(provider)` is the login the CLI is
 /// on, or why nothing of that provider may be pinged (a live login remuda
 /// cannot tie to a stored one could be any of them). `last(provider, name)`
-/// is when that login was last pinged.
+/// is when that login was last pinged. Each login is judged by when
+/// TokenGauge last asked about it, not by the snapshot's own time: it carries
+/// a login the CLI is not on between asks.
 pub fn plan(
     warm: &BTreeMap<String, Vec<String>>,
     usage: Option<&Value>,
     switches: &BTreeMap<String, i64>,
     active: &dyn Fn(&str) -> Result<Option<String>, String>,
-    last: &dyn Fn(&str, &str) -> Option<i64>,
+    last: &dyn Fn(&str, &str) -> Option<Last>,
     now: Timestamp,
 ) -> Vec<Planned> {
     let updated = usage
@@ -83,7 +104,21 @@ pub fn plan(
         .and_then(Value::as_i64);
     let mut out = Vec::new();
     for (provider, names) in warm {
-        let figures = active(provider).and_then(|active| {
+        let on = active(provider);
+        let asked = |name: &str| {
+            let p = usage?.pointer(&format!("/providers/{provider}"))?;
+            let own = p
+                .get("accounts")
+                .and_then(|a| a.get(name))
+                .filter(|a| !a.is_null());
+            let current = on.as_ref().ok().and_then(Option::as_deref) == Some(name);
+            let at = own
+                .or_else(|| current.then_some(p))?
+                .get("askedAt")?
+                .as_str()?;
+            at.parse::<Timestamp>().ok().map(|t| t.as_millisecond())
+        };
+        let figures = on.clone().and_then(|active| {
             let switched = switches
                 .get(provider)
                 .and_then(|ms| Timestamp::from_millisecond(*ms).ok());
@@ -93,7 +128,13 @@ pub fn plan(
             out.push(Planned {
                 provider: provider.clone(),
                 name: name.clone(),
-                due: due(&figures, name, now, last(provider, name), updated),
+                due: due(
+                    &figures,
+                    name,
+                    now,
+                    last(provider, name),
+                    asked(name).or(updated),
+                ),
             });
         }
     }
@@ -241,36 +282,62 @@ mod tests {
         )]));
         assert!(not(due(&missing, "work", now, None, None)).contains("boom"));
 
-        let ping = now.as_millisecond() - 60_000;
-        assert!(
-            not(due(
-                &known("work", vec![five(None)]),
-                "work",
-                now,
-                Some(ping),
-                Some(ping - 1)
-            ))
-            .contains("waiting")
+        let ping = now.as_millisecond() - 10 * 60_000;
+        let ok = Some(Last { at: ping, ok: true });
+        let closed = known("work", vec![five(None)]);
+        assert!(not(due(&closed, "work", now, ok, Some(ping - 1))).contains("waiting"));
+        assert!(not(due(&closed, "work", now, ok, None)).contains("waiting"));
+        assert_eq!(due(&closed, "work", now, ok, Some(ping + 1)), Due::Now);
+
+        let recent = Some(Last {
+            at: now.as_millisecond() - 60_000,
+            ok: true,
+        });
+        let asked = Some(now.as_millisecond());
+        assert!(not(due(&closed, "work", now, recent, asked)).contains("waiting"));
+
+        let failed = Some(Last {
+            at: now.as_millisecond() - 3 * 60_000,
+            ok: false,
+        });
+        assert!(not(due(&closed, "work", now, failed, None)).contains("again in 7 min"));
+        let failed = Some(Last {
+            at: now.as_millisecond() - 11 * 60_000,
+            ok: false,
+        });
+        assert_eq!(due(&closed, "work", now, failed, None), Due::Now);
+    }
+
+    #[test]
+    fn a_login_waits_for_its_own_ask_not_the_snapshot() {
+        let now = t(NOW);
+        let ping = now.as_millisecond() - 10 * 60_000;
+        let closed = serde_json::json!({"windows": [
+            {"title": "5h", "minutes": 300, "usedPercent": 0, "resetsAt": null, "extra": false}
+        ]});
+        let mut perso = closed.clone();
+        perso["askedAt"] = "2026-10-21T09:00:00Z".into();
+        let mut work = closed.clone();
+        work["askedAt"] = "2026-10-21T09:59:00Z".into();
+        let usage = serde_json::json!({
+            "updatedAt": now.as_millisecond(),
+            "providers": {"claude": {"accounts": {"perso": perso, "work": work}}},
+        });
+        let warm = BTreeMap::from([("claude".to_owned(), vec!["perso".into(), "work".into()])]);
+        let planned = plan(
+            &warm,
+            Some(&usage),
+            &BTreeMap::new(),
+            &|_| Ok(Some("work".into())),
+            &|_, _| Some(Last { at: ping, ok: true }),
+            now,
         );
-        assert!(
-            not(due(
-                &known("work", vec![five(None)]),
-                "work",
-                now,
-                Some(ping),
-                None
-            ))
-            .contains("waiting")
-        );
+        let dues: Vec<_> = planned.iter().map(|p| (p.name.as_str(), &p.due)).collect();
+        assert!(matches!(dues[0], ("perso", Due::Not(_))), "{dues:?}");
+        assert_eq!(dues[1], ("work", &Due::Now));
         assert_eq!(
-            due(
-                &known("work", vec![five(None)]),
-                "work",
-                now,
-                Some(ping),
-                Some(ping + 1)
-            ),
-            Due::Now
+            describe(&planned[1]),
+            "keep warm claude/work: its 5-hour window is closed; remuda serve opens it"
         );
     }
 

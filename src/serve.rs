@@ -177,8 +177,6 @@ impl App {
         }
     }
 
-    /// One round of auto mode: decide for every CLI config.toml sets up, and
-    /// switch the ones it is on for. What it decided is kept for the page.
     /// Pings each login named in `[warm]` whose 5-hour window has closed,
     /// one at a time, never holding the store lock across a ping.
     pub fn warm_round(&self, now: jiff::Timestamp) {
@@ -215,21 +213,23 @@ impl App {
             runs::switches(&self.store)
         };
         let last = |p: &str, n: &str| {
-            memory
-                .get(&format!("{p}/{n}"))
-                .and_then(|m| m["lastPing"].as_i64())
+            let m = memory.get(&format!("{p}/{n}"))?;
+            Some(warm::Last {
+                at: m["lastPing"].as_i64()?,
+                ok: m["lastOk"].as_bool().unwrap_or(true),
+            })
         };
         let active = |id: &str| actives.get(id).cloned().unwrap_or(Ok(None));
         let planned = warm::plan(&warm, usage.as_ref(), &switches, &active, &last, now);
         let mut pinged = false;
         for planned in planned {
             let key = format!("{}/{}", planned.provider, planned.name);
-            let mut seen = memory.get(&key).cloned().unwrap_or_else(|| json!({}));
-            let last_ping = seen.get("lastPing").cloned();
-            seen = match planned.due {
+            let before = memory.get(&key).cloned().unwrap_or_else(|| json!({}));
+            let mut seen = match planned.due {
                 warm::Due::Open { resets_at } => {
                     json!({"state": "open", "resetsAt": resets_at.as_millisecond()})
                 }
+                warm::Due::Not(_) if before["state"] == "failed" => before.clone(),
                 warm::Due::Not(why) => json!({"state": "waiting", "why": why}),
                 warm::Due::Now => {
                     let Some(p) = self
@@ -248,32 +248,31 @@ impl App {
                             warm::creds(&self.store, p, &planned.name, active.as_deref())
                         })
                     };
-                    let at = fsx::now_ms();
                     let done = creds.and_then(|c| proxy::ping(p, &c));
-                    pinged = true;
+                    let at = fsx::now_ms();
                     match done {
                         Ok(model) => {
+                            pinged = true;
                             eprintln!("keep warm: opened {key}'s 5-hour window on {model}");
-                            json!({"state": "pinged", "at": at, "model": model})
+                            json!({"state": "pinged", "at": at, "model": model,
+                                   "lastPing": at, "lastOk": true})
                         }
                         Err(e) => {
                             let error = format!("{e:#}");
-                            if memory.get(&key).and_then(|m| m["error"].as_str())
-                                != Some(error.as_str())
-                            {
+                            if before["error"].as_str() != Some(error.as_str()) {
                                 eprintln!("keep warm: could not ping {key}: {error}");
                             }
-                            json!({"state": "failed", "at": at, "error": error})
+                            json!({"state": "failed", "at": at, "error": error,
+                                   "lastPing": at, "lastOk": false})
                         }
                     }
                 }
             };
-            match (&seen["state"], seen.get("at")) {
-                (s, Some(at)) if s == "pinged" || s == "failed" => seen["lastPing"] = at.clone(),
-                _ => {
-                    if let Some(l) = last_ping {
-                        seen["lastPing"] = l;
-                    }
+            for k in ["lastPing", "lastOk"] {
+                if seen.get(k).is_none()
+                    && let Some(v) = before.get(k)
+                {
+                    seen[k] = v.clone();
                 }
             }
             memory.insert(key, seen);
@@ -284,6 +283,8 @@ impl App {
         }
     }
 
+    /// One round of auto mode: decide for every CLI config.toml sets up, and
+    /// switch the ones it is on for. What it decided is kept for the page.
     pub fn auto_round(&self, now: &Zoned) {
         let config = match config::load(&self.places.config) {
             Ok(l) => l.config,
@@ -1372,16 +1373,78 @@ mod tests {
         assert!(warm()["claude/work"]["lastPing"].is_i64());
 
         std::thread::sleep(std::time::Duration::from_millis(5));
-        snapshot(&e, crate::fsx::now_ms(), 3, 3);
-        std::fs::write(places(&e).config, "[warm]\nclaude = [\"work\"]\n").unwrap();
-        app.warm_round(jiff::Timestamp::now());
+        let asked = |ms: i64| jiff::Timestamp::from_millisecond(ms).unwrap().to_string();
+        let usage = |at: String| json!({"updatedAt": at, "primary": {"usedPercent": 0, "windowMinutes": 300}});
+        std::fs::write(
+            places(&e).snapshot,
+            json!({
+                "meta": {"schemaVersion": 2, "updatedAtMs": crate::fsx::now_ms()},
+                "payloads": [
+                    {"provider": "claude", "credential": "perso", "usage": usage(asked(crate::fsx::now_ms() - HOUR))},
+                    {"provider": "claude", "credential": "work", "usage": usage(asked(crate::fsx::now_ms()))},
+                ],
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let later = jiff::Timestamp::now() + jiff::SignedDuration::from_mins(6);
+        app.warm_round(later);
         assert_eq!(warm()["claude/work"]["state"], "pinged");
+        assert_eq!(
+            warm()["claude/perso"]["state"],
+            "waiting",
+            "TokenGauge carried perso's figures from before its ping"
+        );
+        assert!(heard().contains("refresh"));
+
+        std::fs::write(places(&e).config, "[warm]\nclaude = [\"work\"]\n").unwrap();
+        app.warm_round(later);
+        assert_eq!(warm()["claude/work"]["state"], "waiting");
         assert!(
             warm().get("claude/perso").is_none(),
             "a login taken off the list is forgotten"
         );
         work.assert();
         perso.assert();
+    }
+
+    #[test]
+    fn keep_warm_backs_off_after_a_failed_ping_and_keeps_its_error() {
+        let mut server = mockito::Server::new();
+        let refused = server
+            .mock("POST", "/v1/messages")
+            .match_query(mockito::Matcher::Any)
+            .with_status(429)
+            .with_body(
+                r#"{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}"#,
+            )
+            .expect(2)
+            .create();
+        let e = env(&server.url());
+        e.stored("work", "u-work", HOUR);
+        std::fs::write(places(&e).config, "[warm]\nclaude = [\"work\"]\n").unwrap();
+        let app = app(&e, &server.url());
+        let daemon =
+            std::os::unix::net::UnixListener::bind(e.tmp.path().join("tokengauge.sock")).unwrap();
+        daemon.set_nonblocking(true).unwrap();
+        let warm = || call(&app, "GET", "/api/state", Value::Null).1["warm"]["claude/work"].clone();
+
+        snapshot(&e, crate::fsx::now_ms(), 3, 3);
+        app.warm_round(jiff::Timestamp::now());
+        assert_eq!(warm()["state"], "failed");
+        assert!(warm()["error"].as_str().unwrap().contains("slow down"));
+        assert!(daemon.accept().is_err(), "a failed ping nudges nothing");
+
+        snapshot(&e, crate::fsx::now_ms() + 1, 3, 3);
+        app.warm_round(jiff::Timestamp::now() + jiff::SignedDuration::from_mins(5));
+        assert_eq!(
+            warm()["state"],
+            "failed",
+            "the error stays shown until a retry"
+        );
+        app.warm_round(jiff::Timestamp::now() + jiff::SignedDuration::from_mins(11));
+        assert_eq!(warm()["state"], "failed");
+        refused.assert();
     }
 
     #[test]
