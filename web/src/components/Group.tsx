@@ -1,10 +1,10 @@
 import { createSignal, For, Match, onMount, Show, Switch } from 'solid-js';
 import { brand } from '../brand';
 import { createConfirm } from '../confirm';
-import { date, DAY, HOUR, plural, span, until, usedTone } from '../format';
+import { ago, date, DAY, HOUR, plural, span, until, usedTone } from '../format';
 import { act, now, store } from '../state';
 import type { Credential, Live, Provider, Window } from '../types';
-import { dropping, dropsLive, overwrite, planFor, shownFor, taken } from '../usage';
+import { carriedSince, dropping, dropsLive, overwrite, planFor, shownFor, taken } from '../usage';
 import { Icon } from './Icon';
 import { Meter } from './Meter';
 
@@ -92,6 +92,13 @@ function Windows(props: { c: Credential }) {
           <div class="windows">
             <For each={u()!.windows}>{(w) => <WindowCell w={w} />}</For>
           </div>
+          <Show when={carriedSince(store.s!, u()!)}>
+            {(at) => (
+              <div class="aside" title={date(at())}>
+                Figures from {ago(at(), now())}
+              </div>
+            )}
+          </Show>
           <Show when={u()!.stale}>
             <div class="aside soon">
               TokenGauge could not update this{u()!.staleReason ? ` (${u()!.staleReason})` : ''}; figures may be old

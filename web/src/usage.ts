@@ -1,3 +1,4 @@
+import { MIN } from './format';
 import type { Combined, Credential, Live, Provider, Shown, State } from './types';
 
 // The CLIs worth a card and a tab: one with a stored login, or signed into
@@ -27,6 +28,15 @@ export function shownFor(s: State, c: Credential): Shown | null {
 export function planFor(s: State, c: Credential): string | null {
   if (c.plan && c.plan !== '-') return c.plan;
   return shownFor(s, c)?.plan || c.plan;
+}
+
+// When TokenGauge last asked about a login, if that was before the snapshot
+// its figures came in: a login the CLI is not signed into is asked less often,
+// and its figures are carried in between.
+export function carriedSince(s: State, u: Shown): number | null {
+  const asked = u.askedAt ? Date.parse(u.askedAt) : NaN;
+  const written = s.usage?.updatedAt;
+  return Number.isFinite(asked) && written && written - asked >= MIN ? asked : null;
 }
 
 // TokenGauge's figures for a CLI, or what stands in for them.
