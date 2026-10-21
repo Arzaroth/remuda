@@ -896,6 +896,48 @@ order = [["perso"]]
     }
 
     #[test]
+    fn a_renamed_schedule_keeps_its_comments_and_place() {
+        let mut c = sample();
+        let day = c.schedules.remove("workday").unwrap();
+        c.schedules.insert("weekdays".into(), day.clone());
+        c.schedules.insert("nights".into(), Schedule::default());
+        let rules = &mut c.auto.get_mut("claude").unwrap().rules;
+        rules[0].when = "weekdays".into();
+        rules[1].reserve.insert("work".into(), "weekdays".into());
+
+        let text = written(SAMPLE, &c);
+
+        assert!(text.starts_with(
+            "# auto mode\n[schedules.weekdays]\ndays  = [\"mon\", \"tue\", \"wed\", \"thu\", \"fri\"]\nhours = \"09:00-18:00\"   # local time\n\n[schedules.nights]\n\n[auto.claude]\n"
+        ));
+        assert_eq!(toml_edit::de::from_str::<Config>(&text).unwrap(), c);
+    }
+
+    #[test]
+    fn an_added_rule_and_provider_land_after_their_siblings() {
+        let mut c = sample();
+        c.auto.get_mut("claude").unwrap().rules.push(Rule {
+            when: "workday".into(),
+            order: vec![vec!["perso".into()]],
+            reserve: BTreeMap::new(),
+        });
+        c.auto.insert(
+            "codex".into(),
+            Auto {
+                logins: vec!["team".into()],
+                ..Auto::default()
+            },
+        );
+
+        let text = written(&format!("{SAMPLE}# the end\n"), &c);
+
+        assert!(text.starts_with(SAMPLE));
+        assert!(text.ends_with(
+            "[[auto.claude.rule]]\nwhen = \"workday\"\norder = [[\"perso\"]]\n\n[auto.codex]\nlogins = [\"team\"]\n# the end\n"
+        ));
+    }
+
+    #[test]
     fn a_new_file_is_written_from_nothing() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("remuda/config.toml");
