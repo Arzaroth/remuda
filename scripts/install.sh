@@ -4,9 +4,16 @@
 #
 # Installs the latest release into ~/.local/bin, enables the refresh timer and
 # installs completions for the shells it finds. --serve also keeps the page
-# served by a user service, for `remuda open`.
+# served by a user service, for `remuda open`. The archive is checked against
+# the release's SHA256SUMS before anything runs; REMUDA_DOWNLOAD_BASE (a URL or
+# a directory) takes the assets from somewhere else than the GitHub release.
 
 set -euo pipefail
+
+die() {
+  echo "install: $*" >&2
+  exit 1
+}
 
 main() {
   repo="${REMUDA_REPO:-Arzaroth/remuda}"
@@ -56,21 +63,36 @@ main() {
     ;;
   esac
 
-  if [[ -z $tag ]]; then
+  base="${REMUDA_DOWNLOAD_BASE:-}"
+  if [[ -z $tag && -z $base ]]; then
     latest=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$repo/releases/latest")
     tag="${latest##*/}"
-    if [[ $tag != v* ]]; then
-      echo "install: could not find the latest release of $repo" >&2
-      exit 1
-    fi
+    [[ $tag == v* ]] || die "could not find the latest release of $repo"
   fi
+  case "$base" in
+  "") base="https://github.com/$repo/releases/download/$tag" ;;
+  /*) base="file://$base" ;;
+  esac
 
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
 
-  asset="remuda-$tag-linux-$arch.tar.gz"
-  echo "Downloading remuda $tag for $arch"
-  curl -fsSL "https://github.com/$repo/releases/download/$tag/$asset" -o "$tmp/$asset"
+  curl -fsSL "$base/SHA256SUMS" -o "$tmp/SHA256SUMS" ||
+    die "no SHA256SUMS in $base to check the download against"
+  if [[ -n $tag ]]; then
+    asset="remuda-$tag-linux-$arch.tar.gz"
+  else
+    asset=$(sed -n "s/^[0-9a-f]\{64\}  \(remuda-v[0-9][^ ]*-linux-$arch\.tar\.gz\)$/\1/p" "$tmp/SHA256SUMS")
+    [[ -n $asset ]] || die "no linux-$arch archive in $base"
+    [[ $(wc -l <<<"$asset") -eq 1 ]] || die "several linux-$arch archives in $base: pick one with --version"
+  fi
+  expected=$(awk -v f="$asset" '$2 == f { print $1 }' "$tmp/SHA256SUMS")
+  [[ -n $expected ]] || die "$asset is not in $base/SHA256SUMS"
+
+  echo "Downloading $asset"
+  curl -fsSL "$base/$asset" -o "$tmp/$asset"
+  actual=$(sha256sum "$tmp/$asset" | cut -d' ' -f1)
+  [[ $expected == "$actual" ]] || die "$asset does not match its SHA256SUMS entry"
   tar -xzf "$tmp/$asset" -C "$tmp"
 
   if ! "$tmp/remuda" --version >/dev/null 2>&1; then
