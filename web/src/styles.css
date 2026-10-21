@@ -267,3 +267,33 @@ h3 { font-size: 14px; font-weight: 700; margin: 0; }
   .brand span { display: none; }
   .big { font-size: 38px; }
 }
+
+.proxy { margin-top: 24px; padding: 18px 20px 20px; border: 1px solid var(--rule); border-radius: 14px; background: var(--card); }
+.proxy-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+.proxy-head p { margin: 4px 0 0; color: var(--muted); max-width: 640px; }
+.proxy .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; white-space: nowrap; }
+.proxy-status { margin: 10px 0 4px; font-size: 13px; color: var(--muted); }
+.proxy-status.good { color: var(--good); }
+.proxy-status.bad { color: var(--bad); }
+.proxy .field-label { display: flex; justify-content: space-between; align-items: baseline; margin: 18px 0 8px; color: var(--muted); }
+.proxy .hint { font-size: 12.5px; }
+.proxy .link { border: 0; background: none; padding: 0; color: var(--focus); cursor: pointer; }
+.segmented { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; padding: 4px; border: 1px solid var(--rule); border-radius: 12px; background: var(--sunk); }
+.segmented button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 38px; border: 1px solid transparent;
+  border-radius: 9px; background: none; cursor: pointer; color: var(--muted); }
+.segmented button[aria-pressed='true'] { background: var(--card); border-color: var(--rule-strong); color: var(--ink); font-weight: 650; }
+.proxy .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.proxy .field { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 4px 6px 4px 14px; border: 1px solid var(--rule-strong);
+  border-radius: 10px; background: var(--paper); }
+.proxy .field code { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proxy .field.empty { color: var(--muted); padding: 10px 14px; }
+.proxy .field select { height: 30px; }
+.proxy .keys { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.proxy .key-row { display: flex; align-items: center; gap: 12px; }
+.proxy .key-name { font-weight: 600; min-width: 120px; }
+.proxy .muted { color: var(--muted); }
+.proxy .small { font-size: 12.5px; margin: 8px 0 0; }
+.proxy .inline { display: flex; gap: 8px; flex-wrap: wrap; }
+.proxy .inline input { flex: 0 1 260px; }
+.proxy .routes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.proxy .routes li { display: flex; align-items: center; gap: 10px; }

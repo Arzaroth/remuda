@@ -90,6 +90,20 @@ export type AutoStatus = {
   error?: string;
 };
 
+export type ProxyKey = { id: string; name: string; key: string; created: number };
+
+export type ProxyRoute = { provider: string; models: string[]; formats: string[] };
+
+export type Proxy = {
+  enabled: boolean;
+  port: number;
+  running: number | null;
+  error: string | null;
+  baseUrls: { openai: string; claude: string };
+  keys: ProxyKey[];
+  routes: ProxyRoute[];
+};
+
 export type State = {
   store: string;
   providers: Provider[];
@@ -99,4 +113,5 @@ export type State = {
   usage: { updatedAt: number | null; providers: Record<string, Usage> } | null;
   shown: Record<string, ProviderShown>;
   auto?: Record<string, AutoStatus | { enabled: false } | string>;
+  proxy: Proxy;
 };
