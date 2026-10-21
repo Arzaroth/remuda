@@ -9,14 +9,21 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::config::{Auto, Day, OTHERWISE, Rule, Schedule};
+use crate::provider::Provider;
 
 const HOUR_MS: f64 = 3_600_000.0;
+/// Older figures are not acted on: TokenGauge fetches every few minutes.
+const STALE_MS: i64 = 30 * 60_000;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Window {
+    pub title: String,
     pub minutes: Option<u64>,
     pub used: u64,
     pub resets_at: Option<Timestamp>,
+    /// One of TokenGauge's extra windows: a limit on one model or feature,
+    /// not on the account.
+    pub extra: bool,
 }
 
 /// What TokenGauge says of a login: its windows, or why there are none.
@@ -73,22 +80,37 @@ pub fn next_start(s: &Schedule, now: &Zoned) -> Option<Zoned> {
     })
 }
 
-fn longest(windows: &[Window]) -> Option<&Window> {
-    windows
-        .iter()
-        .max_by_key(|w| (w.minutes.unwrap_or(0), w.resets_at))
+/// The account's own windows; a model's or a feature's limit only when the
+/// account has no other, as Codex's monthly one.
+fn counted(windows: &[Window]) -> impl Iterator<Item = &Window> {
+    let account = windows.iter().any(|w| !w.extra);
+    windows.iter().filter(move |w| !account || !w.extra)
 }
 
-fn window_name(w: &Window) -> String {
-    match w.minutes {
-        Some(300) => "5-hour window".into(),
-        Some(1440) => "daily window".into(),
-        Some(10080) => "weekly window".into(),
-        Some(43200) => "monthly window".into(),
-        Some(m) if m % 1440 == 0 => format!("{}-day window", m / 1440),
-        Some(m) if m % 60 == 0 => format!("{}-hour window", m / 60),
-        Some(m) => format!("{m}-minute window"),
-        None => "usage window".into(),
+fn longest(windows: &[Window]) -> Option<&Window> {
+    counted(windows).max_by_key(|w| (w.minutes.unwrap_or(0), w.resets_at))
+}
+
+fn maxed(windows: &[Window]) -> Option<&Window> {
+    counted(windows).find(|w| w.used >= 100)
+}
+
+/// A window whose reset has passed since TokenGauge read it is empty again.
+fn current(f: &Figures, now: Timestamp) -> Figures {
+    match f {
+        Figures::Known(ws) => Figures::Known(
+            ws.iter()
+                .map(|w| match w.resets_at {
+                    Some(at) if at <= now => Window {
+                        used: 0,
+                        resets_at: None,
+                        ..w.clone()
+                    },
+                    _ => w.clone(),
+                })
+                .collect(),
+        ),
+        missing => missing.clone(),
     }
 }
 
@@ -169,6 +191,11 @@ fn clock(t: &Zoned) -> String {
 
 pub fn decide(input: &Input) -> Decision {
     let now = input.now.timestamp();
+    let figures: BTreeMap<String, Figures> = input
+        .figures
+        .iter()
+        .map(|(name, f)| (name.clone(), current(f, now)))
+        .collect();
     let (rule, mut tiers, reserve) = match in_force(input) {
         Some((i, r)) => (
             Some(format!("rule {} ({})", i + 1, r.when)),
@@ -183,6 +210,7 @@ pub fn decide(input: &Input) -> Decision {
 
     let mut notes: BTreeMap<String, String> = BTreeMap::new();
     let mut kept = Vec::new();
+    let mut freed = Vec::new();
     for (login, schedule) in &reserve {
         let Some(s) = input.schedules.get(schedule) else {
             continue;
@@ -190,7 +218,7 @@ pub fn decide(input: &Input) -> Decision {
         if contains(s, input.now) {
             continue;
         }
-        let resets = match input.figures.get(login) {
+        let resets = match figures.get(login) {
             Some(Figures::Known(w)) => longest(w).and_then(|w| w.resets_at),
             _ => None,
         };
@@ -200,10 +228,7 @@ pub fn decide(input: &Input) -> Decision {
                 for t in tiers.iter_mut() {
                     t.retain(|n| n != login);
                 }
-                if tiers.is_empty() {
-                    tiers.push(Vec::new());
-                }
-                tiers[0].insert(0, login.clone());
+                freed.push(login.clone());
                 notes.insert(
                     login.clone(),
                     format!("kept for {schedule}, free now: it resets before {schedule} starts"),
@@ -217,6 +242,11 @@ pub fn decide(input: &Input) -> Decision {
                 notes.insert(login.clone(), format!("kept for {schedule}{when}"));
             }
         }
+    }
+
+    if !freed.is_empty() {
+        tiers.retain(|t| !t.is_empty());
+        tiers.insert(0, freed);
     }
 
     let mut logins = Vec::new();
@@ -233,13 +263,13 @@ pub fn decide(input: &Input) -> Decision {
                 maxed: false,
                 note: notes.remove(name).unwrap_or_default(),
             };
-            match input.figures.get(name) {
+            match figures.get(name) {
                 Some(Figures::Known(w)) if !w.is_empty() => {
                     seen.score = score(w, now);
-                    match w.iter().find(|w| w.used >= 100) {
+                    match maxed(w) {
                         Some(full) => {
                             seen.maxed = true;
-                            seen.note = format!("{} maxed", window_name(full));
+                            seen.note = full_note(full);
                         }
                         None => seen.usable = true,
                     }
@@ -261,7 +291,11 @@ pub fn decide(input: &Input) -> Decision {
         });
     }
 
-    let action = act(input, &logins);
+    let active_full = input.active.and_then(|a| match figures.get(a) {
+        Some(Figures::Known(w)) => maxed(w).map(full_note),
+        _ => None,
+    });
+    let action = act(input, &logins, active_full);
     Decision {
         rule,
         logins,
@@ -269,7 +303,12 @@ pub fn decide(input: &Input) -> Decision {
     }
 }
 
-fn act(input: &Input, logins: &[Seen]) -> Action {
+fn full_note(w: &Window) -> String {
+    format!("{} limit maxed", w.title.to_lowercase())
+}
+
+/// `active_full` says why the active login is maxed, wherever it sits.
+fn act(input: &Input, logins: &[Seen], active_full: Option<String>) -> Action {
     let best = logins.iter().filter(|s| s.usable).min_by(|a, b| {
         a.tier
             .cmp(&b.tier)
@@ -292,12 +331,10 @@ fn act(input: &Input, logins: &[Seen]) -> Action {
         };
     }
     let current = logins.iter().find(|s| s.name == active);
-    if let Some(c) = current
-        && c.maxed
-    {
+    if let Some(full) = active_full {
         return Action::Switch {
             to: best.name.clone(),
-            why: format!("{active}'s {}", c.note),
+            why: format!("{active}'s {full}"),
         };
     }
     if let Some(c) = current
@@ -308,9 +345,9 @@ fn act(input: &Input, logins: &[Seen]) -> Action {
             why: format!("{active} has no figures to compare: {}", c.note),
         };
     }
-    let dwell_ms = input.auto.dwell.0 as i64 * 1000;
+    let dwell_ms = i64::try_from(input.auto.dwell.0.saturating_mul(1000)).unwrap_or(i64::MAX);
     if let Some(at) = input.switched_at {
-        let until = at.as_millisecond() + dwell_ms;
+        let until = at.as_millisecond().saturating_add(dwell_ms);
         if input.now.timestamp().as_millisecond() < until {
             let until = Timestamp::from_millisecond(until)
                 .map(|t| clock(&t.to_zoned(input.now.time_zone().clone())))
@@ -362,6 +399,12 @@ fn windows(v: &Value) -> Vec<Window> {
         .flatten()
         .filter_map(|w| {
             Some(Window {
+                title: w
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .unwrap_or("usage")
+                    .to_owned(),
+                extra: w.get("extra").and_then(Value::as_bool).unwrap_or(false),
                 minutes: w.get("minutes").and_then(Value::as_u64),
                 used: w.get("usedPercent")?.as_u64()?,
                 resets_at: w
@@ -398,6 +441,7 @@ pub fn figures(
     provider: &str,
     active: Option<&str>,
     switched_at: Option<Timestamp>,
+    now: Timestamp,
 ) -> Result<BTreeMap<String, Figures>, String> {
     let usage = usage.ok_or("TokenGauge has written no figures")?;
     let p = usage
@@ -405,6 +449,14 @@ pub fn figures(
         .filter(|p| !p.is_null())
         .ok_or_else(|| format!("TokenGauge has no figures for {provider}"))?;
     let updated = usage.get("updatedAt").and_then(Value::as_i64);
+    if let Some(updated) = updated
+        && now.as_millisecond() - updated > STALE_MS
+    {
+        return Err(format!(
+            "TokenGauge's figures are {} minutes old; is its daemon running?",
+            (now.as_millisecond() - updated) / 60_000
+        ));
+    }
     if let (Some(at), Some(updated)) = (switched_at, updated)
         && updated < at.as_millisecond()
     {
@@ -424,31 +476,64 @@ pub fn figures(
     Ok(out)
 }
 
-/// Why a switch has to wait for the CLI's sessions to end, if it does: Codex
-/// never takes up a new login while it runs, and a refresh it has in flight
-/// writes the old account's tokens over the new one.
-pub fn sessions_open(provider: &str) -> Option<String> {
-    if provider != "codex" {
+/// How many processes under `proc` (a `/proc`) run one of `names`: by
+/// name, by a release binary named after its target (`codex-x86_64-...`), or
+/// as a script under node, bun or deno. `me` is left out.
+pub fn running(proc: &std::path::Path, names: &[&str], me: u32) -> std::io::Result<usize> {
+    let is = |base: &[u8]| {
+        names.iter().any(|n| {
+            let n = n.as_bytes();
+            base == n
+                || base
+                    .strip_prefix(n)
+                    .is_some_and(|rest| rest.starts_with(b"-") || rest == b".js")
+        })
+    };
+    let base = |arg: &[u8]| {
+        arg.rsplit(|b| *b == b'/')
+            .next()
+            .unwrap_or_default()
+            .to_vec()
+    };
+    let mut count = 0;
+    for entry in std::fs::read_dir(proc)? {
+        let entry = entry?;
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|n| n.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        if pid == me {
+            continue;
+        }
+        let comm = std::fs::read(entry.path().join("comm")).unwrap_or_default();
+        let cmdline = std::fs::read(entry.path().join("cmdline")).unwrap_or_default();
+        let args: Vec<Vec<u8>> = cmdline.split(|b| *b == 0).take(2).map(base).collect();
+        let script = args
+            .first()
+            .is_some_and(|a| matches!(a.as_slice(), b"node" | b"bun" | b"deno"))
+            && args.get(1).is_some_and(|a| is(a));
+        if is(comm.trim_ascii_end()) || args.first().is_some_and(|a| is(a)) || script {
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
+/// Why a switch has to wait for the CLI's sessions to end, if it does
+/// ([`Provider::sessions`]). Not seeing the processes counts as seeing one.
+pub fn sessions_open(p: &dyn Provider) -> Option<String> {
+    let names = p.sessions();
+    if names.is_empty() {
         return None;
     }
-    let me = std::process::id().to_string();
-    let open = std::fs::read_dir("/proc")
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|e| e.file_name().to_str() != Some(me.as_str()))
-        .filter(|e| {
-            let dir = e.path();
-            let comm = std::fs::read_to_string(dir.join("comm")).unwrap_or_default();
-            let cmdline = std::fs::read(dir.join("cmdline")).unwrap_or_default();
-            comm.trim() == "codex"
-                || cmdline.split(|b| *b == 0).take(2).any(|arg| {
-                    let name = arg.rsplit(|b| *b == b'/').next().unwrap_or_default();
-                    name == b"codex" || name == b"codex.js"
-                })
-        })
-        .count();
-    (open > 0).then(|| "waiting for every Codex session to end".to_owned())
+    match running(std::path::Path::new("/proc"), names, std::process::id()) {
+        Ok(0) => None,
+        Ok(_) => Some(format!("waiting for every {} session to end", p.name())),
+        Err(e) => Some(format!("cannot see whether {} runs: {e}", p.name())),
+    }
 }
 
 pub struct Context<'a> {
@@ -458,15 +543,15 @@ pub struct Context<'a> {
     pub now: &'a Zoned,
 }
 
-/// The decision for one CLI from its live login and TokenGauge's snapshot.
-/// `busy` holds a switch back, saying why.
+/// The decision for one CLI from its live login and TokenGauge's snapshot. A
+/// switch is held while the CLI has sessions it must wait out.
 pub fn assess(
     auto: &Auto,
-    provider: &str,
+    p: &dyn Provider,
     live: &crate::ops::LiveState,
     cx: &Context,
-    busy: Option<String>,
 ) -> Decision {
+    let provider = p.id();
     use crate::ops::LiveState;
     let active = match live {
         LiveState::SignedOut => None,
@@ -495,7 +580,7 @@ pub fn assess(
     let switched_at = cx
         .switched_at
         .and_then(|ms| Timestamp::from_millisecond(ms).ok());
-    let figures = match figures(cx.usage, provider, active, switched_at) {
+    let figures = match figures(cx.usage, provider, active, switched_at, cx.now.timestamp()) {
         Ok(f) => f,
         Err(why) => return Decision::hold(why),
     };
@@ -507,7 +592,9 @@ pub fn assess(
         switched_at,
         figures: &figures,
     });
-    if let (Action::Switch { to, why }, Some(busy)) = (&decision.action, busy) {
+    if let Action::Switch { to, why } = &decision.action
+        && let Some(busy) = sessions_open(p)
+    {
         decision.action = Action::Hold {
             why: format!("would switch to {to} ({why}), {busy}"),
         };
@@ -595,14 +682,18 @@ reserve = { work = "workday" }
         };
         Figures::Known(vec![
             Window {
+                title: "5 hours".into(),
                 minutes: Some(300),
                 used: five.0,
                 resets_at: t(five.1),
+                extra: false,
             },
             Window {
+                title: "Weekly".into(),
                 minutes: Some(10080),
                 used: week.0,
                 resets_at: t(week.1),
+                extra: false,
             },
         ])
     }
@@ -704,7 +795,7 @@ reserve = { work = "workday" }
         );
         assert_eq!(switch_to(&d), Some("perso"));
         assert!(
-            matches!(&d.action, Action::Switch { why, .. } if why == "work's 5-hour window maxed")
+            matches!(&d.action, Action::Switch { why, .. } if why == "work's 5 hours limit maxed")
         );
     }
 
@@ -876,19 +967,30 @@ reserve = { work = "workday" }
                              "perso": {"stale": true, "staleReason": "timed out", "windows": []}}}}
         });
         let ms = |v| Timestamp::from_millisecond(v).ok();
+        let now = ms(60_000).unwrap();
         assert_eq!(
-            figures(Some(&usage), "claude", None, ms(2000)),
+            figures(Some(&usage), "claude", None, ms(2000), now),
             Err("waiting for TokenGauge to fetch after the last switch".into())
         );
         assert_eq!(
-            figures(None, "claude", None, None),
+            figures(None, "claude", None, None, now),
             Err("TokenGauge has written no figures".into())
         );
         assert_eq!(
-            figures(Some(&usage), "codex", None, None),
+            figures(Some(&usage), "codex", None, None, now),
             Err("TokenGauge has no figures for codex".into())
         );
-        let f = figures(Some(&usage), "claude", Some("old"), ms(500)).unwrap();
+        assert_eq!(
+            figures(
+                Some(&usage),
+                "claude",
+                None,
+                None,
+                ms(1000 + 31 * 60_000).unwrap()
+            ),
+            Err("TokenGauge's figures are 31 minutes old; is its daemon running?".into())
+        );
+        let f = figures(Some(&usage), "claude", Some("old"), ms(500), now).unwrap();
         assert_eq!(
             f["work"],
             Figures::Missing("TokenGauge: 401 Unauthorized".into())
@@ -900,9 +1002,11 @@ reserve = { work = "workday" }
         assert_eq!(
             f["old"],
             Figures::Known(vec![Window {
+                title: "usage".into(),
                 minutes: Some(300),
                 used: 5,
-                resets_at: None
+                resets_at: None,
+                extra: false,
             }]),
             "a snapshot naming no credential holds the active login's"
         );
@@ -919,11 +1023,13 @@ reserve = { work = "workday" }
             switched_at: None,
             now: &now,
         };
-        let why =
-            |live: LiveState| match assess(&c.auto["claude"], "claude", &live, &cx, None).action {
-                Action::Hold { why } => why,
-                other => panic!("{other:?}"),
-            };
+        let tmp = tempfile::tempdir().unwrap();
+        let claude =
+            crate::claude::Claude::at(tmp.path(), crate::claude::Api::local("http://127.0.0.1:9"));
+        let why = |live: LiveState| match assess(&c.auto["claude"], &claude, &live, &cx).action {
+            Action::Hold { why } => why,
+            other => panic!("{other:?}"),
+        };
         assert_eq!(
             why(LiveState::Unstored {
                 email: Some("x@example.com".into())
@@ -941,35 +1047,5 @@ reserve = { work = "workday" }
             why(LiveState::SignedOut),
             "TokenGauge has written no figures"
         );
-    }
-
-    #[test]
-    fn a_busy_cli_turns_a_switch_into_a_hold() {
-        let c = config();
-        let now = at("10:00");
-        let usage = serde_json::json!({"updatedAt": now.timestamp().as_millisecond(), "providers": {"claude": {
-            "windows": [], "accounts": {
-                "work": {"windows": [{"minutes": 300, "usedPercent": 1, "resetsAt": null}]},
-                "perso": {"windows": [{"minutes": 300, "usedPercent": 1, "resetsAt": null}]}}}}});
-        let cx = Context {
-            schedules: &c.schedules,
-            usage: Some(&usage),
-            switched_at: None,
-            now: &now,
-        };
-        let live = crate::ops::LiveState::Stored {
-            name: "perso".into(),
-            synced: true,
-        };
-        let d = assess(
-            &c.auto["claude"],
-            "claude",
-            &live,
-            &cx,
-            Some("waiting for every Codex session to end".into()),
-        );
-        assert_eq!(d.action, Action::Hold {
-            why: "would switch to work (work comes before perso), waiting for every Codex session to end".into()
-        });
     }
 }

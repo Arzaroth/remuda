@@ -430,7 +430,7 @@ fn auto_says_where_it_would_move_a_cli_and_moves_nothing() {
     );
     assert!(out.contains("perso"), "{out}");
     assert!(
-        out.ends_with("  would switch to work: perso's 5-hour window maxed\n"),
+        out.ends_with("  would switch to work: perso's 5 hours limit maxed\n"),
         "{out}"
     );
     assert_eq!(

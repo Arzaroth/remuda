@@ -221,6 +221,12 @@ impl Provider for Codex {
     }
 
     /// TokenGauge refreshes the live auth.json in place under this lock.
+    /// Codex never re-reads auth.json while it runs, and a refresh in flight
+    /// writes the old account's tokens into the new file.
+    fn sessions(&self) -> &'static [&'static str] {
+        &["codex"]
+    }
+
     fn lock_live(&self) -> Result<Option<std::fs::File>> {
         lock_file(&self.auth_path.with_file_name("auth.json.lock")).map(Some)
     }

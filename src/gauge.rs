@@ -101,7 +101,7 @@ fn provider(p: &Value) -> Value {
     let usage = p.get("usage").unwrap_or(&Value::Null);
     let fixed = ["primary", "secondary", "tertiary"]
         .into_iter()
-        .filter_map(|k| window(None, usage.get(k)?));
+        .filter_map(|k| window(None, usage.get(k)?, false));
     let extra = usage
         .get("extraRateWindows")
         .and_then(Value::as_array)
@@ -112,7 +112,13 @@ fn provider(p: &Value) -> Value {
                 .and_then(Value::as_bool)
                 .unwrap_or(false)
         })
-        .filter_map(|w| window(w.get("title").and_then(Value::as_str), w.get("window")?));
+        .filter_map(|w| {
+            window(
+                w.get("title").and_then(Value::as_str),
+                w.get("window")?,
+                true,
+            )
+        });
     json!({
         "stale": p.get("stale").and_then(Value::as_bool).unwrap_or(false),
         "staleReason": p.get("staleReason").and_then(Value::as_str),
@@ -142,7 +148,7 @@ fn banked(resets: Option<&Value>) -> Value {
     }
 }
 
-fn window(title: Option<&str>, w: &Value) -> Option<Value> {
+fn window(title: Option<&str>, w: &Value, extra: bool) -> Option<Value> {
     let used = w.get("usedPercent")?.as_u64()?;
     let title = match (title, w.get("windowMinutes").and_then(Value::as_u64)) {
         (Some(t), _) => t.to_owned(),
@@ -152,6 +158,7 @@ fn window(title: Option<&str>, w: &Value) -> Option<Value> {
     Some(json!({
         "title": title,
         "minutes": w.get("windowMinutes").and_then(Value::as_u64),
+        "extra": extra,
         "usedPercent": used.min(100),
         "resetsAt": w.get("resetsAt").and_then(Value::as_str),
     }))

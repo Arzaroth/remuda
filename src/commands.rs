@@ -538,16 +538,16 @@ fn plan_shown(p: &dyn Provider, e: &Entry) -> String {
 pub fn auto(
     store: &Store,
     lives: &[Live],
-    config: &Path,
+    path: &Path,
     snapshot: &Path,
     out: &mut dyn Write,
 ) -> Result<()> {
-    let config = crate::config::load(config)?.config;
+    let config = crate::config::load(path)?.config;
     if config.auto.is_empty() {
         writeln!(
             out,
             "auto mode is set up for no CLI: open the page, or add an [auto.<cli>] section to {}",
-            crate::paths::config_file().display()
+            path.display()
         )?;
         return Ok(());
     }
@@ -569,13 +569,7 @@ pub fn auto(
             writeln!(out)?;
         }
         first = false;
-        let decision = crate::auto::assess(
-            auto,
-            id,
-            &live.state,
-            &cx(id),
-            crate::auto::sessions_open(id),
-        );
+        let decision = crate::auto::assess(auto, live.provider, &live.state, &cx(id));
         crate::auto::describe(
             live.provider.name(),
             auto,
