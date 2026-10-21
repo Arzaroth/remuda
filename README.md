@@ -32,11 +32,12 @@ Linux, x86_64 or aarch64:
 curl -fsSL https://raw.githubusercontent.com/Arzaroth/remuda/master/scripts/install.sh | bash
 ```
 
-This installs `remuda` into `~/.local/bin`, enables `remuda-refresh.timer`,
-which keeps the inactive logins' tokens fresh every 30 minutes, and installs
-completions for bash, zsh and fish when it finds them. Pass `--no-timer`,
-`--no-completions`, or `--version vX.Y.Z` to pin a release
-(`... | bash -s -- --no-timer`). `--serve` also enables
+This downloads the release archive for your architecture, checks it against
+the release's `SHA256SUMS`, installs `remuda` into `~/.local/bin`, enables
+`remuda-refresh.timer`, which keeps the inactive logins' tokens fresh every 30
+minutes, and installs completions for bash, zsh and fish when it finds them.
+Pass `--no-timer`, `--no-completions`, or `--version vX.Y.Z` to pin a release
+(0.19.0 or later; `... | bash -s -- --no-timer`). `--serve` also enables
 `remuda-serve.service`, which keeps [the page](#the-page) running for
 `remuda open`. Afterwards, `remuda --update` replaces the binary
 with the latest release and brings the systemd units you installed up to date.
@@ -47,6 +48,49 @@ looks where you do. If you change `CLAUDE_CONFIG_DIR` or `CODEX_HOME` later,
 the timer notices: it compares its view with where your last `remuda` command
 found each CLI, and refuses to refresh one it would look for in the wrong
 place, saying what to set in that file (`journalctl --user -u remuda-refresh`).
+
+### Packages
+
+Each release has a `.deb`, an `.rpm` and an Arch package for x86_64 and
+aarch64. They install the binary into `/usr/bin`, the completions, and the
+units, which are yours to enable:
+
+| Distribution | Install |
+|---|---|
+| Debian, Ubuntu | `sudo apt install ./remuda_X.Y.Z_amd64.deb` |
+| Fedora, RHEL, openSUSE | `sudo dnf install ./remuda-X.Y.Z-1.x86_64.rpm` (`sudo zypper install` on openSUSE) |
+| Arch | `sudo pacman -U ./remuda-bin-X.Y.Z-1-x86_64.pkg.tar.zst`, or `makepkg -si` from the PKGBUILDs in `remuda-vX.Y.Z-pkgbuild.tar.gz` (`remuda` builds from source, `remuda-bin` repackages the release) |
+
+```sh
+remuda ls                                         # records where each CLI keeps its login
+systemctl --user enable --now remuda-refresh.timer
+systemctl --user enable --now remuda-serve.service   # optional, for `remuda open`
+```
+
+A package does not write `environment.d` for you: if your shell sets
+`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `REMUDA_STORE` or another CLI's directory,
+put the same lines in `~/.config/environment.d/60-remuda.conf` before enabling
+the timer. After a package upgrade, restart `remuda-serve.service` if it runs.
+
+The `.rpm`s, the Arch packages (a `.sig` beside each) and `SHA256SUMS` (in
+`SHA256SUMS.asc`) are signed with the release key
+[`packaging/remuda.asc`](packaging/remuda.asc), fingerprint
+`0630256DBF85D5A91C9ED7AD18B546E18A0C5512`. Trust it once:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Arzaroth/remuda/master/packaging/remuda.asc -o remuda.asc
+gpg --import remuda.asc && gpg --verify SHA256SUMS.asc SHA256SUMS   # any distribution
+sudo rpm --import remuda.asc                                         # Fedora, openSUSE
+sudo pacman-key --add remuda.asc && sudo pacman-key --lsign-key 0630256DBF85D5A91C9ED7AD18B546E18A0C5512  # Arch
+```
+
+The binary is static, so the packages run on anything from Debian 12 and
+Ubuntu 22.04 up. A packaged binary upgrades through its package manager:
+`remuda --update` refuses to replace it.
+
+Moving from an `install.sh` install to a package, remove `~/.local/bin/remuda`
+and `~/.config/systemd/user/remuda-*` first: both come ahead of the package's
+copies, and the units there run `~/.local/bin/remuda`.
 
 ## Commands
 
