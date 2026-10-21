@@ -923,6 +923,112 @@ mod tests {
         assert!(!places(&e).config.exists());
     }
 
+    fn snapshot(e: &Env, updated: i64, perso: u64, work: u64) {
+        let window = |used: u64| json!({"primary": {"usedPercent": used, "windowMinutes": 300}});
+        std::fs::write(
+            places(e).snapshot,
+            json!({
+                "meta": {"schemaVersion": 2, "updatedAtMs": updated},
+                "payloads": [
+                    {"provider": "claude", "credential": "perso", "usage": window(perso)},
+                    {"provider": "claude", "credential": "work", "usage": window(work)},
+                ],
+            })
+            .to_string(),
+        )
+        .unwrap();
+    }
+
+    fn on_perso(e: &Env, enabled: bool) -> App {
+        e.stored("work", "u-work", HOUR);
+        e.stored("perso", "u-perso", HOUR);
+        let perso = e.store.get("claude", "perso").unwrap().unwrap();
+        e.sign_in(perso.creds, account("u-perso"));
+        std::fs::write(
+            places(e).config,
+            format!("[auto.claude]\nenabled = {enabled}\nlogins = [\"work\", \"perso\"]\n"),
+        )
+        .unwrap();
+        app(e, &OFFLINE)
+    }
+
+    #[test]
+    fn auto_mode_moves_a_cli_off_a_maxed_login_then_waits_for_new_figures() {
+        let e = env(&OFFLINE);
+        let app = on_perso(&e, true);
+        snapshot(&e, crate::fsx::now_ms(), 100, 10);
+
+        app.auto_round(&Zoned::now());
+
+        assert_eq!(e.live_refresh_token().as_deref(), Some("r-work"));
+        let (_, state) = call(&app, "GET", "/api/state", Value::Null);
+        let claude = &state["auto"]["claude"];
+        assert_eq!(claude["switched"]["to"], "work");
+        assert_eq!(claude["switched"]["why"], "perso's 5-hour window maxed");
+
+        app.auto_round(&Zoned::now());
+
+        let (_, state) = call(&app, "GET", "/api/state", Value::Null);
+        let claude = &state["auto"]["claude"];
+        assert_eq!(
+            claude["decision"]["action"],
+            json!({"kind": "hold", "why": "waiting for TokenGauge to fetch after the last switch"})
+        );
+        assert_eq!(claude["switched"]["to"], "work", "the last switch is kept");
+        assert_eq!(e.live_refresh_token().as_deref(), Some("r-work"));
+    }
+
+    #[test]
+    fn auto_mode_off_says_what_it_would_do_and_switches_nothing() {
+        let e = env(&OFFLINE);
+        let app = on_perso(&e, false);
+        snapshot(&e, crate::fsx::now_ms(), 100, 10);
+
+        app.auto_round(&Zoned::now());
+
+        assert_eq!(e.live_refresh_token().as_deref(), Some("r-perso"));
+        let (_, state) = call(&app, "GET", "/api/state", Value::Null);
+        let claude = &state["auto"]["claude"];
+        assert_eq!(claude["enabled"], false);
+        assert_eq!(claude["decision"]["action"]["to"], "work");
+        assert!(claude.get("switched").is_none());
+    }
+
+    #[test]
+    fn auto_mode_never_drops_a_login_nobody_stored() {
+        let e = env(&OFFLINE);
+        let app = on_perso(&e, true);
+        e.sign_in(oauth("a-new", "r-new", HOUR), account("u-new"));
+        snapshot(&e, crate::fsx::now_ms(), 100, 10);
+
+        app.auto_round(&Zoned::now());
+
+        assert_eq!(e.live_refresh_token().as_deref(), Some("r-new"));
+        let (_, state) = call(&app, "GET", "/api/state", Value::Null);
+        assert_eq!(
+            state["auto"]["claude"]["decision"]["action"]["kind"],
+            "hold"
+        );
+    }
+
+    #[test]
+    fn a_broken_config_stops_auto_mode_and_says_why() {
+        let e = env(&OFFLINE);
+        let app = on_perso(&e, true);
+        std::fs::write(places(&e).config, "[auto.claude\n").unwrap();
+
+        app.auto_round(&Zoned::now());
+
+        let (_, state) = call(&app, "GET", "/api/state", Value::Null);
+        assert!(
+            state["auto"]["error"]
+                .as_str()
+                .unwrap()
+                .contains("is not valid")
+        );
+        assert_eq!(e.live_refresh_token().as_deref(), Some("r-perso"));
+    }
+
     #[test]
     fn a_config_edited_by_hand_reports_what_it_names_wrongly() {
         let e = env(&OFFLINE);
