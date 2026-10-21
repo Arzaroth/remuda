@@ -486,7 +486,7 @@ export function AutoMode(props: { providers: Provider[] }) {
   let checks = 0;
   createEffect(
     on(
-      () => text(draft.c),
+      () => [text(draft.c), saved()],
       () => {
         clearTimeout(timer);
         const seq = ++checks;
