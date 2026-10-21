@@ -481,6 +481,7 @@ fn write(path: &Path, text: &str, config: &Config) -> Result<String> {
         .parse()
         .with_context(|| format!("{} is not valid", path.display()))?;
     merge_table(doc.as_table_mut(), config.document().as_table());
+    place_added(&mut doc);
     let body = doc.to_string();
     if body != text {
         fsx::write_private(path, &body)?;
@@ -534,23 +535,143 @@ fn bare(v: &Value) -> String {
     v.to_string()
 }
 
+/// One table gone and one come in its place is a rename: it keeps the
+/// comments and the place in the file the old one had.
 fn merge_table(old: &mut Table, new: &Table) {
     let gone: Vec<String> = old
         .iter()
         .map(|(k, _)| k.to_owned())
         .filter(|k| !new.contains_key(k))
         .collect();
-    for k in gone {
-        old.remove(&k);
+    let come: Vec<&str> = new
+        .iter()
+        .map(|(k, _)| k)
+        .filter(|k| !old.contains_key(k))
+        .collect();
+    let mut renamed = None;
+    if let [from] = gone.as_slice()
+        && old[from.as_str()].is_table()
+    {
+        let tables: Vec<&str> = come
+            .iter()
+            .copied()
+            .filter(|k| new[*k].is_table())
+            .collect();
+        let was = plain(&old[from.as_str()]);
+        let same: Vec<&str> = tables
+            .iter()
+            .copied()
+            .filter(|k| plain(&new[*k]) == was)
+            .collect();
+        renamed = match (same.as_slice(), tables.as_slice()) {
+            ([to], _) | ([], [to]) => Some((*to, old.remove(from))),
+            _ => None,
+        };
+    }
+    for k in &gone {
+        old.remove(k);
     }
     for (k, item) in new.iter() {
         match old.get_mut(k) {
             Some(existing) => merge_item(existing, item),
             None => {
-                old.insert(k, item.clone());
+                let item = match &renamed {
+                    Some((to, Some(moved))) if *to == k => {
+                        let mut moved = moved.clone();
+                        merge_item(&mut moved, item);
+                        moved
+                    }
+                    _ => item.clone(),
+                };
+                old.insert(k, item);
             }
         }
     }
+}
+
+/// A table the merge added has no place in the file yet: it goes after the
+/// last of its siblings already there (the last schedule, the last rule),
+/// with a blank line.
+fn place_added(doc: &mut DocumentMut) {
+    let mut keys: Vec<(f64, bool)> = Vec::new();
+    sort_keys(doc.as_table(), -1.0, &mut keys);
+    let mut order: Vec<usize> = (0..keys.len()).collect();
+    order.sort_by(|a, b| keys[*a].0.total_cmp(&keys[*b].0));
+    let mut rank = vec![0; keys.len()];
+    for (r, i) in order.into_iter().enumerate() {
+        rank[i] = r as isize;
+    }
+    let mut i = 0;
+    each_table(doc.as_table_mut(), &mut |t| {
+        if t.is_implicit() {
+            return;
+        }
+        if keys[i].1 && rank[i] > 0 && t.decor().prefix().is_none() {
+            t.decor_mut().set_prefix("\n");
+        }
+        t.set_position(Some(rank[i]));
+        i += 1;
+    });
+}
+
+fn children(table: &Table) -> Vec<&Table> {
+    table
+        .iter()
+        .flat_map(|(_, item)| match item {
+            Item::Table(t) => vec![t],
+            Item::ArrayOfTables(a) => a.iter().collect(),
+            _ => vec![],
+        })
+        .collect()
+}
+
+fn last_placed(table: &Table) -> Option<isize> {
+    let below = children(table).into_iter().filter_map(last_placed).max();
+    table.position().max(below)
+}
+
+/// Where each explicit table sorts, in [`each_table`]'s order, and whether
+/// it is new; returns the last key it gave.
+fn sort_keys(table: &Table, mut cur: f64, keys: &mut Vec<(f64, bool)>) -> f64 {
+    let kids = children(table);
+    let siblings = kids.iter().filter_map(|t| last_placed(t)).max();
+    for t in kids {
+        if !t.is_implicit() {
+            let key = match t.position() {
+                Some(p) => p as f64,
+                None => cur.max(siblings.map_or(cur, |p| p as f64)) + 1e-6,
+            };
+            keys.push((key, t.position().is_none()));
+            cur = key;
+        }
+        cur = sort_keys(t, cur, keys);
+    }
+    cur
+}
+
+/// Tables in the order the config nests them.
+fn each_table(table: &mut Table, f: &mut impl FnMut(&mut Table)) {
+    for (_, item) in table.iter_mut() {
+        match item {
+            Item::Table(t) => {
+                f(t);
+                each_table(t, f);
+            }
+            Item::ArrayOfTables(a) => {
+                for t in a.iter_mut() {
+                    f(t);
+                    each_table(t, f);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn plain(item: &Item) -> Option<serde_json::Value> {
+    let mut doc = DocumentMut::new();
+    doc["x"] = item.clone();
+    toml_edit::de::from_document(doc).ok()
 }
 
 fn merge_item(old: &mut Item, new: &Item) {
