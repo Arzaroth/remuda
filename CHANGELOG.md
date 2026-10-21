@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-21
+
 ### Added
 
 - Packages: each release has a `.deb`, an `.rpm` and Arch packages
