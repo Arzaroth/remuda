@@ -50,7 +50,16 @@ fn client() -> Option<&'static reqwest::blocking::Client> {
 
 /// Client headers the upstream reads, sent on when the upstream does not set
 /// its own.
-const PASSED: &[&str] = &["anthropic-version", "openai-beta", "accept"];
+const PASSED: &[&str] = &[
+    "anthropic-version",
+    "openai-beta",
+    "accept",
+    "session_id",
+    "session-id",
+    "thread-id",
+    "version",
+    "x-client-request-id",
+];
 
 fn merged_betas(ours: Option<&str>, theirs: Option<&str>) -> Option<String> {
     let mut all: Vec<&str> = Vec::new();
@@ -249,7 +258,13 @@ pub fn models(backend: &dyn Backend, anthropic: bool) -> Value {
             continue;
         }
         for m in route::models(p.id()) {
-            if !p.formats(route::bare(m)).is_empty() {
+            let formats = p.formats(route::bare(m));
+            let reachable = if anthropic {
+                formats.contains(&Format::Messages)
+            } else {
+                formats.iter().any(|f| *f != Format::Messages)
+            };
+            if reachable {
                 ids.push((p.id(), *m));
             }
         }

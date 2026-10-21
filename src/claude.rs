@@ -694,6 +694,50 @@ mod tests {
     use super::*;
 
     #[test]
+    fn another_clients_request_opens_with_claude_codes_line() {
+        let claude = Claude::at(
+            std::path::Path::new("/nonexistent"),
+            Api::local("http://127.0.0.1:1"),
+        );
+        let shaped = |system: Option<Value>, ua: Option<&str>| {
+            let mut body = json!({"model": "claude-x"});
+            if let Some(s) = system {
+                body["system"] = s;
+            }
+            claude
+                .shape(Format::Messages, &mut body, ua)
+                .map(|()| body["system"].clone())
+        };
+        let identity = json!({"type": "text", "text": IDENTITY});
+        assert_eq!(shaped(None, None).unwrap(), json!([identity]));
+        assert_eq!(shaped(Some(Value::Null), None).unwrap(), json!([identity]));
+        assert_eq!(shaped(Some(json!("")), None).unwrap(), json!([identity]));
+        assert_eq!(
+            shaped(Some(json!("mine")), None).unwrap(),
+            json!([identity, {"type": "text", "text": "mine"}])
+        );
+        let cached =
+            json!({"type": "text", "text": "mine", "cache_control": {"type": "ephemeral"}});
+        assert_eq!(
+            shaped(Some(json!([cached])), None).unwrap(),
+            json!([identity, cached])
+        );
+        assert_eq!(
+            shaped(Some(json!([identity, cached])), None).unwrap(),
+            json!([identity, cached])
+        );
+        assert!(shaped(Some(json!(7)), None).is_err());
+        assert_eq!(
+            shaped(
+                Some(json!("mine")),
+                Some("claude-cli/2.1.304 (external, cli)")
+            )
+            .unwrap(),
+            json!("mine")
+        );
+    }
+
+    #[test]
     fn a_profile_maps_onto_the_block_claude_code_writes() {
         let p = json!({
             "account": {"uuid": "a-1", "email": "me@example.com", "display_name": "", "full_name": "Me", "created_at": "2025-01-01"},

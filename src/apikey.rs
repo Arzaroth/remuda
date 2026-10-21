@@ -43,9 +43,12 @@ fn glm_routes(_model: &str) -> &'static [(Format, &'static str)] {
     ]
 }
 
-/// opencode Go serves each model family in its own maker's format.
+/// opencode Go serves each model family in its own maker's format; Gemini's
+/// is Google's, which the proxy does not speak.
 fn opencode_routes(model: &str) -> &'static [(Format, &'static str)] {
-    if model.starts_with("claude-") {
+    if model.starts_with("gemini-") {
+        &[]
+    } else if model.starts_with("claude-") {
         &[(Format::Messages, "/anthropic/v1/messages")]
     } else if model.starts_with("gpt-") || model.starts_with("grok-") {
         &[(Format::Responses, "/openai/v1/responses")]
