@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::fsx::{now_ms, read_json, write_json};
@@ -56,17 +56,14 @@ impl File {
 
     pub fn read(&self) -> Result<Settings> {
         match read_json(&self.path)? {
+            // serde's message quotes the value, which can be a key.
             Some(v) => serde_json::from_value(v)
-                .with_context(|| format!("{} is not proxy settings", self.path.display())),
+                .map_err(|_| anyhow!("{} is not proxy settings", self.path.display())),
             None => Ok(Settings::default()),
         }
     }
 
     fn write(&self, settings: &Settings) -> Result<()> {
-        if let Some(dir) = self.path.parent() {
-            std::fs::create_dir_all(dir)
-                .with_context(|| format!("cannot create {}", dir.display()))?;
-        }
         write_json(&self.path, &serde_json::to_value(settings)?)
     }
 

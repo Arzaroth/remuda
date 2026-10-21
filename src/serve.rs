@@ -38,7 +38,6 @@ pub struct Places {
     pub units: Vec<PathBuf>,
     pub snapshot: PathBuf,
     pub config: PathBuf,
-    pub proxy: PathBuf,
 }
 
 impl Places {
@@ -47,7 +46,6 @@ impl Places {
             units: paths::systemd_user_units(),
             snapshot: paths::tokengauge_snapshot(),
             config: paths::config_file(),
-            proxy: paths::proxy_settings(),
         }
     }
 }
@@ -85,6 +83,7 @@ pub fn watch(app: std::sync::Arc<App>) {
             if seen.as_ref() != Some(&now)
                 || last.is_none_or(|l| l.elapsed() >= std::time::Duration::from_secs(60))
             {
+                app.apply_proxy();
                 app.auto_round(&Zoned::now());
                 seen = Some(app.fingerprint());
                 last = Some(std::time::Instant::now());
@@ -259,13 +258,18 @@ impl App {
     }
 
     fn proxy_file(&self) -> proxy::settings::File {
-        proxy::settings::File::at(self.places.proxy.clone())
+        proxy::settings::File::at(self.store.root().join(".proxy.json"))
     }
 
-    fn proxy_state(&self) -> Result<Value> {
-        self.apply_proxy();
-        let s = self.proxy_file().read()?;
+    /// A settings file that cannot be read shows as the proxy's error, not as
+    /// a page that cannot load.
+    fn proxy_state(&self) -> Value {
+        let (s, unreadable) = match self.proxy_file().read() {
+            Ok(s) => (s, None),
+            Err(e) => (proxy::settings::Settings::default(), Some(format!("{e:#}"))),
+        };
         let (running, error) = self.proxy.status();
+        let error = unreadable.or(error);
         let origin = format!("http://127.0.0.1:{}", running.unwrap_or(s.port));
         let providers: Vec<Value> = self
             .providers
@@ -284,7 +288,7 @@ impl App {
                     .then(|| json!({"provider": p.id(), "models": models, "formats": formats}))
             })
             .collect();
-        Ok(json!({
+        json!({
             "enabled": s.enabled,
             "port": s.port,
             "running": running,
@@ -292,7 +296,7 @@ impl App {
             "routes": providers,
             "baseUrls": {"openai": format!("{origin}/v1"), "claude": origin},
             "keys": s.keys,
-        }))
+        })
     }
 
     fn health(&self) -> Value {
@@ -350,7 +354,6 @@ impl App {
         }
         files.push(self.places.snapshot.clone());
         files.push(self.places.config.clone());
-        files.push(self.places.proxy.clone());
         let mut seen: Vec<_> = files.into_iter().filter_map(stamp).collect();
         seen.sort();
         seen
@@ -464,7 +467,7 @@ impl App {
                 state["usage"] = gauge::read(&self.places.snapshot).unwrap_or(Value::Null);
                 state["shown"] = shown::shown(&state);
                 state["auto"] = json!(*self.auto.lock().unwrap());
-                state["proxy"] = self.proxy_state()?;
+                state["proxy"] = self.proxy_state();
                 Ok(state)
             }
             ("GET", "/api/config") => self.config(),
@@ -513,7 +516,7 @@ impl App {
                 let (running, error) = self.proxy.status();
                 let message = match (running, error) {
                     (Some(port), _) => format!("the proxy listens on 127.0.0.1:{port}"),
-                    (None, Some(e)) => format!("the proxy is not running: {e}"),
+                    (None, Some(e)) => bail!("saved, but the proxy is not running: {e}"),
                     (None, None) => "the proxy is off".to_owned(),
                 };
                 Ok(json!({"message": message}))
@@ -693,7 +696,6 @@ mod tests {
             units: vec![e.tmp.path().join("units"), e.tmp.path().join("global")],
             snapshot: e.tmp.path().join("tokengauge-usage.json"),
             config: e.tmp.path().join("config.toml"),
-            proxy: e.tmp.path().join("proxy.json"),
         }
     }
 
@@ -798,6 +800,63 @@ mod tests {
         );
         assert_eq!(status, 200);
         assert_eq!(proxy()["keys"], json!([]));
+    }
+
+    #[test]
+    fn a_broken_proxy_file_breaks_only_the_proxy() {
+        let e = env(&OFFLINE);
+        let app = app(&e, &OFFLINE);
+        std::fs::create_dir_all(e.store.root()).unwrap();
+        std::fs::write(
+            e.store.root().join(".proxy.json"),
+            r#"{"keys": "rmd-secret"}"#,
+        )
+        .unwrap();
+        let (status, state) = call(&app, "GET", "/api/state", Value::Null);
+        assert_eq!(status, 200);
+        let error = state["proxy"]["error"].as_str().unwrap();
+        assert!(error.contains("is not proxy settings"), "{error}");
+        assert!(!error.contains("rmd-secret"), "{error}");
+        assert!(state["providers"].is_array());
+    }
+
+    #[test]
+    fn a_started_page_runs_the_proxy_its_settings_ask_for() {
+        let e = env(&OFFLINE);
+        let app = Arc::new(app(&e, &OFFLINE));
+        std::fs::create_dir_all(e.store.root()).unwrap();
+        std::fs::write(
+            e.store.root().join(".proxy.json"),
+            r#"{"enabled": true, "port": 0}"#,
+        )
+        .unwrap();
+        app.start();
+        let state = call(&app, "GET", "/api/state", Value::Null).1;
+        let port = state["proxy"]["running"].as_u64().expect("not running") as u16;
+        assert_eq!(
+            state["proxy"]["baseUrls"]["claude"],
+            format!("http://127.0.0.1:{port}")
+        );
+        assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_ok());
+
+        let taken = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let busy = taken.local_addr().unwrap().port();
+        let (status, r) = call(&app, "POST", "/api/proxy/settings", json!({"port": busy}));
+        assert_eq!(status, 400);
+        assert!(r["error"].as_str().unwrap().contains("not running"), "{r}");
+
+        let (status, r) = call(
+            &app,
+            "POST",
+            "/api/proxy/settings",
+            json!({"enabled": false}),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(r["message"], "the proxy is off");
+        assert_eq!(
+            call(&app, "GET", "/api/state", Value::Null).1["proxy"]["running"],
+            Value::Null
+        );
     }
 
     #[test]
