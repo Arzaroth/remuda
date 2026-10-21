@@ -102,6 +102,7 @@ access to anything, and it ends when they stop.
 | `GET /api/state` | Same JSON as `ls --json`, plus `providers`, `health` and `usage` |
 | `GET /api/events` | A server-sent event stream: `data: changed` when the page should reload the state |
 | `GET /api/config` | `{config, version, problems, path}`: the config as JSON, the version to save against, what auto mode cannot act on |
+| `POST /api/config/check` `{config}` | `{problems}` for a config the page has not saved, a malformed one reported `at: "config"` |
 | `POST /api/config` `{config, version}` | Save it ([config.md](config.md)), refused with any problem or when the file changed since `version` |
 | `POST /api/use` `{name, discard?}` | Switch, then nudge TokenGauge |
 | `POST /api/import` `{provider?, name, force?}` | Store the live login |

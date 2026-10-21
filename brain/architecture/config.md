@@ -46,7 +46,11 @@ file edited by hand is still read, and the page shows them.
 
 A write parses the file as it is (`toml_edit`) and changes only the values
 that differ from the new config, so comments and layout around the rest stay,
-and a write that changes nothing leaves the bytes alone. `save` takes the
+and a write that changes nothing leaves the bytes alone. When one table goes and
+one comes in its place (only one, or the one holding the same values), it is
+a rename and keeps the old one's comments and place. A table added goes after
+the last of its siblings already in the file, so a new schedule follows the
+others and a new rule the provider's last. `save` takes the
 version the caller read, the SHA-256 of the file's bytes, and refuses with
 `Stale` if the file has changed since. A `config.toml.lock` beside the file
 serialises writers.

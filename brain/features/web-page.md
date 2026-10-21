@@ -100,6 +100,24 @@ label or refresh made from the CLI or another page, a run of the refresh
 timer, or a new TokenGauge fetch shows within a couple of seconds, without a
 reload, in every open tab. A change to a CLI's own login, such as signing in
 from the CLI, or enabling the refresh timer shows within a minute.
+
+### Auto mode settings
+
+Below the logins, the page edits `config.toml`
+([architecture/config.md](../architecture/config.md)): one card per CLI shown,
+with auto mode's switch, the minimum time on a login and the margin, the
+logins it may pick when no rule is in force, and its rules, each with a
+schedule, its tiers and which logins it keeps for a schedule; and a card of
+schedules, whose days and hours are shared by every CLI. A schedule a rule
+uses cannot be removed, and renaming one renames it in every rule.
+
+Edits stay on the page until Save, and are checked as they are made
+(`/api/config/check`): what auto mode could not act on shows under the card
+or rule it concerns, and Save waits until there is none. A page with no edits
+follows the file when it is changed elsewhere; one with edits says the file
+changed and offers to load it, dropping them, since saving over it is
+refused.
+
 `remuda open` opens the page a running `serve` shows, and
 `install.sh --serve` keeps one running as a user service. How the page is
 guarded, the API it calls and the service are in
@@ -107,7 +125,9 @@ guarded, the API it calls and the service are in
 
 ## Sources
 
-- [web/src/](../../web/src/), built into [src/serve.html](../../src/serve.html)
+- [web/src/](../../web/src/), built into [src/serve.html](../../src/serve.html);
+  the settings in [AutoMode.tsx](../../web/src/components/AutoMode.tsx) and
+  [config.ts](../../web/src/config.ts)
 - [src/serve.rs](../../src/serve.rs)
 - [src/gauge.rs](../../src/gauge.rs)
 - [src/runs.rs](../../src/runs.rs)
