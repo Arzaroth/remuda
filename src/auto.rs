@@ -1048,4 +1048,215 @@ reserve = { work = "workday" }
             "TokenGauge has written no figures"
         );
     }
+
+    fn process(proc: &std::path::Path, pid: u32, comm: &str, args: &[&str]) {
+        let dir = proc.join(pid.to_string());
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("comm"), format!("{comm}\n")).unwrap();
+        std::fs::write(dir.join("cmdline"), args.join("\0")).unwrap();
+    }
+
+    #[test]
+    fn codex_sessions_are_found_by_name_release_binary_and_script() {
+        let tmp = tempfile::tempdir().unwrap();
+        let proc = tmp.path();
+        std::fs::create_dir(proc.join("self")).unwrap();
+        process(proc, 10, "zsh", &["-zsh"]);
+        process(proc, 11, "vim", &["vim", "codex"]);
+        process(proc, 12, "codexx", &["/usr/bin/codexx"]);
+        assert_eq!(running(proc, &["codex"], 1).unwrap(), 0);
+
+        process(proc, 20, "codex", &["codex", "exec"]);
+        process(
+            proc,
+            21,
+            "codex-x86_64-un",
+            &["/opt/codex-x86_64-unknown-linux-musl"],
+        );
+        process(
+            proc,
+            22,
+            "node",
+            &["/usr/bin/node", "/usr/lib/node_modules/codex.js"],
+        );
+        assert_eq!(running(proc, &["codex"], 1).unwrap(), 3);
+        assert_eq!(
+            running(proc, &["codex"], 20).unwrap(),
+            2,
+            "itself is left out"
+        );
+        assert!(running(&proc.join("gone"), &["codex"], 1).is_err());
+    }
+
+    #[test]
+    fn only_a_cli_that_names_its_sessions_waits_for_them() {
+        let tmp = tempfile::tempdir().unwrap();
+        let claude =
+            crate::claude::Claude::at(tmp.path(), crate::claude::Api::local("http://127.0.0.1:9"));
+        assert_eq!(sessions_open(&claude), None);
+    }
+
+    #[test]
+    fn a_model_limit_does_not_max_the_account_but_counts_when_it_is_all_there_is() {
+        let c = config();
+        let now = at("10:00");
+        let scoped = |used| Window {
+            title: "Fable only".into(),
+            minutes: Some(10080),
+            used,
+            resets_at: None,
+            extra: true,
+        };
+        let Figures::Known(mut perso) = login(&now, (10, 2), (10, 100)) else {
+            unreachable!()
+        };
+        perso.push(scoped(100));
+        let d = run(
+            &c,
+            &now,
+            Some("work"),
+            None,
+            &[
+                ("work", login(&now, (100, 2), (10, 100))),
+                ("perso", Figures::Known(perso)),
+            ],
+        );
+        assert_eq!(switch_to(&d), Some("perso"));
+        assert!(
+            matches!(&d.action, Action::Switch { why, .. } if why == "work's 5 hours limit maxed")
+        );
+
+        let d = run(
+            &c,
+            &now,
+            Some("work"),
+            None,
+            &[
+                ("work", Figures::Known(vec![scoped(100)])),
+                ("perso", login(&now, (10, 2), (10, 100))),
+            ],
+        );
+        assert_eq!(switch_to(&d), Some("perso"), "the only window counts");
+    }
+
+    #[test]
+    fn a_window_whose_reset_has_passed_is_empty_again() {
+        let c = config();
+        let now = at("10:00");
+        let d = run(
+            &c,
+            &now,
+            Some("work"),
+            Some(0),
+            &[
+                ("work", login(&now, (100, -1), (10, 100))),
+                ("perso", login(&now, (10, 2), (10, 100))),
+            ],
+        );
+        assert_eq!(
+            d.action,
+            Action::Stay {
+                why: "work is the best pick".into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_maxed_login_outside_the_rule_is_left_at_once() {
+        let c = config();
+        let now = at("10:00");
+        let d = run(
+            &c,
+            &now,
+            Some("other"),
+            Some(0),
+            &[
+                ("other", login(&now, (100, 2), (10, 100))),
+                ("work", login(&now, (10, 2), (10, 100))),
+            ],
+        );
+        assert!(
+            matches!(&d.action, Action::Switch { to, why } if to == "work" && why == "other's 5 hours limit maxed")
+        );
+    }
+
+    #[test]
+    fn a_freed_reservation_is_spent_before_a_better_score() {
+        let c = config();
+        let now = at("20:00");
+        let d = run(
+            &c,
+            &now,
+            Some("perso"),
+            None,
+            &[
+                ("work", login(&now, (0, 2), (95, 6))),
+                ("perso", login(&now, (0, 2), (0, 100))),
+            ],
+        );
+        assert_eq!(d.logins[0].name, "work");
+        assert_eq!(switch_to(&d), Some("work"));
+    }
+
+    #[test]
+    fn no_rule_and_no_logins_holds_and_a_huge_dwell_does_not_overflow() {
+        let mut c = config();
+        let a = c.auto.get_mut("claude").unwrap();
+        a.rules.retain(|r| r.when == "workday");
+        let now = at("20:00");
+        assert_eq!(
+            run(&c, &now, Some("work"), None, &[]).action,
+            Action::Hold {
+                why: "no rule is in force, and no logins are set for that case".into()
+            }
+        );
+        let a = c.auto.get_mut("claude").unwrap();
+        a.dwell = Span(u64::MAX);
+        let now = at("10:00");
+        let d = run(
+            &c,
+            &now,
+            Some("perso"),
+            Some(1),
+            &[
+                ("work", login(&now, (10, 2), (10, 100))),
+                ("perso", login(&now, (10, 2), (10, 100))),
+            ],
+        );
+        assert!(matches!(d.action, Action::Stay { .. }));
+    }
+
+    #[test]
+    fn describe_reads_like_the_decision() {
+        let c = config();
+        let now = at("20:00");
+        let d = run(
+            &c,
+            &now,
+            Some("perso"),
+            None,
+            &[
+                ("work", login(&now, (0, 2), (50, 30))),
+                ("perso", login(&now, (10, 2), (10, 100))),
+            ],
+        );
+        let mut out = Vec::new();
+        describe(
+            "Claude Code",
+            &c.auto["claude"],
+            Some("perso"),
+            &d,
+            &mut out,
+        )
+        .unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(
+            text.starts_with("Claude Code: auto mode on, rule 2 (otherwise)\n"),
+            "{text}"
+        );
+        assert!(text.contains("  1  perso"), "{text}");
+        assert!(text.contains("in use\n"), "{text}");
+        assert!(text.contains("  -  work"), "{text}");
+        assert!(text.ends_with("  stay: perso is the best pick\n"), "{text}");
+    }
 }

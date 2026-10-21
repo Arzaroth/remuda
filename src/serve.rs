@@ -1019,6 +1019,29 @@ mod tests {
     }
 
     #[test]
+    fn a_switch_that_fails_is_reported_and_the_cli_left_as_it_was() {
+        let e = env(&OFFLINE);
+        let app = on_perso(&e, true);
+        e.stored("work", "u-work", 60_000);
+        std::fs::write(
+            places(&e).config,
+            "[auto.nope]\n[auto.claude]\nenabled = true\nlogins = [\"work\", \"perso\"]\n",
+        )
+        .unwrap();
+        snapshot(&e, crate::fsx::now_ms() - 1000, 100, 10);
+
+        app.auto_round(&Zoned::now());
+
+        assert_eq!(e.live_refresh_token().as_deref(), Some("r-perso"));
+        let (_, state) = call(&app, "GET", "/api/state", Value::Null);
+        let claude = &state["auto"]["claude"];
+        assert_eq!(claude["decision"]["action"]["to"], "work");
+        assert!(claude["error"].is_string(), "{claude}");
+        assert!(claude.get("switched").is_none());
+        assert!(state["auto"].get("nope").is_none());
+    }
+
+    #[test]
     fn a_broken_config_stops_auto_mode_and_says_why() {
         let e = env(&OFFLINE);
         let app = on_perso(&e, true);
