@@ -92,9 +92,12 @@ fn longest(windows: &[Window]) -> Option<&Window> {
 }
 
 /// The percentage `w`, one of `name`'s windows, counts as full at: the
-/// login's own ceiling for its shortest window, the CLI's for the rest.
+/// login's own ceiling for the shortest of several windows (Claude's 5-hour
+/// one), the CLI's for the rest and for a login with one window.
 fn cap(auto: &Auto, name: &str, windows: &[Window], w: &Window) -> u64 {
-    let shortest = counted(windows).min_by_key(|x| x.minutes.unwrap_or(u64::MAX));
+    let shortest = (counted(windows).count() > 1)
+        .then(|| counted(windows).min_by_key(|x| x.minutes.unwrap_or(u64::MAX)))
+        .flatten();
     match auto.ceilings.get(name) {
         Some(c) if shortest.is_some_and(|s| std::ptr::eq(s, w)) => *c,
         _ => auto.ceiling,
@@ -313,10 +316,12 @@ pub fn decide(input: &Input) -> Decision {
         .auto
         .fallback
         .as_deref()
+        .filter(|f| !logins.iter().any(|s| s.name == *f && s.tier.is_none()))
         .filter(|f| match figures.get(*f) {
             Some(Figures::Known(w)) if !w.is_empty() => counted(w).all(|w| w.used < 100),
             _ => false,
         });
+    let fallback = fallback.filter(|_| input.active.is_none() || active_full.is_some());
     let action = act(input, &logins, active_full, fallback);
     Decision {
         rule,
@@ -335,7 +340,9 @@ fn full_note(w: &Window, cap: u64) -> String {
 }
 
 /// `active_full` says why the active login is full, wherever it sits;
-/// `fallback` is the login to go to when every other is, if it has room.
+/// `fallback` is the login to go to when every other is too, given only when
+/// the active one is full or there is none, and the fallback has room and is
+/// not kept for a schedule.
 fn act(
     input: &Input,
     logins: &[Seen],
