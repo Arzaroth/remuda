@@ -14,6 +14,7 @@ import {
   type Loaded,
   minutes,
   OTHERWISE,
+  percent,
   type Problem,
   problemsAt,
   renameSchedule,
@@ -326,6 +327,24 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
             % better
           </span>
         </label>
+        <label>
+          <span class="aside">A window is full at</span>
+          <span class="unit">
+            <input
+              type="number"
+              min="1"
+              max="100"
+              value={a().ceiling ?? 100}
+              onChange={(e) =>
+                set((x) => {
+                  x.ceiling = percent(e.currentTarget.value) ?? 100;
+                  if (x.ceiling === 100) delete x.ceiling;
+                })
+              }
+            />
+            %
+          </span>
+        </label>
       </div>
       <div class="pickable">
         <span class="aside">Logins it may pick when no rule is in force</span>
@@ -348,6 +367,56 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
           </For>
         </div>
       </div>
+      <Show when={loginsOf(props.p.id).length}>
+        <div class="pickable">
+          <span class="aside">Its shortest window is full sooner for</span>
+          <div class="ceilings">
+            <For each={loginsOf(props.p.id)}>
+              {(name) => (
+                <label class="kept">
+                  <span class="spec">{name}</span>
+                  <span class="unit">
+                    <input
+                      type="number"
+                      min="1"
+                      max="100"
+                      aria-label={`${name} is full at`}
+                      placeholder={String(a().ceiling ?? 100)}
+                      value={a().ceilings?.[name] ?? ''}
+                      onChange={(e) =>
+                        set((x) => {
+                          const c = percent(e.currentTarget.value);
+                          if (c === null) {
+                            if (x.ceilings) delete x.ceilings[name];
+                          } else (x.ceilings ??= {})[name] = c;
+                        })
+                      }
+                    />
+                    %
+                  </span>
+                </label>
+              )}
+            </For>
+          </div>
+        </div>
+        <label class="kept">
+          <span class="aside">When every login it may pick is full</span>
+          <select
+            aria-label="When every login is full"
+            value={a().fallback ?? ''}
+            onChange={(e) => {
+              const f = e.currentTarget.value;
+              set((x) => {
+                if (f) x.fallback = f;
+                else delete x.fallback;
+              });
+            }}
+          >
+            <option value="">stay where it is</option>
+            <For each={loginsOf(props.p.id)}>{(n) => <option value={n}>go to {n}</option>}</For>
+          </select>
+        </label>
+      </Show>
       <For each={a().rule ?? []}>
         {(_, i) => <RuleCard provider={props.p.id} i={i()} count={a().rule!.length} problems={props.problems} />}
       </For>

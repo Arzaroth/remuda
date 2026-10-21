@@ -1,7 +1,22 @@
 export type Day = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
 export type Schedule = { days?: Day[]; hours?: string };
 export type Rule = { when: string; order: string[][]; reserve?: Record<string, string> };
-export type Auto = { enabled?: boolean; dwell?: string; margin?: number; logins?: string[]; rule?: Rule[] };
+export type Auto = {
+  enabled?: boolean;
+  dwell?: string;
+  margin?: number;
+  logins?: string[];
+  rule?: Rule[];
+  ceiling?: number;
+  ceilings?: Record<string, number>;
+  fallback?: string;
+};
+
+/** A percentage typed into a field: whole, 1 to 100, or none. */
+export function percent(text: string): number | null {
+  const n = Math.round(Number(text));
+  return text.trim() && Number.isFinite(n) ? Math.min(100, Math.max(1, n)) : null;
+}
 export type Config = { schedules?: Record<string, Schedule>; auto?: Record<string, Auto> };
 export type Problem = { at: string; message: string };
 export type Loaded = { config: Config; version: string; problems: Problem[]; path: string };

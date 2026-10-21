@@ -217,6 +217,8 @@ h3 { font-size: 14px; font-weight: 700; margin: 0; }
 .unit { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
 .unit input { width: 72px; color: var(--ink); }
 .pickable { display: grid; gap: 6px; }
+.ceilings { display: flex; gap: 6px 14px; flex-wrap: wrap; }
+.ceilings .unit input { width: 64px; height: 28px; }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 14px; cursor: pointer;
   border: 1px solid var(--rule-strong); background: var(--card); color: var(--muted); }
