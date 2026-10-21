@@ -3,6 +3,7 @@ import { act, store } from './state';
 import { inUse } from './usage';
 import { remember, remembered } from './storage';
 import { AddAccount } from './components/AddAccount';
+import { AutoMode } from './components/AutoMode';
 import { Group } from './components/Group';
 import { Health } from './components/Health';
 import { Strip } from './components/Strip';
@@ -58,6 +59,9 @@ export function App() {
             </Show>
           </Show>
         </div>
+        <Show when={store.s && !store.error}>
+          <AutoMode providers={shown()} />
+        </Show>
         <Show when={store.s}>
           <AddAccount provider={shown().length === 1 ? shown()[0].id : undefined} />
         </Show>

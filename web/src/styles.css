@@ -187,6 +187,67 @@ input, select { background: var(--card); border: 1px solid var(--rule-strong); b
 .signin { margin-top: 14px; display: grid; gap: 10px; }
 .signin a { color: var(--focus); overflow-wrap: anywhere; }
 
+.auto { margin-top: 36px; }
+.auto-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.auto > .aside { margin: 4px 0 14px; max-width: 72ch; }
+.auto-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); gap: 12px; align-items: start; }
+.auto-card { display: grid; gap: 12px; padding: 16px; background: var(--card); border: 1px solid var(--rule); border-radius: 12px; min-width: 0; }
+.auto-card > .aside { margin: -6px 0 0; }
+.auto-card-head { display: flex; align-items: center; gap: 9px; }
+h3 { font-size: 14px; font-weight: 700; margin: 0; }
+.switch { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; border: 0; background: none; cursor: pointer;
+  color: var(--muted); font-weight: 600; padding: 0; }
+.switch i { width: 34px; height: 20px; border-radius: 10px; background: var(--track); position: relative; transition: background 0.15s; }
+.switch i::after { content: ''; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--card); box-shadow: 0 1px 2px rgb(0 0 0 / 0.25); transition: transform 0.15s; }
+.switch[aria-checked='true'] { color: var(--good); }
+.switch[aria-checked='true'] i { background: var(--good); }
+.switch[aria-checked='true'] i::after { transform: translateX(14px); }
+.fields { display: flex; gap: 10px 20px; flex-wrap: wrap; }
+.fields label { display: grid; gap: 4px; }
+.unit { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.unit input { width: 72px; color: var(--ink); }
+.pickable { display: grid; gap: 6px; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 14px; cursor: pointer;
+  border: 1px solid var(--rule-strong); background: var(--card); color: var(--muted); }
+.chip .spec { font-size: 13px; }
+.chip:hover { border-color: var(--muted); color: var(--ink); }
+.chip[aria-pressed='true'] { background: var(--press); border-color: var(--press); color: var(--press-ink); }
+.chip:not([aria-pressed]) { color: var(--ink); background: var(--sunk); border-color: transparent; }
+.chip .x { color: var(--muted); font-size: 15px; line-height: 1; }
+.rule { display: grid; gap: 8px; padding: 12px; border-radius: 10px; background: var(--sunk); }
+.rule-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.rule-tools { margin-left: auto; display: flex; gap: 4px; }
+.rule .btn.icon { width: 28px; height: 28px; }
+.tier { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tier-name { min-width: 3.5em; }
+.tier .chip { background: var(--card); }
+.add-login { height: 28px; padding: 0 8px; border-radius: 14px; border-style: dashed; color: var(--muted); }
+.reserve { display: flex; gap: 6px 12px; flex-wrap: wrap; align-items: center; padding-top: 8px; border-top: 1px solid var(--rule); }
+.reserve > .aside { flex-basis: 100%; }
+.kept { display: inline-flex; align-items: center; gap: 6px; }
+.kept .spec { font-size: 13px; }
+.reserve select { height: 28px; padding: 0 6px; }
+.schedule { display: grid; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--rule); }
+.schedule-head { display: flex; align-items: center; gap: 8px; }
+.schedule .name { field-sizing: content; min-width: 10ch; height: 30px; }
+.schedule-head .btn.icon { margin-left: auto; width: 28px; height: 28px; }
+.days { justify-self: start; }
+.check { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); margin-right: 6px; cursor: pointer; }
+.days { display: inline-flex; padding: 2px; gap: 2px; border-radius: 8px; background: var(--sunk); }
+.days button { border: 0; background: none; border-radius: 6px; height: 28px; padding: 0 7px; font-size: 12px; color: var(--muted); cursor: pointer; }
+.days button[aria-pressed='true'] { background: var(--card); color: var(--ink); font-weight: 600; box-shadow: 0 0 0 1px var(--rule); }
+.hours input[type='time'] { height: 30px; flex: 0 0 auto; width: auto; padding: 0 6px; }
+.hours .check { white-space: nowrap; }
+.hours .check input { flex: none; height: auto; margin: 0; }
+.auto .problems { margin: 0; font-size: 13px; }
+.auto .problems code { color: var(--bad); }
+.savebar { position: sticky; bottom: 16px; z-index: 1; margin-top: 14px; display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px 10px 16px; border-radius: 12px; background: var(--card); border: 1px solid var(--rule-strong);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.12); }
+.savebar > span { margin-right: auto; }
+
 #toast { position: fixed; left: 50%; bottom: 22px; transform: translate(-50%, 8px); max-width: min(92vw, 640px);
   background: var(--press); color: var(--press-ink); padding: 10px 14px; border-radius: 10px;
   opacity: 0; pointer-events: none; transition: opacity 0.18s, transform 0.18s; white-space: pre-wrap; }
