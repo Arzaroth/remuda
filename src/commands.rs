@@ -590,14 +590,15 @@ pub fn rename(
     out: &mut dyn Write,
 ) -> Result<()> {
     store.rename(p.id(), from, to)?;
+    writeln!(out, "renamed {0}/{from} to {0}/{to}", p.id())?;
     if let Err(e) = crate::config::rename_login(config, p.id(), from, to) {
-        eprintln!(
+        writeln!(
+            out,
             "warning: {} still names {}/{from}: {e:#}",
             config.display(),
             p.id()
-        );
+        )?;
     }
-    writeln!(out, "renamed {0}/{from} to {0}/{to}", p.id())?;
     Ok(())
 }
 
@@ -622,14 +623,15 @@ pub fn remove(
         );
     }
     store.remove(p.id(), name)?;
+    writeln!(out, "removed {}/{name}", p.id())?;
     if let Err(e) = crate::config::forget_login(config, p.id(), name) {
-        eprintln!(
+        writeln!(
+            out,
             "warning: {} still names {}/{name}: {e:#}",
             config.display(),
             p.id()
-        );
+        )?;
     }
-    writeln!(out, "removed {}/{name}", p.id())?;
     Ok(())
 }
 
