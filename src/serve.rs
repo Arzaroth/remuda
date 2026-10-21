@@ -239,12 +239,14 @@ impl App {
                     else {
                         continue;
                     };
-                    let active = active(&planned.provider).ok().flatten();
                     let creds = {
                         let Ok(_lock) = self.store.lock() else {
                             continue;
                         };
-                        warm::creds(&self.store, p, &planned.name, active.as_deref())
+                        ops::sync_live(&self.store, p).and_then(|live| {
+                            let active = warm::active(&live).map_err(anyhow::Error::msg)?;
+                            warm::creds(&self.store, p, &planned.name, active.as_deref())
+                        })
                     };
                     let at = fsx::now_ms();
                     let done = creds.and_then(|c| proxy::ping(p, &c));
