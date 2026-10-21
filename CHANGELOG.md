@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- A login's usage on the page says how old it is when it is older than
+  TokenGauge's snapshot ("Figures from 23 minutes ago"). TokenGauge asks about
+  a login the CLI is not signed into less often and carries its figures in
+  between, so a login spent from another machine could look current while its
+  figures were half an hour old.
+
 ## [0.19.0] - 2026-10-21
 
 ### Added

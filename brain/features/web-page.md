@@ -40,7 +40,9 @@
 - One card per stored credential, in a grid under its CLI: name, label,
   email, plan and state pills (the plan is TokenGauge's when the credential
   file does not say, as for Grok), a row per usage window (its title, percentage
-  and reset over a bar), a Claude login's banked usage-limit resets and when
+  and reset over a bar, then "Figures from N minutes ago" when TokenGauge
+  carried them from an earlier ask than its snapshot, `usage.ts` `carriedSince`),
+  a Claude login's banked usage-limit resets and when
   they expire, with a Reset limits button that asks for a second click before
   it spends one and then holds until TokenGauge reports the new count, how long its access token and its sign-in (refresh
   token) have left, and Use, Refresh, Label, Rename and Remove along the
