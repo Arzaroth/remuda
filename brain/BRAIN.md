@@ -29,6 +29,7 @@ shared.
 | Where are credentials kept, and in what shape? | [architecture/store.md](architecture/store.md) |
 | Where are remuda's settings, and how does the page edit them? | [architecture/config.md](architecture/config.md) |
 | Why did auto mode switch, or not? | [features/auto-mode.md](features/auto-mode.md) |
+| Why was a login pinged, or not? | [features/keep-warm.md](features/keep-warm.md) |
 | What does TokenGauge rely on? | [architecture/store.md](architecture/store.md) |
 | How is Claude Code different from Codex? | [architecture/providers.md](architecture/providers.md) |
 | How do I add a third CLI? | [architecture/providers.md](architecture/providers.md) |
@@ -51,6 +52,7 @@ shared.
 | Token refresh | [features/refresh.md](features/refresh.md) |
 | Names and labels | [features/names-and-labels.md](features/names-and-labels.md) |
 | Auto mode | [features/auto-mode.md](features/auto-mode.md) |
+| Keep-warm | [features/keep-warm.md](features/keep-warm.md) |
 | The local page | [features/web-page.md](features/web-page.md) |
 | The proxy | [features/proxy.md](features/proxy.md) |
 | Completions and self-update | [features/completions-and-update.md](features/completions-and-update.md) |

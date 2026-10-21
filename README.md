@@ -197,6 +197,24 @@ after the last one (`dwell`), and one between logins of the same tier needs a
 switched only while no Codex session runs. `remuda auto` shows what it would
 do and why.
 
+## Keep-warm
+
+A 5-hour window only starts at its first message. Keep-warm reopens a login's
+window with a one-token request as soon as it closes, so one is always running
+and the next reset keeps coming: a 7am ping gives you an hour of the 7-12
+window, then a fresh one at noon. Pick the logins on each CLI's card in the
+page's Auto mode section, or in `config.toml`:
+
+```toml
+[warm]
+claude = ["work", "perso"]
+codex  = ["work"]
+```
+
+It needs `remuda serve` and TokenGauge, and works for any login TokenGauge
+reports a 5-hour window for. The login a CLI is on is pinged with the CLI's
+own token and never refreshed by remuda.
+
 ## The proxy
 
 `remuda serve` can also run an API proxy for any OpenAI or Anthropic client,
@@ -297,6 +315,9 @@ Claude Code had made them, and a ChatGPT subscription's as Codex. Both
 providers' consumer terms allow their subscriptions only in their own CLIs,
 and either can refuse such traffic or act on the account. Using it is your
 call.
+
+Keep-warm is automated traffic on a subscription too, around the clock. It is
+the smallest request the provider takes, but it is not you typing.
 
 ## Development
 

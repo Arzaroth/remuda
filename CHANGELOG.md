@@ -4,6 +4,11 @@
 
 ### Added
 
+- Keep-warm: `remuda serve` reopens a chosen login's 5-hour window with a
+  one-token request as soon as it closes, so one is always running. Logins opt
+  in under `[warm]` in `config.toml`, or with chips on each CLI's card in the
+  page's Auto mode section; a login card shows the last ping, and `remuda
+  auto` says which logins are due.
 - A login's usage on the page says how old it is when it is older than
   TokenGauge's snapshot ("Figures from 23 minutes ago"). TokenGauge asks about
   a login the CLI is not signed into less often and carries its figures in

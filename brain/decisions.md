@@ -273,6 +273,16 @@ says to run the CLI or switch, rather than renewed. Pinning the proxy to a
 stored, inactive login it could refresh was turned down: it never stalls,
 but it is a second active login per CLI to manage.
 
+## Keep-warm spends the active login and waits for TokenGauge between pings
+
+A ping on the login a CLI is on uses its live credentials and never refreshes
+them, as the proxy does, for the same reason: the CLI holds that refresh token.
+Pinging only inactive logins was turned down, since the active one is the
+login whose window matters most. A login is pinged again only once TokenGauge's
+snapshot is newer than the last ping: remuda has no figures of its own, and
+until TokenGauge fetches, a closed window still looks closed, so without the
+wait every round would ping again.
+
 ## The proxy has its own listener, guarded by its own keys
 
 The page's listener reads bodies of at most 64 KiB, refuses chunked ones and
