@@ -174,6 +174,52 @@ mod tests {
     }
 
     #[test]
+    fn a_refused_client_reads_the_refusal_rather_than_a_reset() {
+        let p = run(Vec::new());
+        let body = "x".repeat(2 * 1024 * 1024);
+        let mut s = TcpStream::connect(("127.0.0.1", p.port)).unwrap();
+        write!(
+            s,
+            "POST /v1/messages HTTP/1.1\r\nContent-Length: {}\r\n\r\n",
+            body.len()
+        )
+        .unwrap();
+        let _ = s.write_all(body.as_bytes());
+        let mut answer = Vec::new();
+        let _ = s.read_to_end(&mut answer);
+        let answer = String::from_utf8_lossy(&answer);
+        assert!(answer.starts_with("HTTP/1.1 401"), "{answer}");
+        assert!(answer.contains("nosniff"), "{answer}");
+    }
+
+    #[test]
+    fn a_client_waiting_for_continue_is_told_to_go_on() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/v1/messages")
+            .match_query(Matcher::Any)
+            .with_body("{}")
+            .create();
+        let (_tmp, claude) = signed_in_claude(&server, HOUR);
+        let p = run(vec![Box::new(claude)]);
+        let body = json!({"model": "claude-x", "messages": []}).to_string();
+        let mut s = TcpStream::connect(("127.0.0.1", p.port)).unwrap();
+        write!(
+            s,
+            "POST /v1/messages HTTP/1.1\r\nx-api-key: {KEY}\r\nExpect: 100-continue\r\nContent-Length: {}\r\n\r\n",
+            body.len()
+        )
+        .unwrap();
+        let mut first = [0u8; 25];
+        s.read_exact(&mut first).unwrap();
+        assert_eq!(&first, b"HTTP/1.1 100 Continue\r\n\r\n");
+        s.write_all(body.as_bytes()).unwrap();
+        let mut rest = String::new();
+        s.read_to_string(&mut rest).unwrap();
+        assert!(rest.starts_with("HTTP/1.1 200"), "{rest}");
+    }
+
+    #[test]
     fn claude_requests_go_out_on_the_active_login_as_claude_code() {
         let mut server = mockito::Server::new();
         let upstream = server

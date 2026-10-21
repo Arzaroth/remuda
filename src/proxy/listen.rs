@@ -10,15 +10,21 @@ use serde_json::{Value, json};
 
 use super::Backend;
 use super::forward;
-use crate::http::{Head, Slot, read_head};
+use crate::http::{Head, LINGER, Slot, close_with, read_head, write_head};
 use crate::provider::Format;
+use crate::serve::Response;
 
 /// Requests carry whole conversations, attachments included.
 const MAX_BODY: usize = 32 * 1024 * 1024;
 const CONNECTIONS: usize = 32;
 const HEAD_WITHIN: Duration = Duration::from_secs(10);
-/// How long a client may go quiet while it sends its body.
+/// How long a client may go quiet while it sends its body, and how long the
+/// whole body may take.
 const BODY_STALL: Duration = Duration::from_secs(30);
+const BODY_WITHIN: Duration = Duration::from_secs(300);
+/// A client that stops reading the answer is dropped after this long.
+const WRITE_STALL: Duration = Duration::from_secs(60);
+const MAX_TRAILERS: usize = 64;
 const POLL: Duration = Duration::from_millis(50);
 
 /// A listener that answers until it is told to stop.
@@ -61,10 +67,6 @@ fn accept(listener: TcpListener, backend: Weak<dyn Backend>, stop: &AtomicBool) 
     while !stop.load(Ordering::SeqCst) {
         let stream = match listener.accept() {
             Ok((stream, _)) => stream,
-            Err(e) if e.kind() == ErrorKind::WouldBlock => {
-                std::thread::sleep(POLL);
-                continue;
-            }
             Err(_) => {
                 std::thread::sleep(POLL);
                 continue;
@@ -74,7 +76,7 @@ fn accept(listener: TcpListener, backend: Weak<dyn Backend>, stop: &AtomicBool) 
             continue;
         }
         let Some(slot) = Slot::take(&busy, CONNECTIONS) else {
-            refuse(stream, 503, None, "the proxy is busy");
+            linger_refuse(stream, 503, None, "the proxy is busy", Duration::ZERO);
             continue;
         };
         let Some(backend) = backend.upgrade() else {
@@ -105,7 +107,6 @@ pub fn error_body(format: Option<Format>, status: u16, message: &str) -> Value {
         403 => "permission_error",
         404 => "not_found_error",
         429 => "rate_limit_error",
-        502 | 503 => "api_error",
         _ => "api_error",
     };
     match format {
@@ -116,19 +117,23 @@ pub fn error_body(format: Option<Format>, status: u16, message: &str) -> Value {
     }
 }
 
-fn refuse(mut stream: TcpStream, status: u16, format: Option<Format>, message: &str) {
-    let body = error_body(format, status, message).to_string();
-    let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
-    let _ = write_head(
-        &mut stream,
-        status,
-        "application/json",
-        Some(body.len()),
-        &[],
-    )
-    .and_then(|()| stream.write_all(body.as_bytes()));
-    let _ = stream.flush();
-    let _ = stream.shutdown(std::net::Shutdown::Write);
+/// On the accepting thread, drains only what has already arrived.
+fn refuse(stream: TcpStream, status: u16, format: Option<Format>, message: &str) {
+    linger_refuse(stream, status, format, message, LINGER);
+}
+
+fn linger_refuse(
+    stream: TcpStream,
+    status: u16,
+    format: Option<Format>,
+    message: &str,
+    linger: Duration,
+) {
+    close_with(
+        stream,
+        &Response::json(status, error_body(format, status, message)),
+        linger,
+    );
 }
 
 /// The key, as OpenAI's SDKs and Anthropic's each send it.
@@ -161,16 +166,25 @@ fn answer(backend: &dyn Backend, mut stream: TcpStream) {
         );
         return;
     }
-    match (head.method.as_str(), head.path.as_str()) {
-        ("GET", "/v1/models" | "/models") => {
+    if stream.set_write_timeout(Some(WRITE_STALL)).is_err() {
+        return;
+    }
+    match (head.method.as_str(), head.path.as_str(), format) {
+        ("GET", "/v1/models" | "/models", _) => {
             let anthropic = head.header("anthropic-version").is_some();
             let body = forward::models(backend, anthropic).to_string();
             let _ = write_head(&mut stream, 200, "application/json", Some(body.len()), &[])
                 .and_then(|()| stream.write_all(body.as_bytes()));
         }
-        ("POST", path) if format.is_some() => {
-            let format = format.unwrap_or(Format::Chat);
-            let body = match read_body(&mut stream, &head) {
+        ("POST", path, Some(format)) => {
+            if head
+                .header("Expect")
+                .is_some_and(|v| v.eq_ignore_ascii_case("100-continue"))
+                && stream.write_all(b"HTTP/1.1 100 Continue\r\n\r\n").is_err()
+            {
+                return;
+            }
+            let body = match read_body(&stream, &head) {
                 Ok(body) => body,
                 Err((status, message)) => return refuse(stream, status, Some(format), message),
             };
@@ -199,11 +213,31 @@ fn answer(backend: &dyn Backend, mut stream: TcpStream) {
     }
 }
 
-fn read_body(stream: &mut TcpStream, head: &Head) -> Result<Vec<u8>, (u16, &'static str)> {
-    stream
-        .set_read_timeout(Some(BODY_STALL))
-        .map_err(|_| (408, "the request body could not be read"))?;
-    let mut reader = head.rest.as_slice().chain(stream);
+/// Reads with a deadline for each read and one for them all.
+struct Timed<'a> {
+    stream: &'a TcpStream,
+    until: Instant,
+}
+
+impl Read for Timed<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let left = self
+            .until
+            .checked_duration_since(Instant::now())
+            .filter(|d| !d.is_zero())
+            .ok_or(ErrorKind::TimedOut)?;
+        self.stream.set_read_timeout(Some(left.min(BODY_STALL)))?;
+        let mut stream = self.stream;
+        stream.read(buf)
+    }
+}
+
+fn read_body(stream: &TcpStream, head: &Head) -> Result<Vec<u8>, (u16, &'static str)> {
+    let timed = Timed {
+        stream,
+        until: Instant::now() + BODY_WITHIN,
+    };
+    let mut reader = head.rest.as_slice().chain(timed);
     let chunked = head
         .header("Transfer-Encoding")
         .is_some_and(|v| v.to_ascii_lowercase().contains("chunked"));
@@ -232,10 +266,14 @@ fn read_chunked(reader: &mut impl Read) -> Result<Vec<u8>, (u16, &'static str)> 
         let size = line.split(';').next().unwrap_or_default().trim();
         let size = usize::from_str_radix(size, 16).map_err(|_| (400, "bad chunk size"))?;
         if size == 0 {
-            while !read_line(reader).ok_or(cut)?.is_empty() {}
-            return Ok(body);
+            for _ in 0..MAX_TRAILERS {
+                if read_line(reader).ok_or(cut)?.is_empty() {
+                    return Ok(body);
+                }
+            }
+            return Err((400, "too many trailers"));
         }
-        if body.len() + size > MAX_BODY {
+        if size > MAX_BODY - body.len() {
             return Err((413, "the request body is too large"));
         }
         let start = body.len();
@@ -265,35 +303,6 @@ fn read_line(reader: &mut impl Read) -> Option<String> {
     }
 }
 
-/// Without a length, the body runs until the connection closes.
-pub fn write_head(
-    stream: &mut impl Write,
-    status: u16,
-    content_type: &str,
-    length: Option<usize>,
-    extra: &[(&str, String)],
-) -> std::io::Result<()> {
-    let reason = reqwest::StatusCode::from_u16(status)
-        .ok()
-        .and_then(|s| s.canonical_reason())
-        .unwrap_or("");
-    write!(
-        stream,
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\n"
-    )?;
-    if let Some(length) = length {
-        write!(stream, "Content-Length: {length}\r\n")?;
-    }
-    for (name, value) in extra {
-        write!(stream, "{name}: {value}\r\n")?;
-    }
-    write!(
-        stream,
-        "Cache-Control: no-store\r\nConnection: close\r\n\r\n"
-    )?;
-    stream.flush()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -305,6 +314,14 @@ mod tests {
         assert_eq!(read_chunked(&mut &b"5\r\nhel"[..]).unwrap_err().0, 408);
         assert_eq!(read_chunked(&mut &b"zz\r\n"[..]).unwrap_err().0, 400);
         assert_eq!(read_chunked(&mut &b"2\r\nabX\r\n"[..]).unwrap_err().0, 400);
+        assert_eq!(
+            read_chunked(&mut &b"1\r\na\r\nffffffffffffffff\r\n"[..])
+                .unwrap_err()
+                .0,
+            413
+        );
+        let trailers = format!("0\r\n{}\r\n", "T: x\r\n".repeat(MAX_TRAILERS + 1));
+        assert_eq!(read_chunked(&mut trailers.as_bytes()).unwrap_err().0, 400);
     }
 
     #[test]
