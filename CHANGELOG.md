@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-21
+
 ### Added
 
 - The proxy translates between formats, so any client reaches any CLI:
