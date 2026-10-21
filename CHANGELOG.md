@@ -5,7 +5,7 @@
 ### Added
 
 - Keep-warm: `remuda serve` reopens a chosen login's 5-hour window with a
-  one-token request as soon as it closes, so one is always running. Logins opt
+  request as small as it takes as soon as it closes, so one is always running. Logins opt
   in under `[warm]` in `config.toml`, or with chips on each CLI's card in the
   page's Auto mode section; a login card shows the last ping, and `remuda
   auto` says which logins are due.

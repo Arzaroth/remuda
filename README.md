@@ -200,7 +200,7 @@ do and why.
 ## Keep-warm
 
 A 5-hour window only starts at its first message. Keep-warm reopens a login's
-window with a one-token request as soon as it closes, so one is always running
+window with the smallest request it takes as soon as it closes, so one is always running
 and the next reset keeps coming: a 7am ping gives you an hour of the 7-12
 window, then a fresh one at noon. Pick the logins on each CLI's card in the
 page's Auto mode section, or in `config.toml`:
