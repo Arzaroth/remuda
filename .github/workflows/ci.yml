@@ -75,4 +75,4 @@ jobs:
           persist-credentials: false
 
       - name: ShellCheck
-        run: shellcheck scripts/install.sh scripts/release.sh
+        run: shellcheck scripts/install.sh scripts/release.sh scripts/package.sh scripts/arch.sh scripts/check-package.sh
