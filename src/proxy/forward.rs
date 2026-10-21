@@ -1,11 +1,13 @@
-use std::io::{Read, Write};
+use std::io::{BufReader, Read, Write};
 use std::sync::OnceLock;
 use std::time::Duration;
 
 use serde_json::{Value, json};
 
 use super::Backend;
+use super::listen::error_body;
 use super::route;
+use super::translate;
 use crate::fsx::now_ms;
 use crate::http::Head;
 use crate::http::write_head;
@@ -139,24 +141,37 @@ pub fn forward(backend: &dyn Backend, mut call: Call, out: &mut impl Write) -> R
         .to_owned();
     let (p, model, creds) = pick(backend, &model)?;
     let formats = p.formats(&model);
-    if !formats.contains(&call.format) {
-        let takes: Vec<&str> = formats.iter().map(|f| f.name()).collect();
-        return Err(refuse(
-            400,
-            format!(
-                "{} takes {} requests, not {}",
-                p.name(),
-                takes.join(" or "),
-                call.format.name()
-            ),
-        ));
-    }
+    let target = if formats.contains(&call.format) {
+        call.format
+    } else {
+        formats[0]
+    };
+    let asked_stream = call.body.get("stream").and_then(Value::as_bool) == Some(true);
+    let mut translation = if target == call.format {
+        None
+    } else {
+        if call.count_tokens {
+            return Err(refuse(501, format!("{} cannot count tokens", p.name())));
+        }
+        let (body, names, conversation) = translate::request(call.format, target, &call.body)
+            .map_err(|e| refuse(400, format!("{e:#}")))?;
+        call.body = body;
+        Some((names, conversation))
+    };
     call.body["model"] = json!(model);
     let user_agent = call.head.header("User-Agent");
-    p.shape(call.format, &mut call.body, user_agent)
+    p.shape(target, &mut call.body, user_agent)
         .map_err(|e| refuse(400, format!("{e:#}")))?;
+    let streamed = call.body.get("stream").and_then(Value::as_bool) == Some(true);
+    if translation.is_none() && streamed && !asked_stream && target != Format::Chat {
+        let whole = translate::Conversation {
+            model: call.body["model"].as_str().unwrap_or_default().to_owned(),
+            ..translate::Conversation::default()
+        };
+        translation = Some((translate::Names::default(), whole));
+    }
     let upstream = p
-        .upstream(&creds, call.format, &model)
+        .upstream(&creds, target, &model)
         .ok_or_else(|| refuse(503, format!("the active {} login holds no token", p.name())))?;
     let mut url = upstream.url;
     if call.count_tokens {
@@ -187,15 +202,21 @@ pub fn forward(backend: &dyn Backend, mut call: Call, out: &mut impl Write) -> R
         }
         request = request.header(*name, value);
     }
+    let client_header = |name: &str| {
+        translation
+            .is_none()
+            .then(|| call.head.header(name))
+            .flatten()
+    };
     for name in PASSED {
         if !set(name)
-            && let Some(value) = call.head.header(name)
+            && let Some(value) = client_header(name)
         {
             request = request.header(*name, value);
         }
     }
-    if call.format == Format::Messages {
-        if !set("anthropic-version") && call.head.header("anthropic-version").is_none() {
+    if target == Format::Messages {
+        if !set("anthropic-version") && client_header("anthropic-version").is_none() {
             request = request.header("anthropic-version", "2023-06-01");
         }
         let ours = upstream
@@ -203,7 +224,7 @@ pub fn forward(backend: &dyn Backend, mut call: Call, out: &mut impl Write) -> R
             .iter()
             .find(|(n, _)| n.eq_ignore_ascii_case("anthropic-beta"))
             .map(|(_, v)| v.as_str());
-        if let Some(betas) = merged_betas(ours, call.head.header("anthropic-beta")) {
+        if let Some(betas) = merged_betas(ours, client_header("anthropic-beta")) {
             request = request.header("anthropic-beta", betas);
         }
     }
@@ -226,6 +247,33 @@ pub fn forward(backend: &dyn Backend, mut call: Call, out: &mut impl Write) -> R
         if let Some(v) = header(name) {
             extra.push((name, v));
         }
+    }
+    if let Some((names, conversation)) = translation {
+        if !(200..300).contains(&status) {
+            let mut text = String::new();
+            let _ = (&mut resp).take(1024 * 1024).read_to_string(&mut text);
+            let message = format!(
+                "{} answered {status}: {}",
+                p.name(),
+                translate::error_message(&text)
+            );
+            let body = error_body(Some(call.format), status, &message).to_string();
+            let _ = write_head(out, status, "application/json", Some(body.len()), &extra)
+                .and_then(|()| out.write_all(body.as_bytes()));
+            return Ok(());
+        }
+        let _ = translate::respond(
+            target,
+            call.format,
+            &conversation,
+            &names,
+            BufReader::new(resp),
+            out,
+            |out, status, content_type, length| {
+                write_head(out, status, content_type, length, &extra)
+            },
+        );
+        return Ok(());
     }
     let length = resp.content_length().map(|n| n as usize);
     if write_head(out, status, &content_type, length, &extra).is_err() {
