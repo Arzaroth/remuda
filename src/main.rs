@@ -19,6 +19,7 @@ mod paths;
 mod pkce;
 mod project;
 mod provider;
+mod proxy;
 mod runs;
 mod serve;
 mod served;

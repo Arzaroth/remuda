@@ -16,6 +16,7 @@ use crate::ops;
 use crate::paths;
 use crate::pkce;
 use crate::provider::{PendingLogin, Provider};
+use crate::proxy;
 use crate::runs;
 use crate::shown;
 use crate::store::Store;
@@ -37,6 +38,7 @@ pub struct Places {
     pub units: Vec<PathBuf>,
     pub snapshot: PathBuf,
     pub config: PathBuf,
+    pub proxy: PathBuf,
 }
 
 impl Places {
@@ -45,6 +47,7 @@ impl Places {
             units: paths::systemd_user_units(),
             snapshot: paths::tokengauge_snapshot(),
             config: paths::config_file(),
+            proxy: paths::proxy_settings(),
         }
     }
 }
@@ -233,6 +236,21 @@ impl App {
         self.providers.iter().map(|p| p.as_ref()).collect()
     }
 
+    fn proxy_file(&self) -> proxy::settings::File {
+        proxy::settings::File::at(self.places.proxy.clone())
+    }
+
+    fn proxy_state(&self) -> Result<Value> {
+        let s = self.proxy_file().read()?;
+        let origin = format!("http://127.0.0.1:{}", s.port);
+        Ok(json!({
+            "enabled": s.enabled,
+            "port": s.port,
+            "baseUrls": {"openai": format!("{origin}/v1"), "claude": origin},
+            "keys": s.keys,
+        }))
+    }
+
     fn health(&self) -> Value {
         let unit = "remuda-refresh.timer";
         let dirs = &self.places.units;
@@ -288,6 +306,7 @@ impl App {
         }
         files.push(self.places.snapshot.clone());
         files.push(self.places.config.clone());
+        files.push(self.places.proxy.clone());
         let mut seen: Vec<_> = files.into_iter().filter_map(stamp).collect();
         seen.sort();
         seen
@@ -401,6 +420,7 @@ impl App {
                 state["usage"] = gauge::read(&self.places.snapshot).unwrap_or(Value::Null);
                 state["shown"] = shown::shown(&state);
                 state["auto"] = json!(*self.auto.lock().unwrap());
+                state["proxy"] = self.proxy_state()?;
                 Ok(state)
             }
             ("GET", "/api/config") => self.config(),
@@ -424,6 +444,37 @@ impl App {
                 }
                 config::save(&self.places.config, &config, version)?;
                 self.config()
+            }
+            ("POST", "/api/proxy/settings") => {
+                let enabled = body.get("enabled").and_then(Value::as_bool);
+                let port = match body.get("port") {
+                    None | Some(Value::Null) => None,
+                    Some(v) => Some(
+                        v.as_u64()
+                            .and_then(|p| u16::try_from(p).ok())
+                            .filter(|p| *p > 0)
+                            .context("port must be a number from 1 to 65535")?,
+                    ),
+                };
+                self.proxy_file().edit(|s| {
+                    if let Some(enabled) = enabled {
+                        s.enabled = enabled;
+                    }
+                    if let Some(port) = port {
+                        s.port = port;
+                    }
+                    Ok(())
+                })?;
+                Ok(json!({"message": "proxy settings saved"}))
+            }
+            ("POST", "/api/proxy/keys") => {
+                let key = self.proxy_file().add_key(spec()?)?;
+                Ok(json!({"message": format!("added the key {}", key.name), "id": key.id}))
+            }
+            ("POST", "/api/proxy/keys/remove") => {
+                self.proxy_file()
+                    .remove_key(text("id").context("id is required")?)?;
+                Ok(json!({"message": "key removed"}))
             }
             ("POST", "/api/use") => {
                 let (p, name) = commands::resolve(store, &providers, spec()?)?;
@@ -581,6 +632,7 @@ mod tests {
             units: vec![e.tmp.path().join("units"), e.tmp.path().join("global")],
             snapshot: e.tmp.path().join("tokengauge-usage.json"),
             config: e.tmp.path().join("config.toml"),
+            proxy: e.tmp.path().join("proxy.json"),
         }
     }
 
@@ -640,6 +692,55 @@ mod tests {
             resp.status,
             serde_json::from_str(&resp.body).unwrap_or(Value::Null),
         )
+    }
+
+    #[test]
+    fn the_page_manages_the_proxy() {
+        let e = env(&OFFLINE);
+        let app = app(&e, &OFFLINE);
+        let proxy = || call(&app, "GET", "/api/state", Value::Null).1["proxy"].clone();
+        assert_eq!(proxy()["enabled"], false);
+        assert_eq!(proxy()["baseUrls"]["openai"], "http://127.0.0.1:8317/v1");
+        assert_eq!(proxy()["baseUrls"]["claude"], "http://127.0.0.1:8317");
+
+        let (status, _) = call(
+            &app,
+            "POST",
+            "/api/proxy/settings",
+            json!({"enabled": true, "port": 9000}),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(proxy()["enabled"], true);
+        assert_eq!(proxy()["baseUrls"]["claude"], "http://127.0.0.1:9000");
+        let (status, _) = call(&app, "POST", "/api/proxy/settings", json!({"port": 0}));
+        assert_eq!(status, 400);
+        let (status, _) = call(&app, "POST", "/api/proxy/settings", json!({"port": 70000}));
+        assert_eq!(status, 400);
+
+        let (status, r) = call(&app, "POST", "/api/proxy/keys", json!({"name": "laptop"}));
+        assert_eq!(status, 200);
+        let keys = proxy()["keys"].clone();
+        assert_eq!(keys[0]["name"], "laptop");
+        assert_eq!(keys[0]["id"], r["id"]);
+        assert!(keys[0]["key"].as_str().unwrap().starts_with("rmd-"));
+
+        let (status, _) = call(
+            &app,
+            "POST",
+            "/api/proxy/keys/remove",
+            json!({"id": r["id"]}),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(proxy()["keys"], json!([]));
+    }
+
+    #[test]
+    fn a_proxy_settings_change_wakes_the_page() {
+        let e = env(&OFFLINE);
+        let app = app(&e, &OFFLINE);
+        let before = app.fingerprint();
+        call(&app, "POST", "/api/proxy/keys", json!({"name": "a"}));
+        assert_ne!(app.fingerprint(), before);
     }
 
     #[test]
