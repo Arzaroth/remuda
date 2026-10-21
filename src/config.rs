@@ -1209,6 +1209,22 @@ order = [["perso"]]
     }
 
     #[test]
+    fn a_ceilings_table_written_by_hand_stays_a_table() {
+        let text =
+            "[auto.claude]\nenabled = true\n\n[auto.claude.ceilings]\nIDC = 93 # five hours\n";
+        let mut c: Config = toml_edit::de::from_str(text).unwrap();
+        c.auto
+            .get_mut("claude")
+            .unwrap()
+            .ceilings
+            .insert("Axeo".into(), 88);
+        assert_eq!(
+            written(text, &c),
+            "[auto.claude]\nenabled = true\n\n[auto.claude.ceilings]\nIDC = 93 # five hours\nAxeo = 88\n"
+        );
+    }
+
+    #[test]
     fn a_new_file_is_written_from_nothing() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("remuda/config.toml");
