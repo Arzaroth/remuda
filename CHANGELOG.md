@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-21
+
 ### Added
 
 - Auto mode: `remuda serve` keeps each CLI on the most suitable of the logins
