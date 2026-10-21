@@ -4,91 +4,6 @@ Features remuda may grow next. None is started; order is not priority.
 Small fixes and chores go in [TODO.md](TODO.md). When a feature ships, its entry
 leaves this file and a doc for it lands in `brain/features/`.
 
-## Auto mode
-
-remuda keeps each CLI on the most suitable of the logins the user made
-eligible, and moves it to another when the active one is maxed. Each provider
-is decided apart from the others.
-
-**The watcher.** A thread in `remuda serve`, the process that already runs all
-the time and already follows TokenGauge's snapshot. It decides again whenever
-the snapshot changes, and once a minute so a schedule takes effect on time.
-Auto mode works only while `serve` runs.
-
-**The settings.** A config file remuda does not have yet,
-`$XDG_CONFIG_HOME/remuda/config.toml`, which the page edits as well as the
-user's editor. Each provider has its own section, off by default: whether auto
-mode is on, which logins it may pick, its rules, the minimum time on a login
-and the margin. Schedules are named once and shared by every provider.
-`remuda rename` and `remuda remove` keep the logins named there in step.
-
-```toml
-[schedules.workday]
-days  = ["mon", "tue", "wed", "thu", "fri"]
-hours = "09:00-18:00"   # local time
-
-[auto.claude]
-enabled = true
-dwell   = "30m"
-margin  = 0.25
-
-[[auto.claude.rule]]
-when  = "workday"
-order = [["work"], ["perso"]]
-
-[[auto.claude.rule]]
-when    = "otherwise"
-order   = [["perso"], ["work"]]
-reserve = { work = "workday" }
-```
-
-**The pick.**
-
-1. The rule in force is the first whose schedule matches now; `otherwise`
-   matches any time. With no rules, every eligible login sits in one tier.
-2. A rule's `order` is a list of tiers. The first tier holding a usable login
-   wins; a lower tier is reached only when every login above it is maxed or
-   unusable.
-3. Within a tier, the score decides: the headroom left in the login's longest
-   window divided by the hours until it resets (at least one). Headroom about
-   to be lost at a reset is spent first.
-4. A login whose 5-hour window is maxed is not usable.
-5. A reserved login (`reserve = { work = "workday" }`) is kept for its
-   schedule. Outside it, it is usable only when its longest window resets
-   before the schedule next starts, since whatever is left would be lost
-   anyway, and then it moves to the first tier so it is spent before the rest.
-
-When every eligible login is maxed, auto mode stays where it is, says so on the
-page and in its log, and switches once one resets.
-
-**No flapping.** A login stays active for at least `dwell`, and auto mode
-leaves it only for a pick that scores `margin` better. Neither holds when the
-active login is maxed.
-
-**Figures it can trust.** It does not decide on a stale snapshot or one older
-than the last switch. A login whose figures carry an error, or that has none,
-sits out that round. After a switch it nudges TokenGauge and waits for the new
-snapshot.
-
-**Every switch is still a switch.** Auto mode calls the same `ops::switch` as
-`remuda use`, never with `discard`: the live login is synced back first, and an
-unstored live login makes it refuse and report rather than drop it. remuda
-cannot yet tell a session in the middle of a request apart, so it does not
-wait for one.
-
-**Running sessions.** Claude Code checks its credential file's mtime before
-each request and takes up the new login, and writes back only over the token
-it started from, so a switch reaches every open session on its next request.
-Codex never re-reads `auth.json` while it runs: on its next refresh it finds
-another account, refuses it and asks the user to sign in again, and a refresh
-already in flight writes the old account's tokens into the new file (codex-cli
-0.162.1, `codex-rs/login/src/auth/manager.rs`). So auto mode switches Codex
-only while no `codex` process runs, and the page says it is waiting.
-
-`remuda auto` prints, per provider, the rule in force, each eligible login's
-score and why it was or was not picked, so the rules can be checked before they
-are switched on. The page shows the same.
-
 ## `remuda run`
 
 `remuda run <profile>` starts a CLI session on one stored login without
@@ -183,8 +98,8 @@ A Claude login's banked resets are on its card, and the page spends one
 of CLIProxyAPI's management center: a sidebar with sections (Dashboard, Quota,
 Accounts, Add an account, Settings, Logs) and a settings section for what
 remuda gains on the way: the refresh timer, the hub's bind address and
-satellites. Auto mode brings the config file and the first settings the page
-edits; this section grows on what it starts.
+satellites. Auto mode brought the config file and the first settings the page
+edits; this section grows on what it started.
 
 The page is already written in Solid under `web/`, which Vite builds into the
 one file the binary compiles in, so sections grow there as components.

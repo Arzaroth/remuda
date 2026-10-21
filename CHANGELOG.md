@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Added
+
+- Auto mode: `remuda serve` keeps each CLI on the most suitable of the logins
+  you allow, and moves it off one that is maxed. Rules pick logins by schedule
+  (work hours, evenings) in tiers, a login can be kept for a schedule unless
+  its week resets before the schedule starts, and within a tier the login with
+  the most headroom to lose at its next reset goes first. Off by default, set
+  up per CLI on the page or in `~/.config/remuda/config.toml`. Codex is
+  switched only while no Codex session runs, since a running one cannot take
+  a new login.
+- `remuda auto` says which login auto mode would put each CLI on now, and why.
+- `remuda rename` and `remuda rm` keep the config's login names in step.
+
 ## [0.14.0] - 2026-10-20
 
 ### Added

@@ -101,7 +101,12 @@ timer, or a new TokenGauge fetch shows within a couple of seconds, without a
 reload, in every open tab. A change to a CLI's own login, such as signing in
 from the CLI, or enabling the refresh timer shows within a minute.
 
-### Auto mode settings
+### Auto mode
+
+Each CLI's auto mode card opens with what its last round decided
+([auto-mode.md](auto-mode.md)): the rule in force, every login weighed with
+its score and why it was or was not picked, the decision and why, and the last
+switch auto mode made.
 
 Below the logins, the page edits `config.toml`
 ([architecture/config.md](../architecture/config.md)): one card per CLI shown,
