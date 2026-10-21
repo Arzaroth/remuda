@@ -45,10 +45,10 @@ pub fn bind(port: u16) -> Result<(TcpListener, u16)> {
     Ok((listener, port))
 }
 
-struct Slot(Arc<AtomicUsize>);
+pub(crate) struct Slot(Arc<AtomicUsize>);
 
 impl Slot {
-    fn take(taken: &Arc<AtomicUsize>, limit: usize) -> Option<Slot> {
+    pub(crate) fn take(taken: &Arc<AtomicUsize>, limit: usize) -> Option<Slot> {
         if taken.fetch_add(1, Ordering::SeqCst) >= limit {
             taken.fetch_sub(1, Ordering::SeqCst);
             return None;
@@ -90,12 +90,12 @@ fn error(status: u16, message: &str) -> Response {
 }
 
 /// How long an answered connection is drained, all reads together.
-const LINGER: Duration = Duration::from_millis(300);
+pub(crate) const LINGER: Duration = Duration::from_millis(300);
 
 /// Answers without reading the rest of the request. Closing with that still
 /// unread resets the connection and the client never sees the answer, so
 /// whatever arrives in the next moment is read and dropped.
-fn close_with(mut stream: TcpStream, response: &Response, linger: Duration) {
+pub(crate) fn close_with(mut stream: TcpStream, response: &Response, linger: Duration) {
     let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
     let _ = write_response(&mut stream, response);
     let _ = stream.shutdown(std::net::Shutdown::Write);
@@ -121,16 +121,16 @@ fn close_with(mut stream: TcpStream, response: &Response, linger: Duration) {
     }
 }
 
-struct Head {
-    method: String,
-    path: String,
-    headers: Vec<(String, String)>,
+pub(crate) struct Head {
+    pub method: String,
+    pub path: String,
+    pub headers: Vec<(String, String)>,
     /// Bytes past the blank line: the start of the body.
-    rest: Vec<u8>,
+    pub rest: Vec<u8>,
 }
 
 impl Head {
-    fn header(&self, name: &str) -> Option<&str> {
+    pub(crate) fn header(&self, name: &str) -> Option<&str> {
         self.headers
             .iter()
             .find(|(k, _)| k.eq_ignore_ascii_case(name))
@@ -138,7 +138,7 @@ impl Head {
     }
 }
 
-fn read_head(stream: &mut TcpStream, deadline: Instant) -> Option<Head> {
+pub(crate) fn read_head(stream: &mut TcpStream, deadline: Instant) -> Option<Head> {
     let mut buf = Vec::with_capacity(1024);
     let mut chunk = [0u8; 1024];
     let end = loop {
