@@ -349,7 +349,9 @@ fn main() -> Result<()> {
             port,
             open,
         );
-        http::serve(std::sync::Arc::new(app), listener, http::Limits::default());
+        let app = std::sync::Arc::new(app);
+        serve::watch(app.clone());
+        http::serve(app, listener, http::Limits::default());
         return Ok(());
     }
     let out = &mut io::stdout();

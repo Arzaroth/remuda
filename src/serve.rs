@@ -1,12 +1,14 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
+use jiff::Zoned;
 use serde_json::{Value, json};
 
+use crate::auto;
 use crate::commands::{self, RefreshScope};
 use crate::config;
 use crate::gauge;
@@ -55,10 +57,31 @@ pub struct App {
     port: u16,
     open: Opener,
     pending: Mutex<HashMap<String, Pending>>,
+    auto: Mutex<BTreeMap<String, Value>>,
 }
 
 /// Opens a sign-in page in a private window; false leaves it to the page.
 pub type Opener = Box<dyn Fn(&str) -> bool + Send + Sync>;
+
+/// Runs auto mode beside the page: when the store, TokenGauge's snapshot or
+/// the config changes, and every minute so a schedule takes effect on time.
+pub fn watch(app: std::sync::Arc<App>) {
+    std::thread::spawn(move || {
+        let mut seen = None;
+        let mut last: Option<std::time::Instant> = None;
+        loop {
+            let now = app.fingerprint();
+            if seen.as_ref() != Some(&now)
+                || last.is_none_or(|l| l.elapsed() >= std::time::Duration::from_secs(60))
+            {
+                app.auto_round(&Zoned::now());
+                seen = Some(app.fingerprint());
+                last = Some(std::time::Instant::now());
+            }
+            std::thread::sleep(std::time::Duration::from_secs(5));
+        }
+    });
+}
 
 pub struct Request<'a> {
     pub method: &'a str,
@@ -114,7 +137,86 @@ impl App {
             port,
             open,
             pending: Mutex::new(HashMap::new()),
+            auto: Mutex::new(BTreeMap::new()),
         }
+    }
+
+    /// One round of auto mode: decide for every CLI config.toml sets up, and
+    /// switch the ones it is on for. What it decided is kept for the page.
+    pub fn auto_round(&self, now: &Zoned) {
+        let config = match config::load(&self.places.config) {
+            Ok(l) => l.config,
+            Err(e) => {
+                let mut seen = self.auto.lock().unwrap();
+                if seen.get("error").and_then(Value::as_str) != Some(&format!("{e:#}")) {
+                    eprintln!("auto mode: {e:#}");
+                }
+                *seen = BTreeMap::from([("error".to_owned(), json!(format!("{e:#}")))]);
+                return;
+            }
+        };
+        let usage = gauge::read(&self.places.snapshot);
+        let Ok(_lock) = self.store.lock() else {
+            return;
+        };
+        let switches = runs::switches(&self.store);
+        let before = self.auto.lock().unwrap().clone();
+        let mut after = BTreeMap::new();
+        let mut switched = false;
+        for (id, settings) in &config.auto {
+            let Some(p) = self.providers().into_iter().find(|p| p.id() == id) else {
+                continue;
+            };
+            let cx = auto::Context {
+                schedules: &config.schedules,
+                usage: usage.as_ref(),
+                switched_at: switches.get(id).copied(),
+                now,
+            };
+            let decision = match ops::sync_live(&self.store, p) {
+                Ok(live) => auto::assess(settings, id, &live, &cx, auto::sessions_open(id)),
+                Err(e) => auto::Decision::hold(format!("{e:#}")),
+            };
+            let at = now.timestamp().as_millisecond();
+            let mut seen = json!({"enabled": settings.enabled, "at": at, "decision": decision});
+            let last = before.get(id.as_str());
+            if let Some(prev) = last.and_then(|l| l.get("switched")) {
+                seen["switched"] = prev.clone();
+            }
+            if settings.enabled
+                && let auto::Action::Switch { to, why } = &decision.action
+            {
+                match ops::switch(&self.store, p, to, false) {
+                    Ok(message) => {
+                        eprintln!("auto mode: {message}: {why}");
+                        seen["switched"] = json!({"at": at, "to": to, "why": why});
+                        switched = true;
+                    }
+                    Err(e) => {
+                        seen["error"] = json!(format!("{e:#}"));
+                        if last.map(|l| &l["error"]) != Some(&seen["error"]) {
+                            eprintln!("auto mode: could not switch {} to {to}: {e:#}", p.name());
+                        }
+                    }
+                }
+            } else if settings.enabled
+                && last.map(|l| &l["decision"]["action"]) != Some(&seen["decision"]["action"])
+            {
+                let action = &seen["decision"]["action"];
+                eprintln!(
+                    "auto mode: {} {}: {}",
+                    p.name(),
+                    action["kind"].as_str().unwrap_or_default(),
+                    action["why"].as_str().unwrap_or_default()
+                );
+            }
+            after.insert(id.clone(), seen);
+        }
+        drop(_lock);
+        if switched {
+            gauge::nudge(&self.places.snapshot);
+        }
+        *self.auto.lock().unwrap() = after;
     }
 
     fn providers(&self) -> Vec<&dyn Provider> {
@@ -288,6 +390,7 @@ impl App {
                 state["health"] = self.health();
                 state["usage"] = gauge::read(&self.places.snapshot).unwrap_or(Value::Null);
                 state["shown"] = shown::shown(&state);
+                state["auto"] = json!(*self.auto.lock().unwrap());
                 Ok(state)
             }
             ("GET", "/api/config") => self.config(),
