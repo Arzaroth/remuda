@@ -23,6 +23,10 @@ pub struct Config {
     pub schedules: BTreeMap<String, Schedule>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub auto: BTreeMap<String, Auto>,
+    /// Per provider, the logins whose 5-hour window is reopened as soon as it
+    /// closes.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub warm: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -400,6 +404,21 @@ impl Config {
                 );
             }
         }
+
+        for (provider, names) in &self.warm {
+            let at = format!("warm.{provider}");
+            let Some(stored) = logins(provider) else {
+                flag(&at, format!("remuda has no provider {provider:?}"));
+                continue;
+            };
+            for (i, name) in names.iter().enumerate() {
+                if !stored.iter().any(|s| s == name) {
+                    flag(&at, format!("no stored login {provider}/{name}"));
+                } else if names[..i].contains(name) {
+                    flag(&at, format!("{provider}/{name} is named twice"));
+                }
+            }
+        }
         problems
     }
 
@@ -478,6 +497,15 @@ impl Config {
                 all[provider.as_str()] = Item::Table(t);
             }
             doc["auto"] = Item::Table(all);
+        }
+        let warm: Vec<_> = self.warm.iter().filter(|(_, n)| !n.is_empty()).collect();
+        if !warm.is_empty() {
+            let mut all = Table::new();
+            for (provider, names) in warm {
+                all[provider.as_str()] =
+                    toml_edit::value(Value::Array(names.iter().map(String::as_str).collect()));
+            }
+            doc["warm"] = Item::Table(all);
         }
         doc
     }
@@ -587,6 +615,10 @@ pub fn forget_login(path: &Path, provider: &str, name: &str) -> Result<()> {
         if let Some(auto) = c.auto.get_mut(provider) {
             auto.forget(name);
         }
+        if let Some(names) = c.warm.get_mut(provider) {
+            names.retain(|n| n != name);
+        }
+        c.warm.retain(|_, names| !names.is_empty());
     })
 }
 
@@ -594,6 +626,11 @@ pub fn rename_login(path: &Path, provider: &str, from: &str, to: &str) -> Result
     update(path, |c| {
         if let Some(auto) = c.auto.get_mut(provider) {
             auto.rename(from, to);
+        }
+        for n in c.warm.get_mut(provider).into_iter().flatten() {
+            if n == from {
+                *n = to.to_owned();
+            }
         }
     })
 }
@@ -1206,6 +1243,46 @@ order = [["perso"]]
             std::fs::read_to_string(&path).unwrap(),
             "[auto.claude]\nceiling = 97\n"
         );
+    }
+
+    #[test]
+    fn warm_logins_are_read_written_checked_and_kept_in_step() {
+        let text = "# kept\n[warm]\nclaude = [\"work\", \"perso\"] # both\n";
+        let c: Config = toml_edit::de::from_str(text).unwrap();
+        assert_eq!(c.warm["claude"], ["work", "perso"]);
+        assert_eq!(c.check(&stored), []);
+        assert_eq!(written(text, &c), text);
+
+        let bad: Config = toml_edit::de::from_str(
+            "[warm]\nclaude = [\"work\", \"ghost\", \"work\"]\nnope = [\"x\"]\n",
+        )
+        .unwrap();
+        let problems: Vec<String> = bad.check(&stored).iter().map(ToString::to_string).collect();
+        assert_eq!(
+            problems,
+            [
+                "warm.claude: no stored login claude/ghost",
+                "warm.claude: claude/work is named twice",
+                "warm.nope: remuda has no provider \"nope\"",
+            ]
+        );
+
+        let mut more = c.clone();
+        more.warm.insert("codex".into(), vec!["solo".into()]);
+        assert!(written(text, &more).contains("codex = [\"solo\"]"));
+
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(&path, text).unwrap();
+        rename_login(&path, "claude", "work", "job").unwrap();
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("[\"job\", \"perso\"]")
+        );
+        forget_login(&path, "claude", "job").unwrap();
+        forget_login(&path, "claude", "perso").unwrap();
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("claude ="));
     }
 
     #[test]
