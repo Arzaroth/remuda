@@ -27,7 +27,8 @@ For each CLI whose auto mode is on (`App::auto_round`), under the store lock:
 2. Read the figures from TokenGauge's snapshot (`auto::figures`). It holds when
    there is no snapshot, none for this CLI, a snapshot over 30 minutes old (the
    daemon has likely stopped), or one older than the CLI's last switch (by hand
-   or by auto mode): it waits for TokenGauge to fetch again. A login whose figures carry an error, are stale or are missing
+   or by auto mode): it waits for TokenGauge to fetch again. A snapshot from
+   before TokenGauge stamped its time is as old as its file. A login whose figures carry an error, are stale or are missing
    cannot be picked this round. A snapshot that names no credential (before
    TokenGauge 0.37) holds the active login's figures only.
 3. Decide (`auto::decide`, below).
