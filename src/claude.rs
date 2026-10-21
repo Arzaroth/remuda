@@ -9,7 +9,7 @@ use crate::fsx::{Changed, now_ms, read_json, update_json};
 use crate::oauth;
 use crate::paths;
 use crate::pkce;
-use crate::provider::{Identity, Login, PendingLogin, Provider};
+use crate::provider::{Format, Identity, Login, PendingLogin, Provider, Upstream};
 use crate::store::Entry;
 
 // Mirrors Claude Code 2.1.282's OAuth client.
@@ -19,6 +19,9 @@ const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
 const REDIRECT_URI: &str = "https://platform.claude.com/oauth/code/callback";
 const API_URL: &str = "https://api.anthropic.com";
 const CLI_USER_AGENT: &str = "claude-cli/2.1.304 (external, cli)";
+const INFERENCE_BETAS: &str =
+    "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14";
+const IDENTITY: &str = "You are Claude Code, Anthropic's official CLI for Claude.";
 const LOGIN_SCOPES: &[&str] = &[
     "org:create_api_key",
     "user:profile",
@@ -553,6 +556,60 @@ impl Provider for Claude {
             api: self.api.clone(),
             pkce: start_login()?,
         }))
+    }
+
+    fn formats(&self, _model: &str) -> Vec<Format> {
+        vec![Format::Messages]
+    }
+
+    fn upstream(&self, creds: &Value, format: Format, _model: &str) -> Option<Upstream> {
+        if format != Format::Messages {
+            return None;
+        }
+        let token = self.access_token(creds)?;
+        Some(Upstream {
+            url: format!("{}/v1/messages?beta=true", self.api.api_url),
+            headers: vec![
+                ("authorization", format!("Bearer {token}")),
+                ("anthropic-version", "2023-06-01".to_owned()),
+                ("anthropic-beta", INFERENCE_BETAS.to_owned()),
+                (
+                    "anthropic-dangerous-direct-browser-access",
+                    "true".to_owned(),
+                ),
+                ("x-app", "cli".to_owned()),
+                ("user-agent", CLI_USER_AGENT.to_owned()),
+            ],
+        })
+    }
+
+    /// A subscription token is taken for Claude Code's own requests only, so
+    /// another client's request opens with Claude Code's system line.
+    fn shape(&self, _format: Format, body: &mut Value, user_agent: Option<&str>) -> Result<()> {
+        if user_agent.is_some_and(|ua| ua.starts_with("claude-cli/")) {
+            return Ok(());
+        }
+        let identity = json!({"type": "text", "text": IDENTITY});
+        let system = match body.get_mut("system").map(Value::take) {
+            None | Some(Value::Null) => vec![identity],
+            Some(Value::String(s)) if s.is_empty() => vec![identity],
+            Some(Value::String(s)) => vec![identity, json!({"type": "text", "text": s})],
+            Some(Value::Array(blocks)) => {
+                let already = blocks
+                    .first()
+                    .and_then(|b| b.get("text"))
+                    .and_then(Value::as_str)
+                    == Some(IDENTITY);
+                if already {
+                    blocks
+                } else {
+                    std::iter::once(identity).chain(blocks).collect()
+                }
+            }
+            Some(_) => bail!("system must be a string or a list of blocks"),
+        };
+        body["system"] = Value::Array(system);
+        Ok(())
     }
 }
 

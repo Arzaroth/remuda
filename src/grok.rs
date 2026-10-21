@@ -7,11 +7,12 @@ use crate::device::DeviceFlow;
 use crate::fsx::{Changed, lock_file, now_ms, read_json, rfc3339, update_json};
 use crate::oauth::{self, claims};
 use crate::paths;
-use crate::provider::{Identity, Login, PendingLogin, Provider};
+use crate::provider::{Format, Identity, Login, PendingLogin, Provider, Upstream};
 use crate::store::Entry;
 
 // Mirrors xai-org/grok-build's `xai-grok-login`.
 const ISSUER: &str = "https://auth.x.ai";
+const INFERENCE: &str = "https://cli-chat-proxy.grok.com/v1";
 const CLIENT_ID: &str = "b1a00492-073a-47ea-816f-4c329264a828";
 const OIDC_SCOPE: &str = "https://auth.x.ai::";
 const LOGIN_SCOPE: &str = "openid profile email offline_access grok-cli:access api:access conversations:read conversations:write workspaces:read workspaces:write";
@@ -20,27 +21,30 @@ const LOGIN_SCOPE: &str = "openid profile email offline_access grok-cli:access a
 pub struct Api {
     client: reqwest::blocking::Client,
     issuer: String,
+    inference: String,
 }
 
 impl Api {
     pub fn xai() -> Result<Self> {
         #[cfg(debug_assertions)]
         if let Some(base) = std::env::var_os("REMUDA_TEST_XAI_API") {
-            return Self::at(&base.to_string_lossy());
+            let base = base.to_string_lossy();
+            return Self::at(&base, &base);
         }
-        Self::at(ISSUER)
+        Self::at(ISSUER, INFERENCE)
     }
 
-    fn at(issuer: &str) -> Result<Self> {
+    fn at(issuer: &str, inference: &str) -> Result<Self> {
         Ok(Api {
             client: oauth::client()?,
             issuer: issuer.to_owned(),
+            inference: inference.to_owned(),
         })
     }
 
     #[cfg(test)]
     pub fn local(base: &str) -> Self {
-        Self::at(base).unwrap()
+        Self::at(base, base).unwrap()
     }
 
     fn token_url(&self) -> String {
@@ -273,6 +277,23 @@ impl Provider for Grok {
             }),
         }
         .begin()
+    }
+
+    fn formats(&self, _model: &str) -> Vec<Format> {
+        vec![Format::Responses]
+    }
+
+    fn upstream(&self, creds: &Value, format: Format, _model: &str) -> Option<Upstream> {
+        if format != Format::Responses {
+            return None;
+        }
+        Some(Upstream {
+            url: format!("{}/responses", self.api.inference),
+            headers: vec![(
+                "authorization",
+                format!("Bearer {}", self.access_token(creds)?),
+            )],
+        })
     }
 }
 

@@ -12,7 +12,7 @@ use crate::fsx::{Changed, lock_file, now_ms, read_json, rfc3339, update_json};
 use crate::oauth::{self, claims};
 use crate::paths;
 use crate::pkce;
-use crate::provider::{Identity, Login, PendingLogin, Provider};
+use crate::provider::{Format, Identity, Login, PendingLogin, Provider, Upstream};
 use crate::store::Entry;
 
 // Mirrors codex-cli 0.153.4's ChatGPT sign-in.
@@ -24,32 +24,36 @@ const LOGIN_SCOPE: &str =
 const REFRESH_SCOPE: &str = "openid profile email";
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const AUTH_CLAIMS: &str = "https://api.openai.com/auth";
+const INFERENCE: &str = "https://chatgpt.com/backend-api/codex";
 
 #[derive(Clone)]
 pub struct Api {
     client: reqwest::blocking::Client,
     issuer: String,
+    inference: String,
 }
 
 impl Api {
     pub fn openai() -> Result<Self> {
         #[cfg(debug_assertions)]
         if let Some(base) = std::env::var_os("REMUDA_TEST_OPENAI_API") {
-            return Self::at(&base.to_string_lossy());
+            let base = base.to_string_lossy();
+            return Self::at(&base, &base);
         }
-        Self::at(ISSUER)
+        Self::at(ISSUER, INFERENCE)
     }
 
-    fn at(issuer: &str) -> Result<Self> {
+    fn at(issuer: &str, inference: &str) -> Result<Self> {
         Ok(Api {
             client: oauth::client()?,
             issuer: issuer.to_owned(),
+            inference: inference.to_owned(),
         })
     }
 
     #[cfg(test)]
     pub fn local(base: &str) -> Self {
-        Self::at(base).unwrap()
+        Self::at(base, base).unwrap()
     }
 
     fn token_url(&self) -> String {
@@ -289,6 +293,57 @@ impl Provider for Codex {
             state,
             url,
         }))
+    }
+
+    fn formats(&self, _model: &str) -> Vec<Format> {
+        vec![Format::Responses]
+    }
+
+    fn upstream(&self, creds: &Value, format: Format, _model: &str) -> Option<Upstream> {
+        if format != Format::Responses {
+            return None;
+        }
+        let mut headers = vec![
+            (
+                "authorization",
+                format!("Bearer {}", self.access_token(creds)?),
+            ),
+            ("originator", "codex_cli_rs".to_owned()),
+            ("accept", "text/event-stream".to_owned()),
+        ];
+        if let Some(workspace) = token(creds, "account_id") {
+            headers.push(("chatgpt-account-id", workspace.to_owned()));
+        }
+        Some(Upstream {
+            url: format!("{}/responses", self.api.inference),
+            headers,
+        })
+    }
+
+    /// The ChatGPT backend takes only streamed, unstored responses, and
+    /// refuses the API's sampling and storage fields.
+    fn shape(&self, _format: Format, body: &mut Value, _user_agent: Option<&str>) -> Result<()> {
+        let Some(fields) = body.as_object_mut() else {
+            bail!("the request body is not an object");
+        };
+        if fields.get("stream").and_then(Value::as_bool) != Some(true) {
+            bail!("Codex answers only streamed requests; send \"stream\": true");
+        }
+        fields.insert("store".to_owned(), json!(false));
+        fields.entry("instructions").or_insert_with(|| json!(""));
+        for drop in [
+            "previous_response_id",
+            "max_output_tokens",
+            "max_completion_tokens",
+            "temperature",
+            "top_p",
+            "stream_options",
+            "safety_identifier",
+            "prompt_cache_retention",
+        ] {
+            fields.remove(drop);
+        }
+        Ok(())
     }
 }
 

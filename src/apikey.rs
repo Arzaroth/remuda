@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 
 use crate::fsx::{Changed, read_json, update_json};
 use crate::paths;
-use crate::provider::{Identity, Login, PendingLogin, Provider};
+use crate::provider::{Format, Identity, Login, PendingLogin, Provider, Upstream};
 use crate::store::Entry;
 
 /// Where a CLI that takes an API key finds it, besides its environment: one
@@ -28,6 +28,30 @@ pub struct ApiKey {
     key_page: &'static str,
     file: Option<KeyFile>,
     env: Box<Env>,
+    inference: String,
+    routes: Routes,
+}
+
+/// The paths under `inference` that take each format, for a model.
+type Routes = fn(&str) -> &'static [(Format, &'static str)];
+
+/// Z.ai's coding plan, whose quota only these paths draw on.
+fn glm_routes(_model: &str) -> &'static [(Format, &'static str)] {
+    &[
+        (Format::Messages, "/anthropic/v1/messages"),
+        (Format::Chat, "/coding/paas/v4/chat/completions"),
+    ]
+}
+
+/// opencode Go serves each model family in its own maker's format.
+fn opencode_routes(model: &str) -> &'static [(Format, &'static str)] {
+    if model.starts_with("claude-") {
+        &[(Format::Messages, "/anthropic/v1/messages")]
+    } else if model.starts_with("gpt-") || model.starts_with("grok-") {
+        &[(Format::Responses, "/openai/v1/responses")]
+    } else {
+        &[(Format::Chat, "/openai/v1/chat/completions")]
+    }
 }
 
 type Env = dyn Fn(&str) -> Option<String> + Send + Sync;
@@ -71,6 +95,8 @@ impl ApiKey {
             key_page: "https://z.ai/manage-apikey/apikey-list",
             file: None,
             env: Box::new(process_env),
+            inference: "https://api.z.ai/api".to_owned(),
+            routes: glm_routes,
         }
     }
 
@@ -85,6 +111,8 @@ impl ApiKey {
                 entry: "opencode-go",
             }),
             env: Box::new(process_env),
+            inference: "https://opencode.ai/inference/go".to_owned(),
+            routes: opencode_routes,
         }
     }
 
@@ -96,6 +124,12 @@ impl ApiKey {
     ) -> Self {
         self.file = file;
         self.env = Box::new(env);
+        self
+    }
+
+    #[cfg(test)]
+    pub fn inferring_at(mut self, base: &str) -> Self {
+        self.inference = base.to_owned();
         self
     }
 
@@ -250,6 +284,23 @@ impl Provider for ApiKey {
         Ok(Box::new(KeyPending {
             url: self.key_page.to_owned(),
         }))
+    }
+
+    fn formats(&self, model: &str) -> Vec<Format> {
+        (self.routes)(model).iter().map(|(f, _)| *f).collect()
+    }
+
+    fn upstream(&self, creds: &Value, format: Format, model: &str) -> Option<Upstream> {
+        let key = key_of(creds)?.trim();
+        let (_, path) = (self.routes)(model).iter().find(|(f, _)| *f == format)?;
+        let mut headers = vec![("authorization", format!("Bearer {key}"))];
+        if format == Format::Messages {
+            headers.push(("x-api-key", key.to_owned()));
+        }
+        Some(Upstream {
+            url: format!("{}{path}", self.inference),
+            headers,
+        })
     }
 }
 

@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -61,6 +61,8 @@ pub struct App {
     open: Opener,
     pending: Mutex<HashMap<String, Pending>>,
     auto: Mutex<BTreeMap<String, Value>>,
+    proxy: proxy::Control,
+    me: OnceLock<Weak<App>>,
 }
 
 /// Opens a sign-in page in a private window; false leaves it to the page.
@@ -147,6 +149,26 @@ impl App {
             open,
             pending: Mutex::new(HashMap::new()),
             auto: Mutex::new(BTreeMap::new()),
+            proxy: proxy::Control::default(),
+            me: OnceLock::new(),
+        }
+    }
+
+    /// Starts the proxy when its settings say so. The listener holds the app
+    /// weakly, so it stops answering once the app is gone.
+    pub fn start(self: &Arc<Self>) {
+        let _ = self.me.set(Arc::downgrade(self));
+        self.apply_proxy();
+    }
+
+    fn apply_proxy(&self) {
+        let Some(me) = self.me.get() else {
+            return;
+        };
+        let backend: Weak<dyn proxy::Backend> = me.clone();
+        match self.proxy_file().read() {
+            Ok(settings) => self.proxy.apply(backend, &settings),
+            Err(e) => eprintln!("warning: the proxy is not running: {e:#}"),
         }
     }
 
@@ -241,11 +263,33 @@ impl App {
     }
 
     fn proxy_state(&self) -> Result<Value> {
+        self.apply_proxy();
         let s = self.proxy_file().read()?;
-        let origin = format!("http://127.0.0.1:{}", s.port);
+        let (running, error) = self.proxy.status();
+        let origin = format!("http://127.0.0.1:{}", running.unwrap_or(s.port));
+        let providers: Vec<Value> = self
+            .providers
+            .iter()
+            .filter_map(|p| {
+                let models = proxy::route::models(p.id());
+                let mut formats = Vec::new();
+                for m in models {
+                    for f in p.formats(proxy::route::bare(m)) {
+                        if !formats.contains(&f.name()) {
+                            formats.push(f.name());
+                        }
+                    }
+                }
+                (!formats.is_empty())
+                    .then(|| json!({"provider": p.id(), "models": models, "formats": formats}))
+            })
+            .collect();
         Ok(json!({
             "enabled": s.enabled,
             "port": s.port,
+            "running": running,
+            "error": error,
+            "routes": providers,
             "baseUrls": {"openai": format!("{origin}/v1"), "claude": origin},
             "keys": s.keys,
         }))
@@ -465,7 +509,14 @@ impl App {
                     }
                     Ok(())
                 })?;
-                Ok(json!({"message": "proxy settings saved"}))
+                self.apply_proxy();
+                let (running, error) = self.proxy.status();
+                let message = match (running, error) {
+                    (Some(port), _) => format!("the proxy listens on 127.0.0.1:{port}"),
+                    (None, Some(e)) => format!("the proxy is not running: {e}"),
+                    (None, None) => "the proxy is off".to_owned(),
+                };
+                Ok(json!({"message": message}))
             }
             ("POST", "/api/proxy/keys") => {
                 let key = self.proxy_file().add_key(spec()?)?;
@@ -617,6 +668,16 @@ impl App {
     }
 }
 
+impl proxy::Backend for App {
+    fn settings(&self) -> Result<proxy::settings::Settings> {
+        self.proxy_file().read()
+    }
+
+    fn providers(&self) -> Vec<&dyn Provider> {
+        App::providers(self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -702,6 +763,11 @@ mod tests {
         assert_eq!(proxy()["enabled"], false);
         assert_eq!(proxy()["baseUrls"]["openai"], "http://127.0.0.1:8317/v1");
         assert_eq!(proxy()["baseUrls"]["claude"], "http://127.0.0.1:8317");
+        assert_eq!(proxy()["routes"][0]["provider"], "claude");
+        assert_eq!(
+            proxy()["routes"][0]["formats"],
+            json!(["Anthropic messages"])
+        );
 
         let (status, _) = call(
             &app,

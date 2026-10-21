@@ -112,6 +112,23 @@ impl File {
     }
 }
 
+impl Settings {
+    /// Compares every key in full, so the time taken says nothing about how
+    /// much of a guess was right.
+    pub fn accepts(&self, presented: &str) -> bool {
+        self.keys.iter().fold(false, |found, k| {
+            found | same(k.key.as_bytes(), presented.as_bytes())
+        })
+    }
+}
+
+fn same(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,6 +155,10 @@ mod tests {
         assert!(f.add_key("laptop").is_err());
         assert!(f.add_key("  ").is_err());
         assert_eq!(f.read().unwrap().keys, vec![key.clone()]);
+        let s = f.read().unwrap();
+        assert!(s.accepts(&key.key));
+        assert!(!s.accepts("rmd-nope"));
+        assert!(!s.accepts(""));
         f.remove_key(&key.id).unwrap();
         assert!(f.read().unwrap().keys.is_empty());
         assert!(f.remove_key(&key.id).is_err());
