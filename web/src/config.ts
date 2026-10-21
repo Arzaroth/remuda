@@ -98,3 +98,20 @@ export function dropFromRule(r: Rule, login: string) {
 export function problemsAt(problems: Problem[], prefix: string): Problem[] {
   return problems.filter((p) => p.at === prefix || p.at.startsWith(`${prefix}.`) || p.at.startsWith(`${prefix}[`));
 }
+
+export type Status = import('./types').AutoStatus;
+
+/** What a CLI's last round came to, in a few words, and how it reads. */
+export function headline(s: Status, active: string | null): { text: string; tone: 'good' | 'warn' | 'bad' | '' } {
+  const a = s.decision.action;
+  if (s.error) return { text: `Could not switch to ${a.to}`, tone: 'bad' };
+  if (!s.enabled)
+    return {
+      text: a.kind === 'switch' ? `Off; it would switch to ${a.to}` : a.kind === 'hold' ? 'Off; it would hold' : 'Off',
+      tone: '',
+    };
+  if (a.kind === 'hold') return { text: 'Holding', tone: 'warn' };
+  if (a.kind === 'switch')
+    return { text: s.switched?.at === s.at ? `Switched to ${a.to}` : `Switching to ${a.to}`, tone: 'good' };
+  return { text: active ? `Stays on ${active}` : 'Stays', tone: 'good' };
+}

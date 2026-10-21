@@ -203,6 +203,15 @@ h3 { font-size: 14px; font-weight: 700; margin: 0; }
 .switch[aria-checked='true'] { color: var(--good); }
 .switch[aria-checked='true'] i { background: var(--good); }
 .switch[aria-checked='true'] i::after { transform: translateX(14px); }
+.auto-now { display: grid; gap: 6px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--rule); }
+.verdict { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.verdict .dot { transform: none; align-self: center; }
+.seen { border-collapse: collapse; font-size: 13px; margin-top: 2px; }
+.seen td { padding: 2px 10px 2px 0; vertical-align: baseline; }
+.seen .spec { white-space: nowrap; font-size: 13px; }
+.seen .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.seen tr.off .spec, .seen tr.off .num { color: var(--muted); }
+.seen tr.active .spec { color: var(--good); }
 .fields { display: flex; gap: 10px 20px; flex-wrap: wrap; }
 .fields label { display: grid; gap: 4px; }
 .unit { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }

@@ -8,6 +8,7 @@ import {
   type Config,
   DAYS,
   dropFromRule,
+  headline,
   hours,
   inRule,
   type Loaded,
@@ -20,8 +21,9 @@ import {
   scheduleUses,
   span,
 } from '../config';
-import { store, toast } from '../state';
-import type { Provider } from '../types';
+import { ago } from '../format';
+import { now, store, toast } from '../state';
+import type { AutoStatus, Provider } from '../types';
 
 const [saved, setSaved] = createSignal<Loaded | null>(null);
 const [draft, setDraft] = createStore<{ c: Config }>({ c: {} });
@@ -211,7 +213,52 @@ function RuleCard(props: { provider: string; i: number; count: number; problems:
   );
 }
 
+function Now(props: { s: AutoStatus; provider: string }) {
+  const active = () => store.s!.live.find((l) => l.provider === props.provider)?.name ?? null;
+  const head = () => headline(props.s, active());
+  const d = () => props.s.decision;
+  return (
+    <div class="auto-now">
+      <div class="verdict">
+        <span class={`dot ${head().tone}`} />
+        <b>{head().text}</b>
+        <Show when={d().rule}>
+          <span class="aside">{d().rule}</span>
+        </Show>
+      </div>
+      <div class="aside why">{props.s.error ?? d().action.why}</div>
+      <Show when={d().logins.length}>
+        <table class="seen">
+          <tbody>
+            <For each={d().logins}>
+              {(l) => (
+                <tr classList={{ off: !l.usable, active: l.name === active() }}>
+                  <td class="aside">{l.tier === null ? '-' : l.tier + 1}</td>
+                  <td class="spec">{l.name}</td>
+                  <td class="num">{l.score === null ? '' : `${l.score.toFixed(1)}%/h`}</td>
+                  <td class="aside">{[l.name === active() ? 'in use' : '', l.note].filter(Boolean).join(', ')}</td>
+                </tr>
+              )}
+            </For>
+          </tbody>
+        </table>
+      </Show>
+      <Show when={props.s.switched}>
+        {(sw) => (
+          <div class="aside">
+            Switched to <span class="spec">{sw().to}</span> {ago(sw().at, now())}: {sw().why}
+          </div>
+        )}
+      </Show>
+    </div>
+  );
+}
+
 function ProviderCard(props: { p: Provider; problems: Problem[] }) {
+  const status = () => {
+    const s = store.s!.auto?.[props.p.id];
+    return s && typeof s === 'object' ? s : null;
+  };
   const a = () => draft.c.auto?.[props.p.id] ?? {};
   const set = (fn: (a: ReturnType<typeof auto>) => void) => edit((c) => fn(auto(c, props.p.id)));
   const at = () => `auto.${props.p.id}`;
@@ -238,6 +285,7 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
           {a().enabled ? 'On' : 'Off'}
         </button>
       </div>
+      <Show when={status()}>{(s) => <Now s={s()} provider={props.p.id} />}</Show>
       <Show when={props.p.id === 'codex'}>
         <p class="aside">A running Codex session cannot take a new login, so auto mode waits for none to be open.</p>
       </Show>
@@ -491,6 +539,9 @@ export function AutoMode(props: { providers: Provider[] }) {
         remuda keeps each CLI on the most suitable login you allow, and moves it off one that is maxed. Within a tier,
         it spends first the headroom a reset is about to wipe.
       </p>
+      <Show when={typeof store.s!.auto?.error === 'string'}>
+        <div class="note">Auto mode is stopped: {store.s!.auto!.error as string}</div>
+      </Show>
       <Show when={loadError()}>
         <div class="note">
           Could not read the config: {loadError()}{' '}
