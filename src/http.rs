@@ -250,7 +250,7 @@ fn answer(app: &App, mut stream: TcpStream, limits: Limits, streams: &Arc<Atomic
 fn follow(app: &App, mut stream: TcpStream, limits: Limits) {
     let mut seen = app.fingerprint();
     let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
-    if write_head(&mut stream, 200, "text/event-stream", None)
+    if write_head(&mut stream, 200, "text/event-stream", None, &[])
         .and_then(|()| stream.write_all(b": connected\n\n"))
         .and_then(|()| stream.flush())
         .is_err()
@@ -286,26 +286,19 @@ fn follow(app: &App, mut stream: TcpStream, limits: Limits) {
 }
 
 fn reason(status: u16) -> &'static str {
-    match status {
-        200 => "OK",
-        400 => "Bad Request",
-        401 => "Unauthorized",
-        403 => "Forbidden",
-        404 => "Not Found",
-        408 => "Request Timeout",
-        411 => "Length Required",
-        413 => "Payload Too Large",
-        503 => "Service Unavailable",
-        _ => "",
-    }
+    reqwest::StatusCode::from_u16(status)
+        .ok()
+        .and_then(|s| s.canonical_reason())
+        .unwrap_or("")
 }
 
 /// Without a length, the body runs until the connection closes.
-fn write_head(
-    stream: &mut TcpStream,
+pub(crate) fn write_head(
+    stream: &mut impl Write,
     status: u16,
     content_type: &str,
     length: Option<usize>,
+    extra: &[(&str, String)],
 ) -> std::io::Result<()> {
     write!(
         stream,
@@ -315,6 +308,9 @@ fn write_head(
     if let Some(length) = length {
         write!(stream, "Content-Length: {length}\r\n")?;
     }
+    for (name, value) in extra {
+        write!(stream, "{name}: {value}\r\n")?;
+    }
     write!(
         stream,
         "Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n\
@@ -323,7 +319,7 @@ fn write_head(
 }
 
 fn write_response(stream: &mut TcpStream, r: &Response) -> std::io::Result<()> {
-    write_head(stream, r.status, r.content_type, Some(r.body.len()))?;
+    write_head(stream, r.status, r.content_type, Some(r.body.len()), &[])?;
     stream.write_all(r.body.as_bytes())?;
     stream.flush()
 }
