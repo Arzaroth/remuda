@@ -323,7 +323,13 @@ mod tests {
 
         let legacy = json!([{"provider": "claude", "usage": {"primary": {"usedPercent": 5}}}]);
         std::fs::write(&file, legacy.to_string()).unwrap();
-        let window = &read(&file).unwrap()["providers"]["claude"]["windows"][0];
+        let usage = read(&file).unwrap();
+        assert_eq!(
+            usage["updatedAt"],
+            json!(modified_ms(&file)),
+            "as old as the file"
+        );
+        let window = &usage["providers"]["claude"]["windows"][0];
         assert_eq!(
             (&window["title"], &window["minutes"]),
             (&json!("Usage"), &Value::Null)
