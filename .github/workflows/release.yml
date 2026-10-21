@@ -11,6 +11,8 @@ on:
     paths:
       - '.github/workflows/release.yml'
       - 'scripts/install.sh'
+      - 'scripts/package.sh'
+      - 'packaging/**'
       - 'systemd/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
@@ -30,6 +32,8 @@ concurrency:
 env:
   REF: ${{ github.event.inputs.tag || github.ref }}
   PUBLISH: ${{ github.event_name != 'pull_request' }}
+  NFPM_VERSION: 2.47.0
+  NFPM_SHA256: 3f1cf344bd0b57373ca55636a78c08b0491f7293d609a456a9ac3b0b150fda97
 
 jobs:
   # Static musl: the C rustls compiles against the runner's glibc asked for
@@ -114,6 +118,13 @@ jobs:
             echo "REF_NAME=v$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)" >>"$GITHUB_ENV"
           fi
 
+      - name: Install nfpm
+        run: |
+          deb="nfpm_${NFPM_VERSION}_amd64.deb"
+          curl -fsSLO "https://github.com/goreleaser/nfpm/releases/download/v$NFPM_VERSION/$deb"
+          echo "$NFPM_SHA256  $deb" | sha256sum -c -
+          sudo dpkg -i "$deb"
+
       - name: Download the binaries
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -122,15 +133,25 @@ jobs:
       - name: Package
         run: |
           safe="${REF_NAME//[^A-Za-z0-9._-]/_}"
-          mkdir -p dist
+          mkdir -p dist completions
+          # The scripts are the same for every architecture, so the runner's
+          # own binary writes them.
+          chmod +x binaries/remuda-x86_64/remuda
+          binaries/remuda-x86_64/remuda completions bash >completions/remuda.bash
+          binaries/remuda-x86_64/remuda completions zsh >completions/_remuda
+          binaries/remuda-x86_64/remuda completions fish >completions/remuda.fish
           for arch in x86_64 aarch64; do
             stage="pack/$arch"
             rm -rf "$stage"
             mkdir -p "$stage/systemd"
             install -m 755 "binaries/remuda-$arch/remuda" "$stage/remuda"
             cp systemd/* "$stage/systemd/"
+            cp -r completions "$stage/"
             cp LICENSE LICENSE-MIT LICENSE-WTFPL "$stage/"
             tar -czf "dist/remuda-$safe-linux-$arch.tar.gz" -C "$stage" .
+            # The .deb and .rpm, from the archive rather than beside it, so a
+            # package and `--update` install the same bytes.
+            scripts/package.sh "dist/remuda-$safe-linux-$arch.tar.gz" dist
           done
           ls -l dist
 
@@ -195,4 +216,6 @@ jobs:
           generate_release_notes: true
           files: |
             dist/*.tar.gz
+            dist/*.deb
+            dist/*.rpm
             dist/SHA256SUMS
