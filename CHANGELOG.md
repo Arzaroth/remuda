@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-21
+
 ### Added
 
 - An API proxy in `remuda serve`, off until switched on from the page's new
