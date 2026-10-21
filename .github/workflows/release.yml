@@ -238,13 +238,73 @@ jobs:
           path: dist
           merge-multiple: true
 
+      # Signing starts the day packaging/remuda.asc is committed, and from then
+      # on a release without the key behind it refuses to publish. A pull
+      # request never sees the secret, so its rehearsal stays unsigned.
+      - name: Signing key
+        id: key
+        env:
+          KEY: ${{ env.PUBLISH == 'true' && secrets.REMUDA_GPG_KEY || '' }}
+          PASSPHRASE: ${{ env.PUBLISH == 'true' && secrets.REMUDA_GPG_PASSPHRASE || '' }}
+        run: |
+          fpr=""
+          if [[ -f packaging/remuda.asc ]]; then
+            fpr="$(gpg --show-keys --with-colons packaging/remuda.asc | awk -F: '/^fpr/ { print $10; exit }')"
+          fi
+          if [[ -z "$KEY" ]]; then
+            if [[ -n "$fpr" && "$PUBLISH" == true ]]; then
+              echo "::error::packaging/remuda.asc is committed, so a release needs the REMUDA_GPG_KEY secret"
+              exit 1
+            fi
+            echo "No signing key in this run: the packages stay unsigned"
+            exit 0
+          fi
+          if [[ -z "$fpr" ]]; then
+            echo "::error::REMUDA_GPG_KEY is set but packaging/remuda.asc, its public half, is not committed"
+            exit 1
+          fi
+          printf '%s' "$PASSPHRASE" >"$RUNNER_TEMP/passphrase"
+          printf '%s\n' "$KEY" | gpg --batch --import
+          if ! gpg --list-secret-keys --with-colons | awk -F: '/^fpr/ { print $10 }' | grep -qx "$fpr"; then
+            echo "::error::REMUDA_GPG_KEY is not the key packaging/remuda.asc publishes ($fpr)"
+            exit 1
+          fi
+          sudo apt-get install -qq -y rpm >/dev/null
+          echo "fpr=$fpr" >>"$GITHUB_OUTPUT"
+
+      - name: Sign the packages
+        if: steps.key.outputs.fpr
+        env:
+          FPR: ${{ steps.key.outputs.fpr }}
+        run: |
+          cd dist
+          rpmsign --addsign \
+            --define "__gpg $(command -v gpg)" \
+            --define "_gpg_name $FPR" \
+            --define "_gpg_sign_cmd_extra_args --batch --pinentry-mode loopback --passphrase-file $RUNNER_TEMP/passphrase" \
+            -- *.rpm
+          for pkg in *.pkg.tar.zst; do
+            gpg --batch --yes --pinentry-mode loopback --passphrase-file "$RUNNER_TEMP/passphrase" \
+              --local-user "$FPR" --detach-sign --no-armor --output "$pkg.sig" "$pkg"
+          done
+          cp ../packaging/remuda.asc remuda-release-key.asc
+
       # What scripts/install.sh checks a download against before running it,
-      # taken once every asset is in.
+      # taken once every asset is in and signed.
       - name: SHA256SUMS
         run: |
           cd dist
           sha256sum -- * >SHA256SUMS
           cat SHA256SUMS
+
+      - name: Sign SHA256SUMS
+        if: steps.key.outputs.fpr
+        env:
+          FPR: ${{ steps.key.outputs.fpr }}
+        run: |
+          gpg --batch --yes --pinentry-mode loopback --passphrase-file "$RUNNER_TEMP/passphrase" \
+            --local-user "$FPR" --armor --detach-sign --output dist/SHA256SUMS.asc dist/SHA256SUMS
+          rm -f "$RUNNER_TEMP/passphrase"
 
       - name: install.sh
         run: |
@@ -303,4 +363,6 @@ jobs:
             dist/*.deb
             dist/*.rpm
             dist/*.pkg.tar.zst
+            dist/*.sig
+            dist/*.asc
             dist/SHA256SUMS
