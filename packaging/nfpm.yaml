@@ -1,0 +1,98 @@
+# The .deb and .rpm, built by scripts/package.sh from inside a staged release
+# archive: ARCH (amd64, arm64) and VERSION come from the environment.
+name: remuda
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: utils
+priority: optional
+maintainer: Marc-Etienne Barrut <lekva+github@arzaroth.com>
+homepage: https://github.com/Arzaroth/remuda
+license: MIT OR WTFPL
+description: |
+  Keep several Claude Code, Codex, Grok, Kimi Code and Cursor logins, and GLM
+  and opencode Go API keys, and switch the one each CLI uses without logging
+  out and back in. A user timer keeps the stored logins fresh, and a local
+  page does all of it from the browser.
+recommends:
+  - ca-certificates
+
+rpm:
+  group: Applications/System
+  compression: zstd
+deb:
+  compression: xz
+
+contents:
+  - src: ./archive/remuda
+    dst: /usr/bin/remuda
+    file_info:
+      mode: 0755
+  - src: ./systemd/remuda-refresh.service
+    dst: /usr/lib/systemd/user/remuda-refresh.service
+    file_info:
+      mode: 0644
+  - src: ./systemd/remuda-refresh.timer
+    dst: /usr/lib/systemd/user/remuda-refresh.timer
+    file_info:
+      mode: 0644
+  - src: ./systemd/remuda-serve.service
+    dst: /usr/lib/systemd/user/remuda-serve.service
+    file_info:
+      mode: 0644
+  - src: ./archive/completions/remuda.bash
+    dst: /usr/share/bash-completion/completions/remuda
+    file_info:
+      mode: 0644
+  - src: ./archive/completions/_remuda
+    dst: /usr/share/zsh/vendor-completions/_remuda
+    packager: deb
+    file_info:
+      mode: 0644
+  - src: ./archive/completions/_remuda
+    dst: /usr/share/zsh/site-functions/_remuda
+    packager: rpm
+    file_info:
+      mode: 0644
+  - src: ./archive/completions/remuda.fish
+    dst: /usr/share/fish/vendor_completions.d/remuda.fish
+    file_info:
+      mode: 0644
+  - src: ./archive/README.md
+    dst: /usr/share/doc/remuda/README.md
+    file_info:
+      mode: 0644
+  - src: ./archive/CHANGELOG.md
+    dst: /usr/share/doc/remuda/CHANGELOG.md
+    file_info:
+      mode: 0644
+  - src: ./archive/LICENSE
+    dst: /usr/share/doc/remuda/copyright
+    packager: deb
+    file_info:
+      mode: 0644
+  - src: ./archive/LICENSE-MIT
+    dst: /usr/share/doc/remuda/LICENSE-MIT
+    packager: deb
+    file_info:
+      mode: 0644
+  - src: ./archive/LICENSE-WTFPL
+    dst: /usr/share/doc/remuda/LICENSE-WTFPL
+    packager: deb
+    file_info:
+      mode: 0644
+  - src: ./archive/LICENSE
+    dst: /usr/share/licenses/remuda/LICENSE
+    packager: rpm
+    file_info:
+      mode: 0644
+  - src: ./archive/LICENSE-MIT
+    dst: /usr/share/licenses/remuda/LICENSE-MIT
+    packager: rpm
+    file_info:
+      mode: 0644
+  - src: ./archive/LICENSE-WTFPL
+    dst: /usr/share/licenses/remuda/LICENSE-WTFPL
+    packager: rpm
+    file_info:
+      mode: 0644
