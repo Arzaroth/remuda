@@ -91,8 +91,21 @@ fn longest(windows: &[Window]) -> Option<&Window> {
     counted(windows).max_by_key(|w| (w.minutes.unwrap_or(0), w.resets_at))
 }
 
-fn maxed(windows: &[Window]) -> Option<&Window> {
-    counted(windows).find(|w| w.used >= 100)
+/// The percentage `w`, one of `name`'s windows, counts as full at: the
+/// login's own ceiling for its shortest window, the CLI's for the rest.
+fn cap(auto: &Auto, name: &str, windows: &[Window], w: &Window) -> u64 {
+    let shortest = counted(windows).min_by_key(|x| x.minutes.unwrap_or(u64::MAX));
+    match auto.ceilings.get(name) {
+        Some(c) if shortest.is_some_and(|s| std::ptr::eq(s, w)) => *c,
+        _ => auto.ceiling,
+    }
+}
+
+/// The first of the login's windows at or over its ceiling, with that ceiling.
+fn full<'a>(auto: &Auto, name: &str, windows: &'a [Window]) -> Option<(&'a Window, u64)> {
+    counted(windows)
+        .map(|w| (w, cap(auto, name, windows, w)))
+        .find(|(w, c)| w.used >= *c)
 }
 
 /// A window whose reset has passed since TokenGauge read it is empty again.
@@ -116,13 +129,14 @@ fn current(f: &Figures, now: Timestamp) -> Figures {
 
 /// Headroom left in the longest window per hour until it resets: what would
 /// be lost at the reset if the login sat idle.
-fn score(windows: &[Window], now: Timestamp) -> Option<f64> {
+fn score(auto: &Auto, name: &str, windows: &[Window], now: Timestamp) -> Option<f64> {
     let w = longest(windows)?;
+    let room = cap(auto, name, windows, w).saturating_sub(w.used);
     let hours = match w.resets_at {
         Some(at) => (at.as_millisecond() - now.as_millisecond()) as f64 / HOUR_MS,
         None => w.minutes.map_or(168.0, |m| m as f64 / 60.0),
     };
-    Some((100 - w.used.min(100)) as f64 / hours.max(1.0))
+    Some(room as f64 / hours.max(1.0))
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -265,11 +279,11 @@ pub fn decide(input: &Input) -> Decision {
             };
             match figures.get(name) {
                 Some(Figures::Known(w)) if !w.is_empty() => {
-                    seen.score = score(w, now);
-                    match maxed(w) {
-                        Some(full) => {
+                    seen.score = score(input.auto, name, w, now);
+                    match full(input.auto, name, w) {
+                        Some((at, c)) => {
                             seen.maxed = true;
-                            seen.note = full_note(full);
+                            seen.note = full_note(at, c);
                         }
                         None => seen.usable = true,
                     }
@@ -292,10 +306,18 @@ pub fn decide(input: &Input) -> Decision {
     }
 
     let active_full = input.active.and_then(|a| match figures.get(a) {
-        Some(Figures::Known(w)) => maxed(w).map(full_note),
+        Some(Figures::Known(w)) => full(input.auto, a, w).map(|(at, c)| full_note(at, c)),
         _ => None,
     });
-    let action = act(input, &logins, active_full);
+    let fallback = input
+        .auto
+        .fallback
+        .as_deref()
+        .filter(|f| match figures.get(*f) {
+            Some(Figures::Known(w)) if !w.is_empty() => counted(w).all(|w| w.used < 100),
+            _ => false,
+        });
+    let action = act(input, &logins, active_full, fallback);
     Decision {
         rule,
         logins,
@@ -303,20 +325,39 @@ pub fn decide(input: &Input) -> Decision {
     }
 }
 
-fn full_note(w: &Window) -> String {
-    format!("{} limit maxed", w.title.to_lowercase())
+fn full_note(w: &Window, cap: u64) -> String {
+    let title = w.title.to_lowercase();
+    if cap >= 100 {
+        format!("{title} limit maxed")
+    } else {
+        format!("{title} at {}%, full at {cap}%", w.used)
+    }
 }
 
-/// `active_full` says why the active login is maxed, wherever it sits.
-fn act(input: &Input, logins: &[Seen], active_full: Option<String>) -> Action {
+/// `active_full` says why the active login is full, wherever it sits;
+/// `fallback` is the login to go to when every other is, if it has room.
+fn act(
+    input: &Input,
+    logins: &[Seen],
+    active_full: Option<String>,
+    fallback: Option<&str>,
+) -> Action {
     let best = logins.iter().filter(|s| s.usable).min_by(|a, b| {
         a.tier
             .cmp(&b.tier)
             .then(b.score.unwrap_or(0.0).total_cmp(&a.score.unwrap_or(0.0)))
     });
     let Some(best) = best else {
-        return Action::Stay {
-            why: "every login it may pick is maxed or has no figures".into(),
+        let why = "every login it may pick is full or has no figures";
+        return match fallback {
+            Some(f) if input.active != Some(f) => Action::Switch {
+                to: f.to_owned(),
+                why: format!("{why}; {f} is the fallback"),
+            },
+            Some(f) => Action::Stay {
+                why: format!("{why}; staying on {f}, the fallback"),
+            },
+            None => Action::Stay { why: why.into() },
         };
     };
     let Some(active) = input.active else {
@@ -821,7 +862,7 @@ reserve = { work = "workday" }
         assert_eq!(
             d.action,
             Action::Stay {
-                why: "every login it may pick is maxed or has no figures".into()
+                why: "every login it may pick is full or has no figures".into()
             }
         );
     }
