@@ -2,7 +2,7 @@ import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from
 import { createStore, produce, reconcile, unwrap } from 'solid-js/store';
 import { api } from '../api';
 import { brand } from '../brand';
-import { Brand } from './Brand';
+import { ProviderIcon } from './ProviderIcon';
 import {
   auto,
   canonical,
@@ -279,7 +279,7 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
   return (
     <div class="auto-card" style={{ '--brand': brand(props.p.id) }}>
       <div class="auto-card-head">
-        <Brand provider={props.p.id} name={props.p.name} size={22} />
+        <ProviderIcon provider={props.p.id} size={20} />
         <h3>{props.p.name}</h3>
         <button
           class="switch"

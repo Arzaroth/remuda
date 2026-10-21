@@ -1,5 +1,4 @@
 import { createMemo, For, Show } from 'solid-js';
-import { Brand } from './Brand';
 import { createStore } from 'solid-js/store';
 import { brand } from '../brand';
 import { date, plural, until, usedTone } from '../format';
@@ -8,6 +7,8 @@ import { remember, remembered } from '../storage';
 import type { Provider } from '../types';
 import { inUse, providerUsage, resetsAt } from '../usage';
 import { Meter } from './Meter';
+import { ProviderIcon } from './ProviderIcon';
+import { go } from '../route';
 
 const [picks, setPicks] = createStore<Record<string, string>>(remembered('remuda-tiles') || {});
 const [modes, setModes] = createStore<Record<string, 'weighted' | 'absolute'>>(remembered('remuda-weighting') || {});
@@ -18,12 +19,21 @@ const ESTIMATE =
 export function Strip() {
   return (
     <div class="strip">
-      <For each={inUse(store.s!)}>{(p) => <Tile p={p} />}</For>
+      <For each={inUse(store.s!)}>{(p) => <Tile p={p} link />}</For>
     </div>
   );
 }
 
-function Tile(props: { p: Provider }) {
+/** The window a CLI's tile shows, as the sidebar sums it up. */
+export function lead(id: string) {
+  const s = store.s!;
+  const weighted = (s.shown?.[id]?.weighable ?? false) && modes[id] !== 'absolute';
+  const all = s.shown?.[id]?.[weighted ? 'weighted' : 'absolute'] ?? [];
+  if (!all.length) return null;
+  return all.find((w) => w.title === picks[id]) || all.reduce((a, b) => (b.pooled > a.pooled ? b : a));
+}
+
+export function Tile(props: { p: Provider; link?: boolean; bare?: boolean }) {
   const s = () => store.s!;
   const creds = () => s().credentials.filter((c) => c.provider === props.p.id);
   const active = () => creds().find((c) => c.active);
@@ -45,15 +55,20 @@ function Tile(props: { p: Provider }) {
     remember('remuda-tiles', { ...picks });
   };
   return (
-    <div class="tile" style={{ '--brand': brand(props.p.id) }}>
-      <Brand provider={props.p.id} size={230} ghost />
-      <div class="tile-head">
-        <Brand provider={props.p.id} name={props.p.name} size={62} scorched />
-        <div>
-          <b>{props.p.name}</b>
-          <span>{plural(creds().length, 'login')}</span>
+    <div class="tile" classList={{ bare: props.bare }} style={{ '--brand': brand(props.p.id) }}>
+      <Show when={!props.bare}>
+        <div class="tile-head">
+          <ProviderIcon provider={props.p.id} size={30} />
+          <div>
+            <Show when={props.link} fallback={<b>{props.p.name}</b>}>
+              <a class="tile-link" href={`#/cli/${props.p.id}`} onClick={(e) => (e.preventDefault(), go({ page: 'cli', id: props.p.id, tab: 'logins' }))}>
+                {props.p.name}
+              </a>
+            </Show>
+            <span>{plural(creds().length, 'login')}</span>
+          </div>
         </div>
-      </div>
+      </Show>
       <Show
         when={combined().length}
         fallback={

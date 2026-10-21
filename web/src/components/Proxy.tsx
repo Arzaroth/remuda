@@ -1,5 +1,5 @@
 import { createSignal, For, Show } from 'solid-js';
-import { brand } from '../brand';
+import { ProviderIcon } from './ProviderIcon';
 import { createConfirm } from '../confirm';
 import { api } from '../api';
 import { load, store, toast } from '../state';
@@ -88,7 +88,7 @@ export function Proxy() {
         <For each={PROTOCOLS}>
           {(x) => (
             <button aria-pressed={protocol() === x.id} onClick={() => pick(x.id)}>
-              <span class="dot" style={{ background: brand(x.id === 'claude' ? 'claude' : 'codex') }} />
+              <ProviderIcon provider={x.id === 'claude' ? 'claude' : 'codex'} size={18} />
               {x.name}
             </button>
           )}
@@ -181,7 +181,7 @@ export function Proxy() {
           <For each={p().routes}>
             {(r) => (
               <li>
-                <span class="dot" style={{ background: brand(r.provider) }} />
+                <ProviderIcon provider={r.provider} size={16} />
                 <code>{r.models.join(', ')}</code>
                 <span class="muted">speaks {r.formats.join(' · ')}</span>
               </li>
