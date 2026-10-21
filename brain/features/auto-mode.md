@@ -60,17 +60,22 @@ each switch, each failed switch (once per error), and each change of decision
    headroom would be lost anyway, so it gets a tier of its own ahead of the
    others and is spent first. Inside its schedule a reservation does nothing.
 3. **Tiers.** The first tier holding a usable login wins. A login is usable
-   when it has figures and none of its account's windows is at 100%. A
+   when it has figures and none of its account's windows is full. A window is
+   full at the CLI's `ceiling` (default 100%), or, for the login's shortest
+   window (the 5-hour one), at the login's own `ceilings` entry: switching
+   before the wall leaves room for TokenGauge's figures lagging behind real
+   use. A
    model's or feature's own limit (TokenGauge's extra windows, such as Claude's
    "Fable only") does not count, unless the login has no other window, as
    Codex's monthly one. A window whose reset has passed since TokenGauge read
    it counts as empty.
 4. **The score**, within a tier: the headroom left in the login's longest
-   window divided by the hours until it resets (at least one). A login close to
+   window, up to its ceiling, divided by the hours until it resets (at least
+   one). A login close to
    its weekly reset with headroom left beats one whose week has just started.
 5. **Against the active login.**
    - Already on the best pick: stay.
-   - The active login is maxed, in the rule or not: switch now, whatever the
+   - The active login is full, in the rule or not: switch now, whatever the
      dwell.
    - The active login has no figures: stay, rather than move blind.
    - Switched less than `dwell` ago (default 30 min): stay.
@@ -78,7 +83,9 @@ each switch, each failed switch (once per error), and each change of decision
    - The best pick is in an earlier tier: switch.
    - Same tier: switch only when the best pick scores `margin` (default 25%)
      more.
-   - No usable login at all: stay, and switch once one resets.
+   - No usable login at all: go to the `fallback` login if it is not at 100%
+     on any window; with none set, or it maxed too, stay, and switch once one
+     resets.
    - Nothing signed in: switch to the best pick.
 
 remuda cannot tell a session in the middle of a request, so a switch does not

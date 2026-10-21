@@ -130,6 +130,22 @@ order   = [["perso"], ["work"]]
 reserve = { work = "workday" }
 ```
 
+A strict priority with room to spare before each limit, as a quota balancer
+would keep it:
+
+```toml
+[auto.claude]
+enabled  = true
+dwell    = "1m"
+ceiling  = 97                        # every window counts as full at 97%
+ceilings = { IDC = 93, Axeo = 88 }   # their 5-hour window, sooner
+fallback = "perso"                   # when every login is full
+
+[[auto.claude.rule]]
+when  = "otherwise"
+order = [["IDC"], ["Axeo"], ["perso"]]
+```
+
 Within a tier, the login with the most headroom to lose at its next reset goes
 first. Unless the login in use is maxed, a switch waits at least 30 minutes
 after the last one (`dwell`), and one between logins of the same tier needs a
