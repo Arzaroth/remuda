@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-21
+
 ### Added
 
 - Keep-warm: `remuda serve` reopens a chosen login's 5-hour window with the
