@@ -130,6 +130,9 @@ fn provider(p: &Value) -> Value {
         });
     json!({
         "stale": p.get("stale").and_then(Value::as_bool).unwrap_or(false),
+        // TokenGauge carries a login it is not signed into between asks, so
+        // these figures can be older than the snapshot they came in.
+        "askedAt": usage.get("updatedAt").and_then(Value::as_str),
         "staleReason": p.get("staleReason").and_then(Value::as_str),
         "error": p.pointer("/error/message").and_then(Value::as_str),
         "credentialState": p.get("credentialState").and_then(Value::as_str),
