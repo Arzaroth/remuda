@@ -66,7 +66,8 @@ take `-p <cli>`: `claude` (the default), `codex`, `cursor`, `glm`, `grok`,
 | `remuda label <name> [text]` | Set the label shown beside a credential, or clear it |
 | `remuda rename <name> <new>` | Rename a stored credential |
 | `remuda rm <name>` | Delete a stored credential |
-| `remuda serve [--port N] [--no-browser]` | Do all of the above from a page in the browser |
+| `remuda auto` | Say which login auto mode would put each CLI on now, and why |
+| `remuda serve [--port N] [--no-browser]` | Do all of the above from a page in the browser, and run auto mode |
 | `remuda open [--no-browser]` | Open the page a running `serve` shows |
 | `remuda completions <shell>` | Print a completion script |
 | `remuda --update` | Replace the binary with the latest release |
@@ -102,6 +103,38 @@ another site open in the same browser cannot drive it.
 `remuda open` opens the page a running `serve` shows, without the printed
 URL. Installed with `--serve`, `remuda-serve.service` keeps one running (or
 `open` starts it), and the token never reaches its journal.
+
+## Auto mode
+
+While `remuda serve` runs, auto mode keeps each CLI on the most suitable of the
+logins you allow and moves it off one that is maxed, using the usage figures
+[TokenGauge](https://github.com/Arzaroth/TokenGauge) reports. It is off by
+default; set it up per CLI in the page's Auto mode section, or in
+`~/.config/remuda/config.toml`:
+
+```toml
+[schedules.workday]
+days  = ["mon", "tue", "wed", "thu", "fri"]
+hours = "09:00-18:00"
+
+[auto.claude]
+enabled = true
+
+[[auto.claude.rule]]          # during work hours: work, then perso once work is maxed
+when  = "workday"
+order = [["work"], ["perso"]]
+
+[[auto.claude.rule]]          # otherwise: perso; work only when its week resets before work hours
+when    = "otherwise"
+order   = [["perso"], ["work"]]
+reserve = { work = "workday" }
+```
+
+Within a tier, the login with the most headroom to lose at its next reset goes
+first. A switch waits at least 30 minutes after the last one (`dwell`) and
+needs a 25% better pick (`margin`), unless the login in use is maxed. Codex is
+switched only while no Codex session runs. `remuda auto` shows what it would
+do and why.
 
 ## How a switch works
 

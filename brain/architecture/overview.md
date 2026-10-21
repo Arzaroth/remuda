@@ -25,6 +25,7 @@ running.
 | `runs.rs` | The last scheduled refresh's record, for the page |
 | `gauge.rs` | Reads TokenGauge's usage snapshot for the page |
 | `fsx.rs` | Atomic 0600 writes, compare-and-swap JSON edits, the file lock, timestamps |
+| `auto.rs` | Auto mode's decision: schedules, tiers, reservations, the score |
 | `config.rs` | `config.toml`: read, checked, written around its comments |
 | `paths.rs` | Where each CLI's files and the store live, honouring their env vars |
 | `pkce.rs` | PKCE verifier/state generation and the S256 challenge |

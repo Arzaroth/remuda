@@ -28,6 +28,7 @@ shared.
 | Why would a stored login stop working? | [features/refresh.md](features/refresh.md), [decisions.md](decisions.md) |
 | Where are credentials kept, and in what shape? | [architecture/store.md](architecture/store.md) |
 | Where are remuda's settings, and how does the page edit them? | [architecture/config.md](architecture/config.md) |
+| Why did auto mode switch, or not? | [features/auto-mode.md](features/auto-mode.md) |
 | What does TokenGauge rely on? | [architecture/store.md](architecture/store.md) |
 | How is Claude Code different from Codex? | [architecture/providers.md](architecture/providers.md) |
 | How do I add a third CLI? | [architecture/providers.md](architecture/providers.md) |
@@ -47,5 +48,6 @@ shared.
 | Sign-in | [features/sign-in.md](features/sign-in.md) |
 | Token refresh | [features/refresh.md](features/refresh.md) |
 | Names and labels | [features/names-and-labels.md](features/names-and-labels.md) |
+| Auto mode | [features/auto-mode.md](features/auto-mode.md) |
 | The local page | [features/web-page.md](features/web-page.md) |
 | Completions and self-update | [features/completions-and-update.md](features/completions-and-update.md) |

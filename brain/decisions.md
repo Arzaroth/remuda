@@ -237,6 +237,30 @@ serialising the config afresh. It is saved against the version the page read,
 the digest of the file's bytes, so a hand edit made while the page was open is
 refused rather than overwritten ([config.rs](../src/config.rs) `save`).
 
+## Auto mode runs inside `serve`
+
+The page's service already runs all the time and already follows TokenGauge's
+snapshot, so auto mode is a thread there rather than a third unit or a run of
+the refresh timer, whose half hour is too coarse for a 5-hour window. The
+price: no `serve`, no auto mode.
+
+## Auto mode spends first what a reset would wipe
+
+Within a tier the score is the headroom left in the longest window per hour
+until it resets, not the headroom alone: picking the login with the most left
+leaves another's week to expire unspent. The same idea frees a reserved login
+outside its schedule when its window resets before the schedule starts.
+
+## Auto mode waits for Codex sessions to end
+
+Claude Code checks its credential file before each request and writes back
+only over the token it started from, so a switch reaches every open session.
+Codex never re-reads `auth.json` while it runs, fails on its next refresh when
+another account is there, and a refresh in flight writes the old account's
+tokens into the new file (codex-cli 0.162.1,
+`codex-rs/login/src/auth/manager.rs`). So auto mode switches Codex only while
+no `codex` process runs.
+
 ## Sources
 
 - [src/ops.rs](../src/ops.rs)
