@@ -573,7 +573,10 @@ impl App {
                 let mut state = commands::list_json(store, &lives)?;
                 state["providers"] = providers
                     .iter()
-                    .map(|p| json!({"id": p.id(), "name": p.name()}))
+                    .map(|p| {
+                        let warm = crate::proxy::route::cheapest(p.id()).is_some();
+                        json!({"id": p.id(), "name": p.name(), "warm": warm})
+                    })
                     .collect();
                 state["health"] = self.health();
                 state["usage"] = gauge::read(&self.places.snapshot).unwrap_or(Value::Null);

@@ -411,6 +411,10 @@ impl Config {
                 flag(&at, format!("remuda has no provider {provider:?}"));
                 continue;
             };
+            if crate::proxy::route::cheapest(provider).is_none() {
+                flag(&at, format!("remuda cannot keep a {provider} login warm"));
+                continue;
+            }
             for (i, name) in names.iter().enumerate() {
                 if !stored.iter().any(|s| s == name) {
                     flag(&at, format!("no stored login {provider}/{name}"));
@@ -1254,15 +1258,21 @@ order = [["perso"]]
         assert_eq!(written(text, &c), text);
 
         let bad: Config = toml_edit::de::from_str(
-            "[warm]\nclaude = [\"work\", \"ghost\", \"work\"]\nnope = [\"x\"]\n",
+            "[warm]\nclaude = [\"work\", \"ghost\", \"work\"]\ncursor = [\"x\"]\nnope = [\"x\"]\n",
         )
         .unwrap();
-        let problems: Vec<String> = bad.check(&stored).iter().map(ToString::to_string).collect();
+        let with_cursor = |p: &str| stored(p).or_else(|| (p == "cursor").then(Vec::new));
+        let problems: Vec<String> = bad
+            .check(&with_cursor)
+            .iter()
+            .map(ToString::to_string)
+            .collect();
         assert_eq!(
             problems,
             [
                 "warm.claude: no stored login claude/ghost",
                 "warm.claude: claude/work is named twice",
+                "warm.cursor: remuda cannot keep a cursor login warm",
                 "warm.nope: remuda has no provider \"nope\"",
             ]
         );
