@@ -167,6 +167,33 @@ mod tests {
             std::path::Path::new("/nonexistent"),
             crate::cursor::Api::local(&server.url()),
         );
-        assert!(ping(&cursor_like, &json!({})).is_err());
+        let e = ping(&cursor_like, &json!({})).unwrap_err().to_string();
+        assert!(e.contains("no model to keep warm with"), "{e}");
+    }
+
+    #[test]
+    fn codex_is_sent_a_short_low_effort_response() {
+        let mut server = mockito::Server::new();
+        let upstream = server
+            .mock("POST", "/responses")
+            .match_header("chatgpt-account-id", "ws-1")
+            .match_header("originator", "codex_cli_rs")
+            .match_body(Matcher::PartialJson(json!({
+                "model": "gpt-5", "stream": true, "store": false,
+                "reasoning": {"effort": "low"},
+            })))
+            .with_body(
+                "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[]}}\n\n",
+            )
+            .create();
+        let codex = crate::codex::Codex::at(
+            std::path::Path::new("/nonexistent"),
+            crate::codex::Api::local(&server.url()),
+            0,
+        );
+        let creds =
+            json!({"tokens": {"access_token": "a", "refresh_token": "r", "account_id": "ws-1"}});
+        assert_eq!(ping(&codex, &creds).unwrap(), "gpt-5");
+        upstream.assert();
     }
 }
