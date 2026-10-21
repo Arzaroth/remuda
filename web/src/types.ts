@@ -29,6 +29,7 @@ export type Window = { title: string; minutes?: number | null; usedPercent: numb
 export type Usage = {
   stale?: boolean;
   staleReason?: string | null;
+  askedAt?: string | null;
   error?: string | null;
   credentialState?: string | null;
   planWeight?: number | null;

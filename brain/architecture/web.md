@@ -154,7 +154,9 @@ where TokenGauge puts it: the top-level `cache_file` of its config
 unless that is TokenGauge's old temp path, which TokenGauge itself replaces
 with the default `$XDG_STATE_HOME/tokengauge/tokengauge-usage.json`. It is
 read only when it is a regular file, and at most 4 MiB of it. `usage` holds
-`updatedAt` and, per provider id, `stale`, `staleReason`, `error` (from the
+`updatedAt` and, per provider id, `stale`, `staleReason`, `askedAt` (the payload's own
+`usage.updatedAt`: TokenGauge carries a login it is not signed into between
+asks, so it can be older than `updatedAt`), `error` (from the
 snapshot's top-level `errors`, where TokenGauge files a fetch that failed with
 nothing cached), `credentialState`, `planWeight` (TokenGauge's nominal plan multiplier, when it knows one: any positive number, since a Claude Team seat is 1.25 or 6.25), `plan` (the snapshot's `usage.loginMethod`, the plan as TokenGauge names it, such as Grok's tier, which no credential file holds), `windows` (`title`, `usedPercent`,
 `resetsAt`), placeholders dropped, `bankedResets` (`available`, `expiresAt`:
