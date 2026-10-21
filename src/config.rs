@@ -165,6 +165,14 @@ fn is_default_margin(m: &f64) -> bool {
     *m == default_margin()
 }
 
+fn default_ceiling() -> u64 {
+    100
+}
+
+fn is_default_ceiling(c: &u64) -> bool {
+    *c == default_ceiling()
+}
+
 fn is_false(b: &bool) -> bool {
     !b
 }
@@ -183,6 +191,15 @@ pub struct Auto {
     pub logins: Vec<String>,
     #[serde(default, rename = "rule", skip_serializing_if = "Vec::is_empty")]
     pub rules: Vec<Rule>,
+    /// The percentage at which a window counts as full.
+    #[serde(default = "default_ceiling", skip_serializing_if = "is_default_ceiling")]
+    pub ceiling: u64,
+    /// Login name to the percentage its shortest window counts as full at.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub ceilings: BTreeMap<String, u64>,
+    /// The login to go to when every login it may pick is full.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback: Option<String>,
 }
 
 impl Default for Auto {
@@ -193,6 +210,9 @@ impl Default for Auto {
             margin: default_margin(),
             logins: Vec::new(),
             rules: Vec::new(),
+            ceiling: default_ceiling(),
+            ceilings: BTreeMap::new(),
+            fallback: None,
         }
     }
 }
@@ -206,6 +226,10 @@ impl Auto {
             }
             rule.order.retain(|t| !t.is_empty());
             rule.reserve.remove(name);
+        }
+        self.ceilings.remove(name);
+        if self.fallback.as_deref() == Some(name) {
+            self.fallback = None;
         }
     }
 
@@ -221,6 +245,12 @@ impl Auto {
             if let Some(schedule) = rule.reserve.remove(from) {
                 rule.reserve.insert(to.to_owned(), schedule);
             }
+        }
+        if let Some(c) = self.ceilings.remove(from) {
+            self.ceilings.insert(to.to_owned(), c);
+        }
+        if let Some(f) = self.fallback.as_mut() {
+            swap(f);
         }
     }
 }
@@ -291,6 +321,25 @@ impl Config {
                 if let Some(m) = unknown(name) {
                     flag(&format!("{at}.logins"), m);
                 }
+            }
+            let percent = |c: u64| (1..=100).contains(&c);
+            if !percent(auto.ceiling) {
+                flag(
+                    &format!("{at}.ceiling"),
+                    "a ceiling is a percentage, 1 to 100".into(),
+                );
+            }
+            for (name, c) in &auto.ceilings {
+                let cat = format!("{at}.ceilings.{name}");
+                if let Some(m) = unknown(name) {
+                    flag(&cat, m);
+                }
+                if !percent(*c) {
+                    flag(&cat, "a ceiling is a percentage, 1 to 100".into());
+                }
+            }
+            if let Some(m) = auto.fallback.as_deref().and_then(unknown) {
+                flag(&format!("{at}.fallback"), m);
             }
             let mut otherwise_at = None;
             for (i, rule) in auto.rules.iter().enumerate() {
@@ -387,6 +436,19 @@ impl Config {
                     t["logins"] = toml_edit::value(Value::Array(
                         a.logins.iter().map(String::as_str).collect(),
                     ));
+                }
+                if !is_default_ceiling(&a.ceiling) {
+                    t["ceiling"] = toml_edit::value(a.ceiling as i64);
+                }
+                if !a.ceilings.is_empty() {
+                    let mut ceilings = InlineTable::new();
+                    for (login, c) in &a.ceilings {
+                        ceilings.insert(login, (*c as i64).into());
+                    }
+                    t["ceilings"] = toml_edit::value(ceilings);
+                }
+                if let Some(f) = &a.fallback {
+                    t["fallback"] = toml_edit::value(f.as_str());
                 }
                 if !a.rules.is_empty() {
                     let mut rules = ArrayOfTables::new();
@@ -703,6 +765,7 @@ fn keep_defaults(old: &DocumentMut, new: &mut DocumentMut) {
             ("enabled", toml_edit::value(false)),
             ("dwell", toml_edit::value(String::from(default_dwell()))),
             ("margin", toml_edit::value(default_margin())),
+            ("ceiling", toml_edit::value(default_ceiling() as i64)),
         ];
         for (k, v) in defaults {
             if !section.contains_key(k) && had(k) {
