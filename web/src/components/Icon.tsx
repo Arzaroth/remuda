@@ -6,9 +6,11 @@ const PATHS: Record<IconName, () => JSX.Element> = {
   rename: () => [<path d="M4 20h4L19 9l-4-4L4 16z" />, <path d="m13.5 6.5 4 4" />],
   remove: () => [<path d="M4 7h16" />, <path d="M9 7V4h6v3" />, <path d="M6 7l1 13h10l1-13" />],
   save: () => <path d="m5 12.5 4.5 4.5L19 7" />,
+  copy: () => [<rect x="9" y="9" width="11" height="11" rx="2" />, <path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" />],
+  show: () => [<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />, <circle cx="12" cy="12" r="3" />],
 };
 
-export type IconName = 'refresh' | 'label' | 'rename' | 'remove' | 'save';
+export type IconName = 'refresh' | 'label' | 'rename' | 'remove' | 'save' | 'copy' | 'show';
 
 export function Icon(props: { name: IconName }) {
   return (

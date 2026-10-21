@@ -6,6 +6,7 @@ import { AddAccount } from './components/AddAccount';
 import { AutoMode } from './components/AutoMode';
 import { Group } from './components/Group';
 import { Health } from './components/Health';
+import { Proxy } from './components/Proxy';
 import { Strip } from './components/Strip';
 import { Tabs } from './components/Tabs';
 import { ThemeSwitch } from './components/ThemeSwitch';
@@ -64,6 +65,9 @@ export function App() {
         </Show>
         <Show when={store.s}>
           <AddAccount provider={shown().length === 1 ? shown()[0].id : undefined} />
+        </Show>
+        <Show when={store.s?.proxy}>
+          <Proxy />
         </Show>
       </main>
       <Toast />
