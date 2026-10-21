@@ -276,6 +276,7 @@ mod tests {
                 "meta": {"updatedAtMs": 1_790_638_810_718_i64},
                 "payloads": [
                     {"provider": "claude", "stale": false, "error": null, "usage": {
+                        "updatedAt": "2026-09-28T23:10:00Z",
                         "primary": {"usedPercent": 16, "resetsAt": "2026-09-29T03:30:00Z", "windowMinutes": 300},
                         "secondary": {"usedPercent": 140, "resetsAt": null, "windowMinutes": 10080},
                         "tertiary": {"usedPercent": null, "windowMinutes": 60},
@@ -316,7 +317,12 @@ mod tests {
                 ("Fable only", 10080, 3)
             ]
         );
+        assert_eq!(
+            usage["providers"]["claude"]["askedAt"],
+            "2026-09-28T23:10:00Z"
+        );
         let codex = &usage["providers"]["codex"];
+        assert_eq!(codex["askedAt"], Value::Null);
         assert_eq!(codex["stale"], true);
         assert_eq!(codex["staleReason"], "timed out");
         assert_eq!(codex["windows"], json!([]));
