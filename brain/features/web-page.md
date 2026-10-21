@@ -101,9 +101,14 @@ timer, or a new TokenGauge fetch shows within a couple of seconds, without a
 reload, in every open tab. A change to a CLI's own login, such as signing in
 from the CLI, or enabling the refresh timer shows within a minute.
 
-### Auto mode
+`remuda open` opens the page a running `serve` shows, and
+`install.sh --serve` keeps one running as a user service. How the page is
+guarded, the API it calls and the service are in
+[architecture/web.md](../architecture/web.md).
 
-Each CLI's auto mode card opens with what its last round decided
+## Auto mode
+
+While auto mode is on, each CLI's card opens with what its last round decided
 ([auto-mode.md](auto-mode.md)): the rule in force, every login weighed with
 its score and why it was or was not picked, the decision and why, and the last
 switch auto mode made.
@@ -123,10 +128,6 @@ follows the file when it is changed elsewhere; one with edits says the file
 changed and offers to load it, dropping them, since saving over it is
 refused.
 
-`remuda open` opens the page a running `serve` shows, and
-`install.sh --serve` keeps one running as a user service. How the page is
-guarded, the API it calls and the service are in
-[architecture/web.md](../architecture/web.md).
 
 ## Sources
 

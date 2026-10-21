@@ -131,8 +131,9 @@ reserve = { work = "workday" }
 ```
 
 Within a tier, the login with the most headroom to lose at its next reset goes
-first. A switch waits at least 30 minutes after the last one (`dwell`) and
-needs a 25% better pick (`margin`), unless the login in use is maxed. Codex is
+first. Unless the login in use is maxed, a switch waits at least 30 minutes
+after the last one (`dwell`), and one between logins of the same tier needs a
+25% better pick (`margin`). Codex is
 switched only while no Codex session runs. `remuda auto` shows what it would
 do and why.
 

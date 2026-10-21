@@ -8,7 +8,7 @@ A missing file is an empty config.
 
 ## What it holds
 
-Auto mode's settings (the design is in [ROADMAP.md](../../ROADMAP.md)): named
+Auto mode's settings ([features/auto-mode.md](../features/auto-mode.md)): named
 schedules, shared by every provider, and one `[auto.<provider>]` section per
 provider.
 
@@ -19,7 +19,7 @@ hours = "09:00-18:00"                         # local; none: all day; may wrap m
 
 [auto.claude]
 enabled = true      # default false
-dwell   = "30m"     # default; h, m, s
+dwell   = "30m"     # default; h, m, s; 1 minute to 7 days
 margin  = 0.25      # default
 logins  = ["work", "perso"]   # the one tier used when no rule is in force
 
@@ -30,7 +30,7 @@ reserve = { work = "workday" }
 ```
 
 Unknown keys are refused. A key at its default is left out when remuda writes
-the file.
+it anew, and kept when the file already sets it.
 
 ## Checks
 
@@ -39,7 +39,8 @@ the file.
 stored, a schedule that does not exist, `otherwise` used as a schedule name, a
 day named twice, a login twice in one rule, an empty tier, a reservation for a
 login outside its rule's order, a rule after an `otherwise` one (never in
-force), a negative margin. The page cannot save a config with any of them; a
+force), a rule with no tier at all, a dwell under a minute or over seven days,
+a negative margin. The page cannot save a config with any of them; a
 file edited by hand is still read, and the page shows them.
 
 ## Writes
@@ -48,7 +49,11 @@ A write parses the file as it is (`toml_edit`) and changes only the values
 that differ from the new config, so comments and layout around the rest stay,
 and a write that changes nothing leaves the bytes alone. When one table goes and
 one comes in its place (only one, or the one holding the same values), it is
-a rename and keeps the old one's comments and place. A table added goes after
+a rename and keeps the old one's comments and place; a rename made in the
+same save as adding a table holding the renamed one's old values pairs with
+that one instead. Rules are matched by their values, so a rule removed takes
+its comments with it, and a rule moved keeps them; an edited rule pairs with a
+leftover one in order. A table added goes after
 the last of its siblings already in the file, so a new schedule follows the
 others and a new rule the provider's last. `save` takes the
 version the caller read, the SHA-256 of the file's bytes, and refuses with
@@ -57,7 +62,8 @@ serialises writers.
 
 `remuda rename` and `remuda rm` (and the page's) keep the names in step: a
 renamed login keeps its place in every tier and reservation, and a removed one
-leaves them, taking a tier it empties with it. They write nothing when there is
+leaves them, taking a tier it empties with it (a rule left with no tier is then
+a problem the page shows). They write nothing when there is
 no file, and a config that cannot be updated leaves the store change standing,
 with a warning.
 
