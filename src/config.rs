@@ -13,6 +13,8 @@ use toml_edit::{ArrayOfTables, DocumentMut, InlineTable, Item, Table, Value};
 use crate::fsx;
 
 pub const OTHERWISE: &str = "otherwise";
+const MIN_DWELL: u64 = 60;
+const MAX_DWELL: u64 = 7 * 24 * 3600;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -303,6 +305,9 @@ impl Config {
                     }
                     seen.push(name);
                 }
+                if rule.order.is_empty() {
+                    flag(&format!("{rat}.order"), "the rule names no login".into());
+                }
                 if rule.order.iter().any(Vec::is_empty) {
                     flag(&format!("{rat}.order"), "a tier is empty".into());
                 }
@@ -329,6 +334,12 @@ impl Config {
                         flag(&at, format!("no schedule named {schedule:?}"));
                     }
                 }
+            }
+            if !(MIN_DWELL..=MAX_DWELL).contains(&auto.dwell.0) {
+                flag(
+                    &format!("{at}.dwell"),
+                    "the least time on a login is between 1 minute and 7 days".into(),
+                );
             }
             if !auto.margin.is_finite() || auto.margin < 0.0 {
                 flag(
@@ -416,11 +427,7 @@ pub struct Loaded {
 }
 
 fn version(text: &str) -> String {
-    use sha2::{Digest, Sha256};
-    Sha256::digest(text.as_bytes())
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    crate::store::digest(text)
 }
 
 fn read(path: &Path) -> Result<Option<String>> {
@@ -480,7 +487,9 @@ fn write(path: &Path, text: &str, config: &Config) -> Result<String> {
     let mut doc: DocumentMut = text
         .parse()
         .with_context(|| format!("{} is not valid", path.display()))?;
-    merge_table(doc.as_table_mut(), config.document().as_table());
+    let mut new = config.document();
+    keep_defaults(&doc, &mut new);
+    merge_table(doc.as_table_mut(), new.as_table());
     place_added(&mut doc);
     let body = doc.to_string();
     if body != text {
@@ -674,20 +683,85 @@ fn plain(item: &Item) -> Option<serde_json::Value> {
     toml_edit::de::from_document(doc).ok()
 }
 
+/// A key the file sets to its default stays, rather than going because the
+/// config leaves defaults out.
+fn keep_defaults(old: &DocumentMut, new: &mut DocumentMut) {
+    let Some(auto) = new.get_mut("auto").and_then(Item::as_table_mut) else {
+        return;
+    };
+    for (id, section) in auto.iter_mut() {
+        let Some(section) = section.as_table_mut() else {
+            continue;
+        };
+        let had = |k: &str| {
+            old.get("auto")
+                .and_then(|a| a.get(id.get()))
+                .and_then(|p| p.get(k))
+                .is_some()
+        };
+        let defaults = [
+            ("enabled", toml_edit::value(false)),
+            ("dwell", toml_edit::value(String::from(default_dwell()))),
+            ("margin", toml_edit::value(default_margin())),
+        ];
+        for (k, v) in defaults {
+            if !section.contains_key(k) && had(k) {
+                section.insert(k, v);
+            }
+        }
+    }
+}
+
+/// Each new table takes the old one holding the same values, so a rule
+/// removed or moved keeps its comments; the rest pair up in order.
+fn merge_rules(old: &mut ArrayOfTables, new: &ArrayOfTables) {
+    let olds: Vec<Table> = old.iter().cloned().collect();
+    let plain_of = |t: &Table| plain(&Item::Table(t.clone()));
+    let mut used = vec![false; olds.len()];
+    let mut pick: Vec<Option<usize>> = new
+        .iter()
+        .map(|t| {
+            let want = plain_of(t);
+            let j = (0..olds.len()).find(|j| !used[*j] && plain_of(&olds[*j]) == want);
+            if let Some(j) = j {
+                used[j] = true;
+            }
+            j
+        })
+        .collect();
+    let mut rest = (0..olds.len())
+        .filter(|j| !used[*j])
+        .collect::<Vec<_>>()
+        .into_iter();
+    for p in pick.iter_mut().filter(|p| p.is_none()) {
+        *p = rest.next();
+    }
+    let mut places: Vec<isize> = pick
+        .iter()
+        .flatten()
+        .filter_map(|j| olds[*j].position())
+        .collect();
+    places.sort();
+    let mut places = places.into_iter();
+    let mut out = ArrayOfTables::new();
+    for (t, j) in new.iter().zip(pick) {
+        out.push(match j {
+            Some(j) => {
+                let mut kept = olds[j].clone();
+                merge_table(&mut kept, t);
+                kept.set_position(places.next());
+                kept
+            }
+            None => t.clone(),
+        });
+    }
+    *old = out;
+}
+
 fn merge_item(old: &mut Item, new: &Item) {
     match (&mut *old, new) {
         (Item::Table(o), Item::Table(n)) => merge_table(o, n),
-        (Item::ArrayOfTables(o), Item::ArrayOfTables(n)) => {
-            while o.len() > n.len() {
-                o.remove(o.len() - 1);
-            }
-            for (i, t) in n.iter().enumerate() {
-                match o.get_mut(i) {
-                    Some(existing) => merge_table(existing, t),
-                    None => o.push(t.clone()),
-                }
-            }
-        }
+        (Item::ArrayOfTables(o), Item::ArrayOfTables(n)) => merge_rules(o, n),
         (Item::Value(o), Item::Value(n)) => {
             if bare(o) != bare(n) {
                 let decor = o.decor().clone();
@@ -868,7 +942,10 @@ order = [["perso"]]
 
         assert!(text.starts_with("# auto mode\n[schedules.workday]\n"));
         assert!(text.contains("hours = \"08:00-17:00\"   # local time\n"));
-        assert!(!text.contains("enabled"));
+        assert!(
+            text.contains("enabled = false\n"),
+            "a key set to its default stays"
+        );
         assert!(text.contains("reserve = { work = \"workday\" }"));
         assert_eq!(toml_edit::de::from_str::<Config>(&text).unwrap(), c);
     }
