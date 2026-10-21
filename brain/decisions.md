@@ -292,9 +292,9 @@ One base URL serves every client: the path gives the format, the model's
 prefix gives the provider, as CLIProxyAPI does, and `provider/model` covers a
 name two providers share. Any format reaches any provider: rather than a
 translator per pair of formats, as CLIProxyAPI has, requests go through one
-conversation shape and answers through one stream of events, so three
-parsers, two emitters, two decoders and three encoders cover every pair, and
-a new provider's format is one of each. A Claude subscription token is accepted for Claude
+conversation shape and answers through one stream of events, so a parser,
+an emitter, a decoder and an encoder for each of the three formats cover
+every pair, and a new format is one of each. A Claude subscription token is accepted for Claude
 Code's own requests, so a request from any other client is sent with Claude
 Code's headers and its identity line as the first system block. That is
 against Anthropic's consumer terms for a client that is not Claude Code, and

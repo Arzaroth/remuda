@@ -53,11 +53,14 @@ on the way out:
 
 So Claude Code can run on a Codex login with `--model gpt-5`, and an OpenAI
 SDK can use a Claude login. Text, images, tools and their results, reasoning,
-stop reasons and token counts carry over, streamed or not. What does not:
-Anthropic's server tools (web search and the like) are dropped on the way to
-an OpenAI endpoint, reasoning from one provider is not handed to another
-(each refuses the other's signatures), and `count_tokens` works only on a
-provider that takes Anthropic requests. A request that Codex gets without
+stop reasons and token counts carry over, streamed or not. Claude models
+from 4.6 on think adaptively at the effort the client asked for, older ones
+on a token budget. What does not carry over: Anthropic's server tools (web
+search and the like) are dropped on the way to an OpenAI endpoint; reasoning
+from one provider is not handed to another (each refuses the other's
+signatures), and a chat client, with no field for Claude's signatures,
+loses Claude's thinking on the turn after a tool call; and `count_tokens`
+works only on a provider that takes Anthropic requests. A request that Codex gets without
 `stream: true` is streamed from Codex all the same and answered whole.
 
 ## Access keys
