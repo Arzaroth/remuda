@@ -437,6 +437,16 @@ fn auto_says_where_it_would_move_a_cli_and_moves_nothing() {
         read(&home.creds())["claudeAiOauth"]["refreshToken"],
         "r-perso"
     );
+
+    std::fs::write(
+        home.path(".config/remuda/config.toml"),
+        "[warm]\nclaude = [\"work\"]\n",
+    )
+    .unwrap();
+    assert_eq!(
+        home.ok(&["auto"]),
+        "keep warm claude/work: its 5-hour window is closed; remuda serve opens it\n"
+    );
 }
 
 #[test]
