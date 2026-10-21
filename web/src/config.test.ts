@@ -4,6 +4,7 @@ import {
   canonical,
   type Config,
   dropFromRule,
+  headline,
   hours,
   minutes,
   problemsAt,
@@ -11,6 +12,7 @@ import {
   scheduleName,
   scheduleUses,
   span,
+  type Status,
 } from './config';
 
 const sample = (): Config => ({
@@ -117,5 +119,32 @@ describe('problemsAt', () => {
     ];
     expect(problemsAt(list, 'auto.claude').map((p) => p.message)).toEqual(['a', 'b']);
     expect(problemsAt(list, 'auto.claude.rule[1]').map((p) => p.message)).toEqual(['b']);
+  });
+});
+
+describe('headline', () => {
+  const status = (kind: 'stay' | 'switch' | 'hold', more: Partial<Status> = {}): Status => ({
+    enabled: true,
+    at: 5,
+    decision: { rule: null, logins: [], action: { kind, to: 'work', why: 'because' } },
+    ...more,
+  });
+
+  it('says what the round came to', () => {
+    expect(headline(status('stay'), 'perso')).toEqual({ text: 'Stays on perso', tone: 'good' });
+    expect(headline(status('hold'), 'perso')).toEqual({ text: 'Holding', tone: 'warn' });
+    expect(headline(status('switch'), 'perso').text).toBe('Switching to work');
+    expect(headline(status('switch', { switched: { at: 5, to: 'work', why: '' } }), 'work').text).toBe(
+      'Switched to work',
+    );
+    expect(headline(status('switch', { error: 'no' }), 'perso')).toEqual({
+      text: 'Could not switch to work',
+      tone: 'bad',
+    });
+  });
+
+  it('says what it would do when off', () => {
+    expect(headline(status('switch', { enabled: false }), 'perso').text).toBe('Off; it would switch to work');
+    expect(headline(status('stay', { enabled: false }), 'perso').text).toBe('Off');
   });
 });
