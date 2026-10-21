@@ -1,10 +1,24 @@
 import { createSignal, For, Show } from 'solid-js';
 import { brand } from '../brand';
 import { createConfirm } from '../confirm';
-import { act, store, toast } from '../state';
+import { api } from '../api';
+import { load, store, toast } from '../state';
 import { remember, remembered } from '../storage';
 import { baseUrl, masked, PROTOCOLS, status, type Protocol } from '../proxy';
 import { Icon } from './Icon';
+
+async function send(path: string, body: unknown): Promise<boolean> {
+  try {
+    const r = await api(path, body);
+    if (r.message) toast(r.message);
+    return true;
+  } catch (e) {
+    toast((e as Error).message, true);
+    return false;
+  } finally {
+    await load();
+  }
+}
 
 const copy = (text: string, what: string) =>
   navigator.clipboard.writeText(text).then(
@@ -34,18 +48,17 @@ export function Proxy() {
     ev.preventDefault();
     const n = name().trim();
     if (!n) return;
-    await act('/api/proxy/keys', { name: n });
-    setName('');
+    if (await send('/api/proxy/keys', { name: n })) setName('');
   };
   const removeKey = (id: string, n: string) => {
     if (!confirm.ask(`Remove the key ${n}? Clients using it stop working.`, id)) return setArmed(id);
-    act('/api/proxy/keys/remove', { id });
+    send('/api/proxy/keys/remove', { id });
   };
   const savePort = (ev: SubmitEvent) => {
     ev.preventDefault();
     const n = Number(port());
     if (!Number.isInteger(n) || n < 1 || n > 65535) return toast('A port is a number from 1 to 65535', true);
-    act('/api/proxy/settings', { port: n }).then(() => setPort(''));
+    send('/api/proxy/settings', { port: n }).then((ok) => ok && setPort(''));
   };
 
   return (
@@ -58,14 +71,15 @@ export function Proxy() {
             and the path tells the format.
           </p>
         </div>
-        <label class="switch">
-          <input
-            type="checkbox"
-            checked={p().enabled}
-            onChange={(e) => act('/api/proxy/settings', { enabled: e.currentTarget.checked })}
-          />
-          <span>{p().enabled ? 'On' : 'Off'}</span>
-        </label>
+        <button
+          class="switch"
+          role="switch"
+          aria-checked={p().enabled}
+          onClick={() => send('/api/proxy/settings', { enabled: !p().enabled })}
+        >
+          <i />
+          {p().enabled ? 'On' : 'Off'}
+        </button>
       </div>
       <div class={`proxy-status ${status(p()).tone}`}>{status(p()).text}</div>
 
