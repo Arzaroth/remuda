@@ -1465,4 +1465,98 @@ order = [["IDC"], ["Axeo"], ["perso"]]
             "10 points to its 50% ceiling over 10 hours"
         );
     }
+
+    #[test]
+    fn the_fallback_waits_for_the_active_login_to_be_full() {
+        let c = balancer();
+        let now = at("10:00");
+        let full_others = |active: (&'static str, Figures)| {
+            run(
+                &c,
+                &now,
+                Some(active.0),
+                Some(0),
+                &[
+                    active,
+                    ("Axeo", login(&now, (90, 2), (40, 100))),
+                    ("perso", login(&now, (98, 2), (40, 100))),
+                ],
+            )
+        };
+        let d = full_others(("IDC", Figures::Missing("TokenGauge: 500".into())));
+        assert!(
+            matches!(&d.action, Action::Stay { why } if why.starts_with("every login it may pick is full")),
+            "{:?}",
+            d.action
+        );
+        let d = full_others(("spare", login(&now, (5, 2), (5, 100))));
+        assert!(
+            matches!(d.action, Action::Stay { .. }),
+            "a login outside the rule with room is kept"
+        );
+        let d = run(
+            &c,
+            &now,
+            None,
+            None,
+            &[
+                ("IDC", login(&now, (95, 2), (40, 100))),
+                ("perso", login(&now, (98, 2), (40, 100))),
+            ],
+        );
+        assert_eq!(switch_to(&d), Some("perso"), "nothing signed in");
+    }
+
+    #[test]
+    fn a_fallback_kept_for_its_schedule_is_not_used() {
+        let mut c = config();
+        c.auto.get_mut("claude").unwrap().fallback = Some("work".into());
+        let now = at("20:00");
+        let d = run(
+            &c,
+            &now,
+            Some("perso"),
+            None,
+            &[
+                ("work", login(&now, (0, 2), (50, 30))),
+                ("perso", login(&now, (100, 2), (10, 100))),
+            ],
+        );
+        assert_eq!(
+            d.action,
+            Action::Stay {
+                why: "every login it may pick is full or has no figures".into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_login_with_one_window_keeps_the_cli_ceiling() {
+        let c = balancer();
+        let now = at("10:00");
+        let weekly = |used| {
+            Figures::Known(vec![Window {
+                title: "Weekly".into(),
+                minutes: Some(10080),
+                used,
+                resets_at: None,
+                extra: false,
+            }])
+        };
+        let d = run(
+            &c,
+            &now,
+            Some("IDC"),
+            Some(0),
+            &[
+                ("IDC", weekly(94)),
+                ("Axeo", login(&now, (10, 2), (40, 100))),
+            ],
+        );
+        assert!(
+            matches!(d.action, Action::Stay { .. }),
+            "94% is under the CLI's 97%, not IDC's 93%: {:?}",
+            d.action
+        );
+    }
 }
