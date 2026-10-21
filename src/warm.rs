@@ -137,6 +137,9 @@ pub fn creds(store: &Store, p: &dyn Provider, name: &str, active: Option<&str>) 
     let mut entry = store
         .get(p.id(), name)?
         .with_context(|| format!("no stored login {}/{name}", p.id()))?;
+    if !entry.verified {
+        bail!("it does not match its sidecar, so remuda will not spend or refresh it");
+    }
     if p.renews() && ops::expires_in_ms(p, &entry).is_some_and(|left| left < FRESH_FOR_MS) {
         ops::refresh_entry(store, p, &mut entry)?;
         store.save(&entry)?;
@@ -313,5 +316,25 @@ mod tests {
         let got = creds(&e.store, &e.claude, "job", None).unwrap();
         assert_eq!(e.claude.access_token(&got), Some("a-job"));
         assert!(creds(&e.store, &e.claude, "ghost", None).is_err());
+    }
+
+    #[test]
+    fn an_unverified_login_is_neither_spent_nor_refreshed() {
+        use crate::ops::testing::*;
+        let mut server = mockito::Server::new();
+        let refresh = server.mock("POST", "/v1/oauth/token").expect(0).create();
+        let e = env(&server.url());
+        e.stored("perso", "u-2", 60_000);
+        crate::fsx::write_json(
+            &e.store.root().join("claude/perso.json"),
+            &oauth("a-torn", "r-torn", 60_000),
+        )
+        .unwrap();
+        let err = creds(&e.store, &e.claude, "perso", None)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("does not match its sidecar"), "{err}");
+        assert_eq!(e.stored_refresh_token("perso").as_deref(), Some("r-torn"));
+        refresh.assert();
     }
 }
