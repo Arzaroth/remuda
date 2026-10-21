@@ -1,7 +1,8 @@
 # Testing
 
-`cargo test` runs the unit tests and `tests/cli.rs`. Nothing reaches the
-network or touches the developer's own logins.
+`cargo test` runs the unit tests, `tests/cli.rs`, `tests/install.rs` and
+`tests/packaging.rs`. Nothing reaches the network or touches the developer's
+own logins.
 
 - **Providers take their endpoints and paths as values.** `claude::Api::local`
   and `codex::Api::local` point at a mockito server, `Claude::at` and
@@ -42,6 +43,17 @@ network or touches the developer's own logins.
   it with `REMUDA_SERVICE` set to check the systemd behaviour. `sync-units` is
   run with a fake `systemctl` first on `PATH` that logs its arguments, so no
   test reaches the real user manager.
+- **`tests/install.rs`** pipes `scripts/install.sh` into `bash -s` the way
+  `curl | bash` does, against a release laid out in a temp directory
+  (`REMUDA_DOWNLOAD_BASE`, read over `file://`), with `env_clear()`, a temp
+  `HOME` and a `systemctl` stub that fails, so the installer's restart of a
+  running `remuda-serve.service` cannot reach the real one. It checks that a
+  matching archive installs and that a wrong digest, a missing `SHA256SUMS` or
+  an archive the sums do not list installs nothing.
+- **`tests/packaging.rs`** reads the packaging files as text: every unit in
+  `systemd/` is in `nfpm.yaml` and `check-package.sh`, runs the binary by the
+  prefix the packages rewrite, and every completion script reaches each
+  package.
 
 The page's own logic is tested with Vitest under `web/` (`pnpm test`): which
 figures each login shows, how the summary adds logins up (weighted and

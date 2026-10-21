@@ -300,6 +300,17 @@ Code's headers and its identity line as the first system block. That is
 against Anthropic's consumer terms for a client that is not Claude Code, and
 the README says so; Claude Code's own requests pass untouched.
 
+## Packages are made from the release archive
+
+The `.deb`, the `.rpm` and `remuda-bin` repackage the per-architecture archive
+rather than building in each distribution, so every install method runs the
+bytes `--update` would install, and CI needs no toolchain per distribution.
+That only works because the binary is static musl: the glibc build needed
+2.39, and building it on an older runner only moves that floor. A package
+enables no unit, since a package must not write into a home and the timer
+needs `remuda ls` run first from the user's shell (see
+[architecture/distribution.md](architecture/distribution.md#packages)).
+
 ## Sources
 
 - [src/ops.rs](../src/ops.rs)
@@ -312,3 +323,4 @@ the README says so; Claude Code's own requests pass untouched.
 - [web/](../web/)
 - [src/project.rs](../src/project.rs)
 - [src/proxy/](../src/proxy/)
+- [packaging/nfpm.yaml](../packaging/nfpm.yaml)
