@@ -16,8 +16,11 @@ done.
       proxy exists; check how each CLI copes with a credential that has no
       refresh token before ruling the first way out.
 - [ ] Proxy: check against real logins that Claude's endpoint takes a
-      subscription token with Claude Code's identity line alone, which
-      headers Grok's chat endpoint wants beyond the bearer token, and that
+      subscription token with Claude Code's identity line alone (CLIProxyAPI
+      also sends a `x-anthropic-billing-header` block and moves the caller's
+      system prompt out of `system`, saying a top-level one trips Anthropic's
+      third-party classifier), that
+      Grok's chat proxy takes the grok 1.0.46 headers, and that
       opencode Go serves each model family on the path the proxy picks.
 - [ ] Hub and satellites: pairing and per-satellite tokens, TLS on a plain LAN.
 - [ ] Banked resets: check Codex's credit fields against a real answer, and

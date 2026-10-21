@@ -56,10 +56,10 @@ names the ones it does.
 
 The card makes keys (`rmd-` and 32 random bytes), shows one masked with a
 button to reveal or copy it, and removes them. With no key, every client is
-refused. Keys, `enabled` and `port` live in `$XDG_DATA_HOME/remuda/proxy.json`
-(0600), beside the store rather than in it. The page follows the file like the
-store, and switching the proxy on or off, or changing its port, takes effect at
-once.
+refused. Keys, `enabled` and `port` live in `<store>/.proxy.json` (0600),
+beside `.last-refresh.json`, outside any provider's directory. Switching the
+proxy on or off, or changing its port, takes effect at once, from the page or
+from a hand edit of the file; a port that cannot be bound is said on the card.
 
 ## Sources
 
