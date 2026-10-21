@@ -156,7 +156,7 @@ pub struct Usage {
 /// One step of an answer, whatever format it came in.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
-    Start { id: String, model: String },
+    Start { id: String },
     Text(String),
     Thinking(String),
     Signature(String),
@@ -165,6 +165,25 @@ pub enum Event {
     Usage(Usage),
     Stop(Stop),
     Error { kind: String, message: String },
+}
+
+fn text_of(parts: &[Part]) -> String {
+    parts
+        .iter()
+        .filter_map(|p| match p {
+            Part::Text(t) => Some(t.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Tool-call arguments as an object; anything else is sent as none.
+fn arguments(text: &str) -> Value {
+    match serde_json::from_str::<Value>(text) {
+        Ok(v @ Value::Object(_)) => v,
+        _ => serde_json::json!({}),
+    }
 }
 
 /// Codex takes tool names of at most 64 characters; Claude Code's MCP tools
@@ -234,12 +253,71 @@ pub fn respond<W: Write>(
     }
     let (status, body) = match encode::whole(to, conversation, names, events) {
         Ok(body) => (200, body),
-        Err((_, message)) => (502, super::listen::error_body(Some(to), 502, &message)),
+        Err((kind, message)) => {
+            let status = status_of(&kind);
+            (
+                status,
+                super::listen::error_body(Some(to), status, &message),
+            )
+        }
     };
     let body = body.to_string();
     head(out, status, "application/json", Some(body.len()))?;
     out.write_all(body.as_bytes())?;
     out.flush()
+}
+
+/// A Responses stream collected into the response it describes, with every
+/// item as the upstream sent it: the completed event's own `output` can be
+/// empty.
+pub fn collect(upstream: impl BufRead) -> Result<Value, (String, String)> {
+    let mut items: Vec<(u64, Value)> = Vec::new();
+    for e in sse::Reader::new(upstream) {
+        let Ok(d) = serde_json::from_str::<Value>(&e.data) else {
+            continue;
+        };
+        let kind = e
+            .event
+            .or_else(|| d["type"].as_str().map(str::to_owned))
+            .unwrap_or_default();
+        match kind.as_str() {
+            "response.output_item.done" => {
+                let index = d["output_index"].as_u64().unwrap_or(items.len() as u64);
+                items.push((index, d["item"].clone()));
+            }
+            "response.completed" | "response.incomplete" => {
+                let mut response = d["response"].clone();
+                if !items.is_empty() {
+                    items.sort_by_key(|(i, _)| *i);
+                    response["output"] = Value::Array(items.into_iter().map(|(_, v)| v).collect());
+                }
+                return Ok(response);
+            }
+            "response.failed" => {
+                return Err((
+                    d.pointer("/response/error/code")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                    d.pointer("/response/error/message")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                ));
+            }
+            "error" => {
+                return Err((
+                    d["code"].as_str().unwrap_or_default().to_owned(),
+                    d["message"].as_str().unwrap_or_default().to_owned(),
+                ));
+            }
+            _ => {}
+        }
+    }
+    Err((
+        "api_error".to_owned(),
+        "the provider's stream ended before the answer did".to_owned(),
+    ))
 }
 
 /// An upstream's error body, retold in the client's shape.
@@ -250,9 +328,19 @@ pub fn error_message(body: &str) -> String {
         .or_else(|| v.pointer("/message"))
         .or_else(|| v.pointer("/detail"))
         .and_then(Value::as_str);
-    match message {
-        Some(m) => m.to_owned(),
-        None => body.chars().take(500).collect(),
+    message.unwrap_or(body).chars().take(500).collect()
+}
+
+/// The status an error in a stream would have had, had it come first.
+pub fn status_of(kind: &str) -> u16 {
+    if kind.contains("rate_limit") {
+        429
+    } else if kind.contains("overloaded") {
+        529
+    } else if kind.contains("invalid_request") {
+        400
+    } else {
+        502
     }
 }
 

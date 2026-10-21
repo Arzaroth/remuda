@@ -1,7 +1,8 @@
 use anyhow::{Result, bail};
 use serde_json::{Map, Value};
 
-use super::{Conversation, Effort, Image, Part, Role, Tool, ToolChoice, Turn};
+use super::emit::{CLAUDE_SIGNATURE, SIGNATURE};
+use super::{Conversation, Effort, Image, Part, Role, Tool, ToolChoice, Turn, text_of};
 use crate::provider::Format;
 
 pub fn parse(format: Format, body: &Value) -> Result<Conversation> {
@@ -104,17 +105,6 @@ fn content_part(item: &Value) -> Option<Part> {
         }
         _ => None,
     }
-}
-
-fn text_of(parts: &[Part]) -> String {
-    parts
-        .iter()
-        .filter_map(|p| match p {
-            Part::Text(t) => Some(t.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 fn tool_result_content(v: Option<&Value>) -> Vec<Part> {
@@ -350,7 +340,13 @@ fn responses(body: &Map<String, Value>, c: &mut Conversation) -> Result<()> {
                         signature: item
                             .get("encrypted_content")
                             .and_then(Value::as_str)
-                            .map(str::to_owned),
+                            .map(|e| {
+                                if e.starts_with(CLAUDE_SIGNATURE) {
+                                    e.to_owned()
+                                } else {
+                                    format!("{SIGNATURE}{e}")
+                                }
+                            }),
                     }],
                 );
             }
@@ -374,14 +370,26 @@ fn messages(body: &Map<String, Value>, c: &mut Conversation) -> Result<()> {
         ),
         _ => {}
     }
-    if let Some(t) = body.get("thinking")
-        && t.get("type").and_then(Value::as_str) == Some("enabled")
-    {
-        c.reasoning = Some(
-            t.get("budget_tokens")
-                .and_then(Value::as_u64)
-                .map_or(Effort::Medium, Effort::from_budget),
-        );
+    let thinking = body.get("thinking");
+    match thinking.and_then(|t| t.get("type")).and_then(Value::as_str) {
+        Some("enabled") => {
+            c.reasoning = Some(
+                thinking
+                    .and_then(|t| t.get("budget_tokens"))
+                    .and_then(Value::as_u64)
+                    .map_or(Effort::Medium, Effort::from_budget),
+            )
+        }
+        Some("adaptive") => {
+            c.reasoning = Some(
+                body.get("output_config")
+                    .and_then(|o| o.get("effort"))
+                    .and_then(Value::as_str)
+                    .and_then(Effort::named)
+                    .unwrap_or(Effort::Medium),
+            )
+        }
+        _ => {}
     }
     for t in body
         .get("tools")
@@ -392,7 +400,6 @@ fn messages(body: &Map<String, Value>, c: &mut Conversation) -> Result<()> {
         let Some(name) = t.get("name").and_then(Value::as_str) else {
             continue;
         };
-        // Anthropic's own server tools have a type and no schema to pass on.
         if t.get("input_schema").is_none() {
             continue;
         }
@@ -441,7 +448,7 @@ fn messages(body: &Map<String, Value>, c: &mut Conversation) -> Result<()> {
 
 fn message_block(b: &Value) -> Option<Part> {
     match b.get("type").and_then(Value::as_str)? {
-        "tool_use" | "server_tool_use" => Some(Part::ToolCall {
+        "tool_use" => Some(Part::ToolCall {
             id: b.get("id")?.as_str()?.to_owned(),
             name: b.get("name")?.as_str()?.to_owned(),
             arguments: b

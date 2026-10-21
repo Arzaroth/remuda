@@ -2,6 +2,7 @@ use std::io::Write;
 
 use serde_json::{Value, json};
 
+use super::emit::{CLAUDE_SIGNATURE, SIGNATURE};
 use super::sse;
 use super::{Conversation, Event, Names, Stop, Usage};
 use crate::fsx::now_ms;
@@ -53,10 +54,6 @@ impl Answer {
                 Some(Block::Thinking { signature, .. }) if signature.is_none() => {
                     *signature = Some(s.clone())
                 }
-                Some(Block::Thinking {
-                    signature: Some(sig),
-                    ..
-                }) => sig.push_str(s),
                 _ => self.blocks.push(Block::Thinking {
                     text: String::new(),
                     signature: Some(s.clone()),
@@ -154,18 +151,13 @@ fn responses_usage(u: &Usage) -> Value {
     })
 }
 
-fn id_or(id: &str, prefix: &str) -> String {
+pub fn id_or(id: &str, prefix: &str) -> String {
     if id.is_empty() {
         format!("{prefix}{}", now_ms())
+    } else if id.starts_with(prefix) {
+        id.to_owned()
     } else {
         format!("{prefix}{id}")
-    }
-}
-
-fn arguments_object(text: &str) -> Value {
-    match serde_json::from_str::<Value>(text) {
-        Ok(v @ Value::Object(_)) => v,
-        _ => json!({}),
     }
 }
 
@@ -198,15 +190,24 @@ fn responses_item(b: &Block, index: usize, done: bool) -> Value {
                 json!([])
             },
         }),
-        Block::Thinking { text, .. } => json!({
-            "id": format!("rs_{index}"),
-            "type": "reasoning",
-            "summary": if done && !text.is_empty() {
-                json!([{"type": "summary_text", "text": text}])
-            } else {
-                json!([])
-            },
-        }),
+        Block::Thinking { text, signature } => {
+            let mut item = json!({
+                "id": format!("rs_{index}"),
+                "type": "reasoning",
+                "summary": if done && !text.is_empty() {
+                    json!([{"type": "summary_text", "text": text}])
+                } else {
+                    json!([])
+                },
+            });
+            if let Some(sig) = signature.as_deref().filter(|_| done) {
+                item["encrypted_content"] = json!(match sig.strip_prefix(SIGNATURE) {
+                    Some(openai) => openai.to_owned(),
+                    None => format!("{CLAUDE_SIGNATURE}{sig}"),
+                });
+            }
+            item
+        }
         Block::Tool {
             id,
             name,
@@ -239,7 +240,7 @@ fn whole_value(to: Format, c: &Conversation, a: &Answer) -> Value {
                         id,
                         name,
                         arguments,
-                    } => json!({"type": "tool_use", "id": id, "name": name, "input": arguments_object(arguments)}),
+                    } => json!({"type": "tool_use", "id": id, "name": name, "input": super::arguments(arguments)}),
                 })
                 .collect();
             json!({

@@ -521,7 +521,8 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
             .with_header("content-type", "text/event-stream")
             .with_body(concat!(
                 "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n",
-                "data: {\"type\":\"response.completed\",\"response\":{}}\n\n",
+                "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"hi\"}]}}\n\n",
+                "data: {\"type\":\"response.completed\",\"response\":{\"object\":\"response\",\"status\":\"completed\",\"output\":[]}}\n\n",
             ))
             .expect(2)
             .create();
@@ -824,7 +825,7 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
     }
 
     #[test]
-    fn an_anthropic_client_is_offered_only_models_it_can_reach() {
+    fn every_client_is_offered_every_model_it_can_reach() {
         let server = mockito::Server::new();
         let (_tmp, claude) = signed_in_claude(&server, HOUR);
         let (_ctmp, codex) = signed_in_codex(&server);
@@ -843,11 +844,41 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
                 .collect::<Vec<_>>()
         };
         let anthropic = get("anthropic-version: 2023-06-01\r\n");
-        assert!(
-            anthropic.iter().all(|m| m.starts_with("claude-")),
-            "{anthropic:?}"
+        assert!(anthropic.contains(&"gpt-5".to_owned()), "{anthropic:?}");
+        assert_eq!(anthropic, get(""));
+    }
+
+    #[test]
+    fn claude_code_reaches_a_chat_only_model() {
+        let mut server = mockito::Server::new();
+        let upstream = server
+            .mock("POST", "/openai/v1/chat/completions")
+            .match_body(Matcher::PartialJson(
+                json!({"model": "glm-4.6", "stream": true}),
+            ))
+            .with_header("content-type", "text/event-stream")
+            .with_body(concat!(
+                "data: {\"id\":\"c\",\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n",
+                "data: {\"id\":\"c\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+                "data: [DONE]\n\n",
+            ))
+            .create();
+        let opencode = crate::apikey::ApiKey::opencode()
+            .with(None, |name| {
+                (name == "OPENCODE_API_KEY").then(|| "oc-1".to_owned())
+            })
+            .inferring_at(&server.url());
+        let p = run(vec![Box::new(opencode)]);
+        let (status, _, body) = post(
+            p.port,
+            "/v1/messages",
+            &format!("x-api-key: {KEY}\r\nUser-Agent: claude-cli/2.1.304 (external, cli)\r\n"),
+            &json!({"model": "opencode/glm-4.6", "max_tokens": 10, "messages": [{"role": "user", "content": "hi"}]}),
         );
-        let openai = get("");
-        assert!(openai.iter().all(|m| m.starts_with("gpt-")), "{openai:?}");
+        assert_eq!(status, 200, "{body}");
+        upstream.assert();
+        let body: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(body["content"], json!([{"type": "text", "text": "ok"}]));
+        assert_eq!(body["stop_reason"], "end_turn");
     }
 }

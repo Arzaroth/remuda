@@ -147,7 +147,8 @@ pub fn forward(backend: &dyn Backend, mut call: Call, out: &mut impl Write) -> R
         formats[0]
     };
     let asked_stream = call.body.get("stream").and_then(Value::as_bool) == Some(true);
-    let mut translation = if target == call.format {
+    let translated = target != call.format;
+    let translation = if !translated {
         None
     } else {
         if call.count_tokens {
@@ -163,13 +164,7 @@ pub fn forward(backend: &dyn Backend, mut call: Call, out: &mut impl Write) -> R
     p.shape(target, &mut call.body, user_agent)
         .map_err(|e| refuse(400, format!("{e:#}")))?;
     let streamed = call.body.get("stream").and_then(Value::as_bool) == Some(true);
-    if translation.is_none() && streamed && !asked_stream && target != Format::Chat {
-        let whole = translate::Conversation {
-            model: call.body["model"].as_str().unwrap_or_default().to_owned(),
-            ..translate::Conversation::default()
-        };
-        translation = Some((translate::Names::default(), whole));
-    }
+    let collect = !translated && streamed && !asked_stream && target == Format::Responses;
     let upstream = p
         .upstream(&creds, target, &model)
         .ok_or_else(|| refuse(503, format!("the active {} login holds no token", p.name())))?;
@@ -202,12 +197,7 @@ pub fn forward(backend: &dyn Backend, mut call: Call, out: &mut impl Write) -> R
         }
         request = request.header(*name, value);
     }
-    let client_header = |name: &str| {
-        translation
-            .is_none()
-            .then(|| call.head.header(name))
-            .flatten()
-    };
+    let client_header = |name: &str| (!translated).then(|| call.head.header(name)).flatten();
     for name in PASSED {
         if !set(name)
             && let Some(value) = client_header(name)
@@ -247,6 +237,19 @@ pub fn forward(backend: &dyn Backend, mut call: Call, out: &mut impl Write) -> R
         if let Some(v) = header(name) {
             extra.push((name, v));
         }
+    }
+    if collect && (200..300).contains(&status) {
+        let (status, body) = match translate::collect(BufReader::new(resp)) {
+            Ok(body) => (200, body),
+            Err((kind, message)) => {
+                let status = translate::status_of(&kind);
+                (status, error_body(Some(call.format), status, &message))
+            }
+        };
+        let body = body.to_string();
+        let _ = write_head(out, status, "application/json", Some(body.len()), &extra)
+            .and_then(|()| out.write_all(body.as_bytes()));
+        return Ok(());
     }
     if let Some((names, conversation)) = translation {
         if !(200..300).contains(&status) {
@@ -306,13 +309,7 @@ pub fn models(backend: &dyn Backend, anthropic: bool) -> Value {
             continue;
         }
         for m in route::models(p.id()) {
-            let formats = p.formats(route::bare(m));
-            let reachable = if anthropic {
-                formats.contains(&Format::Messages)
-            } else {
-                formats.iter().any(|f| *f != Format::Messages)
-            };
-            if reachable {
+            if !p.formats(route::bare(m)).is_empty() {
                 ids.push((p.id(), *m));
             }
         }
