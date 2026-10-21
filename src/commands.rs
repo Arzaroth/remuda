@@ -543,7 +543,7 @@ pub fn auto(
     out: &mut dyn Write,
 ) -> Result<()> {
     let config = crate::config::load(path)?.config;
-    if config.auto.is_empty() {
+    if config.auto.is_empty() && config.warm.is_empty() {
         writeln!(
             out,
             "auto mode is set up for no CLI: open the page, or add an [auto.<cli>] section to {}",
@@ -577,6 +577,28 @@ pub fn auto(
             &decision,
             out,
         )?;
+    }
+    if !config.warm.is_empty() {
+        if !first {
+            writeln!(out)?;
+        }
+        let active = |id: &str| -> Result<Option<String>, String> {
+            let live = lives
+                .iter()
+                .find(|l| l.provider.id() == id)
+                .ok_or_else(|| format!("remuda has no provider {id:?}"))?;
+            crate::warm::active(&live.state)
+        };
+        for planned in crate::warm::plan(
+            &config.warm,
+            usage.as_ref(),
+            &switches,
+            &active,
+            &|_, _| None,
+            now.timestamp(),
+        ) {
+            writeln!(out, "{}", crate::warm::describe(&planned))?;
+        }
     }
     Ok(())
 }

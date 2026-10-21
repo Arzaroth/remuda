@@ -26,6 +26,7 @@ mod served;
 mod shown;
 mod store;
 mod units;
+mod warm;
 
 use std::io::{self, BufRead};
 

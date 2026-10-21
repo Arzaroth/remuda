@@ -29,6 +29,20 @@ pub fn bare(model: &str) -> &str {
     model.split_once('/').map_or(model, |(_, rest)| rest)
 }
 
+/// The cheapest model each provider answers on, for a request that only
+/// needs to be counted.
+pub fn cheapest(provider: &str) -> Option<&'static str> {
+    match provider {
+        "claude" => Some("claude-haiku-4-5"),
+        "codex" => Some("gpt-5"),
+        "grok" => Some("grok-code-fast-1"),
+        "kimi" => Some("kimi-for-coding"),
+        "glm" => Some("glm-4.6"),
+        "opencode" => Some("glm-4.6"),
+        _ => None,
+    }
+}
+
 /// `provider/model` names its provider, which a model on several providers
 /// needs. Otherwise the prefix decides. Returns the provider and the model
 /// name to send it.

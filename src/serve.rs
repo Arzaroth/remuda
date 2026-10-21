@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 use crate::auto;
 use crate::commands::{self, RefreshScope};
 use crate::config;
+use crate::fsx;
 use crate::gauge;
 use crate::ops;
 use crate::paths;
@@ -20,6 +21,7 @@ use crate::proxy;
 use crate::runs;
 use crate::shown;
 use crate::store::Store;
+use crate::warm;
 
 const PAGE: &str = include_str!("serve.html");
 const ICON: &str = include_str!("../assets/remuda.svg");
@@ -59,6 +61,8 @@ pub struct App {
     open: Opener,
     pending: Mutex<HashMap<String, Pending>>,
     auto: Mutex<BTreeMap<String, Value>>,
+    /// `provider/name` to what keep-warm last did for that login.
+    warm: Mutex<BTreeMap<String, Value>>,
     proxy: proxy::Control,
     me: OnceLock<Weak<App>>,
 }
@@ -85,6 +89,7 @@ pub fn watch(app: std::sync::Arc<App>) {
             {
                 app.apply_proxy();
                 app.auto_round(&Zoned::now());
+                app.warm_round(jiff::Timestamp::now());
                 seen = Some(app.fingerprint());
                 last = Some(std::time::Instant::now());
             }
@@ -148,6 +153,7 @@ impl App {
             open,
             pending: Mutex::new(HashMap::new()),
             auto: Mutex::new(BTreeMap::new()),
+            warm: Mutex::new(BTreeMap::new()),
             proxy: proxy::Control::default(),
             me: OnceLock::new(),
         }
@@ -173,6 +179,109 @@ impl App {
 
     /// One round of auto mode: decide for every CLI config.toml sets up, and
     /// switch the ones it is on for. What it decided is kept for the page.
+    /// Pings each login named in `[warm]` whose 5-hour window has closed,
+    /// one at a time, never holding the store lock across a ping.
+    pub fn warm_round(&self, now: jiff::Timestamp) {
+        let Ok(loaded) = config::load(&self.places.config) else {
+            return;
+        };
+        let warm = loaded.config.warm;
+        let mut memory = self.warm.lock().unwrap().clone();
+        memory.retain(|key, _| {
+            key.split_once('/').is_some_and(|(p, n)| {
+                warm.get(p)
+                    .is_some_and(|names| names.iter().any(|x| x == n))
+            })
+        });
+        if warm.is_empty() {
+            *self.warm.lock().unwrap() = memory;
+            return;
+        }
+        let usage = gauge::read(&self.places.snapshot);
+        let mut actives = BTreeMap::new();
+        let switches = {
+            let Ok(_lock) = self.store.lock() else {
+                return;
+            };
+            for id in warm.keys() {
+                let active = match self.providers().into_iter().find(|p| p.id() == id) {
+                    Some(p) => ops::sync_live(&self.store, p)
+                        .map_err(|e| format!("{e:#}"))
+                        .and_then(|live| warm::active(&live)),
+                    None => Err(format!("remuda has no provider {id:?}")),
+                };
+                actives.insert(id.clone(), active);
+            }
+            runs::switches(&self.store)
+        };
+        let last = |p: &str, n: &str| {
+            memory
+                .get(&format!("{p}/{n}"))
+                .and_then(|m| m["lastPing"].as_i64())
+        };
+        let active = |id: &str| actives.get(id).cloned().unwrap_or(Ok(None));
+        let planned = warm::plan(&warm, usage.as_ref(), &switches, &active, &last, now);
+        let mut pinged = false;
+        for planned in planned {
+            let key = format!("{}/{}", planned.provider, planned.name);
+            let mut seen = memory.get(&key).cloned().unwrap_or_else(|| json!({}));
+            let last_ping = seen.get("lastPing").cloned();
+            seen = match planned.due {
+                warm::Due::Open { resets_at } => {
+                    json!({"state": "open", "resetsAt": resets_at.as_millisecond()})
+                }
+                warm::Due::Not(why) => json!({"state": "waiting", "why": why}),
+                warm::Due::Now => {
+                    let Some(p) = self
+                        .providers()
+                        .into_iter()
+                        .find(|p| p.id() == planned.provider)
+                    else {
+                        continue;
+                    };
+                    let active = active(&planned.provider).ok().flatten();
+                    let creds = {
+                        let Ok(_lock) = self.store.lock() else {
+                            continue;
+                        };
+                        warm::creds(&self.store, p, &planned.name, active.as_deref())
+                    };
+                    let at = fsx::now_ms();
+                    let done = creds.and_then(|c| proxy::ping(p, &c));
+                    pinged = true;
+                    match done {
+                        Ok(model) => {
+                            eprintln!("keep warm: opened {key}'s 5-hour window on {model}");
+                            json!({"state": "pinged", "at": at, "model": model})
+                        }
+                        Err(e) => {
+                            let error = format!("{e:#}");
+                            if memory.get(&key).and_then(|m| m["error"].as_str())
+                                != Some(error.as_str())
+                            {
+                                eprintln!("keep warm: could not ping {key}: {error}");
+                            }
+                            json!({"state": "failed", "at": at, "error": error})
+                        }
+                    }
+                }
+            };
+            match (&seen["state"], seen.get("at")) {
+                (s, Some(at)) if s == "pinged" || s == "failed" => seen["lastPing"] = at.clone(),
+                _ => {
+                    if let Some(l) = last_ping {
+                        seen["lastPing"] = l;
+                    }
+                }
+            }
+            memory.insert(key, seen);
+        }
+        *self.warm.lock().unwrap() = memory;
+        if pinged {
+            gauge::nudge(&self.places.snapshot);
+        }
+    }
+
     pub fn auto_round(&self, now: &Zoned) {
         let config = match config::load(&self.places.config) {
             Ok(l) => l.config,
@@ -467,6 +576,7 @@ impl App {
                 state["usage"] = gauge::read(&self.places.snapshot).unwrap_or(Value::Null);
                 state["shown"] = shown::shown(&state);
                 state["auto"] = json!(*self.auto.lock().unwrap());
+                state["warm"] = json!(*self.warm.lock().unwrap());
                 state["proxy"] = self.proxy_state();
                 Ok(state)
             }
@@ -1212,6 +1322,86 @@ mod tests {
         );
         assert_eq!(claude["switched"]["to"], "work", "the last switch is kept");
         assert_eq!(e.live_refresh_token().as_deref(), Some("r-work"));
+    }
+
+    #[test]
+    fn keep_warm_opens_a_closed_window_once_per_snapshot() {
+        let mut server = mockito::Server::new();
+        let work = server
+            .mock("POST", "/v1/messages")
+            .match_query(mockito::Matcher::Any)
+            .match_header("authorization", "Bearer a-work")
+            .match_body(mockito::Matcher::PartialJson(json!({"max_tokens": 1})))
+            .with_body("event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"}}\n\n")
+            .expect(2)
+            .create();
+        let perso = server
+            .mock("POST", "/v1/messages")
+            .match_query(mockito::Matcher::Any)
+            .match_header("authorization", "Bearer a-perso")
+            .with_body("event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"}}\n\n")
+            .expect(1)
+            .create();
+        let e = env(&server.url());
+        e.stored("work", "u-work", HOUR);
+        e.stored("perso", "u-perso", HOUR);
+        let live = e.store.get("claude", "perso").unwrap().unwrap();
+        e.sign_in(live.creds, account("u-perso"));
+        std::fs::write(
+            places(&e).config,
+            "[warm]\nclaude = [\"work\", \"perso\", \"ghost\"]\n",
+        )
+        .unwrap();
+        let app = app(&e, &server.url());
+        let heard = gauge_daemon(&e);
+        snapshot(&e, crate::fsx::now_ms() - 1000, 3, 3);
+
+        app.warm_round(jiff::Timestamp::now());
+        assert!(heard().contains("refresh"));
+        let warm = || call(&app, "GET", "/api/state", Value::Null).1["warm"].clone();
+        assert_eq!(warm()["claude/work"]["state"], "pinged");
+        assert_eq!(warm()["claude/work"]["model"], "claude-haiku-4-5");
+        assert_eq!(warm()["claude/perso"]["state"], "pinged");
+        assert_eq!(warm()["claude/ghost"]["state"], "waiting");
+        assert_eq!(e.live_refresh_token().as_deref(), Some("r-perso"));
+
+        app.warm_round(jiff::Timestamp::now());
+        assert_eq!(warm()["claude/work"]["state"], "waiting");
+        assert!(warm()["claude/work"]["lastPing"].is_i64());
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        snapshot(&e, crate::fsx::now_ms(), 3, 3);
+        std::fs::write(places(&e).config, "[warm]\nclaude = [\"work\"]\n").unwrap();
+        app.warm_round(jiff::Timestamp::now());
+        assert_eq!(warm()["claude/work"]["state"], "pinged");
+        assert!(
+            warm().get("claude/perso").is_none(),
+            "a login taken off the list is forgotten"
+        );
+        work.assert();
+        perso.assert();
+    }
+
+    #[test]
+    fn keep_warm_leaves_an_open_window_alone() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        std::fs::write(places(&e).config, "[warm]\nclaude = [\"work\"]\n").unwrap();
+        let app = app(&e, &OFFLINE);
+        let resets = jiff::Timestamp::now() + jiff::SignedDuration::from_hours(2);
+        std::fs::write(
+            places(&e).snapshot,
+            json!({
+                "meta": {"schemaVersion": 2, "updatedAtMs": crate::fsx::now_ms()},
+                "payloads": [{"provider": "claude", "credential": "work", "usage":
+                    {"primary": {"usedPercent": 5, "windowMinutes": 300, "resetsAt": resets.to_string()}}}],
+            })
+            .to_string(),
+        )
+        .unwrap();
+        app.warm_round(jiff::Timestamp::now());
+        let warm = call(&app, "GET", "/api/state", Value::Null).1["warm"].clone();
+        assert_eq!(warm["claude/work"]["state"], "open");
     }
 
     #[test]

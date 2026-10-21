@@ -36,7 +36,7 @@ fn refuse(status: u16, message: impl Into<String>) -> Refusal {
 }
 
 /// A stream runs as long as the model writes, so only connecting is timed.
-fn client() -> Option<&'static reqwest::blocking::Client> {
+pub(super) fn client() -> Option<&'static reqwest::blocking::Client> {
     static CLIENT: OnceLock<Option<reqwest::blocking::Client>> = OnceLock::new();
     CLIENT
         .get_or_init(|| {

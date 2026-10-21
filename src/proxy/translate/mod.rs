@@ -320,6 +320,19 @@ pub fn collect(upstream: impl BufRead) -> Result<Value, (String, String)> {
     ))
 }
 
+/// Reads a stream to its end: whether the answer stopped, or the error it
+/// ended on.
+pub fn finished(from: Format, upstream: impl BufRead) -> Result<(), String> {
+    for e in decode::decode(from, upstream) {
+        match e {
+            Event::Stop(_) => return Ok(()),
+            Event::Error { message, .. } => return Err(message),
+            _ => {}
+        }
+    }
+    Err("the stream ended before the answer did".to_owned())
+}
+
 /// An upstream's error body, retold in the client's shape.
 pub fn error_message(body: &str) -> String {
     let v: Value = serde_json::from_str(body).unwrap_or(Value::Null);

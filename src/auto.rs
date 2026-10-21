@@ -112,7 +112,7 @@ fn full<'a>(auto: &Auto, name: &str, windows: &'a [Window]) -> Option<(&'a Windo
 }
 
 /// A window whose reset has passed since TokenGauge read it is empty again.
-fn current(f: &Figures, now: Timestamp) -> Figures {
+pub fn current(f: &Figures, now: Timestamp) -> Figures {
     match f {
         Figures::Known(ws) => Figures::Known(
             ws.iter()
