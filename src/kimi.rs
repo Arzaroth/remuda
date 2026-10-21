@@ -7,7 +7,7 @@ use crate::device::DeviceFlow;
 use crate::fsx::{Changed, read_json, update_json};
 use crate::oauth::{self, claims};
 use crate::paths;
-use crate::provider::{Identity, Login, PendingLogin, Provider};
+use crate::provider::{Format, Identity, Login, PendingLogin, Provider, Upstream};
 use crate::store::Entry;
 
 // Mirrors MoonshotAI/kimi-code's `packages/oauth`.
@@ -245,6 +245,27 @@ impl Provider for Kimi {
             }),
         }
         .begin()
+    }
+
+    fn formats(&self, _model: &str) -> Vec<Format> {
+        vec![Format::Chat, Format::Responses, Format::Messages]
+    }
+
+    fn upstream(&self, creds: &Value, format: Format, _model: &str) -> Option<Upstream> {
+        let path = match format {
+            Format::Chat => "chat/completions",
+            Format::Responses => "responses",
+            Format::Messages => "messages",
+        };
+        let mut headers = vec![(
+            "authorization",
+            format!("Bearer {}", self.access_token(creds)?),
+        )];
+        headers.extend(self.headers());
+        Some(Upstream {
+            url: format!("{}/{path}", self.api.api),
+            headers,
+        })
     }
 }
 

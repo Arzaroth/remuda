@@ -12,6 +12,33 @@ pub struct Identity {
     pub oauth_account: Option<Value>,
 }
 
+/// A wire format the proxy takes from clients and sends upstream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Format {
+    /// OpenAI's `/v1/chat/completions`.
+    Chat,
+    /// OpenAI's `/v1/responses`.
+    Responses,
+    /// Anthropic's `/v1/messages`.
+    Messages,
+}
+
+impl Format {
+    pub fn name(self) -> &'static str {
+        match self {
+            Format::Chat => "OpenAI chat completions",
+            Format::Responses => "OpenAI responses",
+            Format::Messages => "Anthropic messages",
+        }
+    }
+}
+
+/// Where the proxy sends a request that spends a login, and with what.
+pub struct Upstream {
+    pub url: String,
+    pub headers: Vec<(&'static str, String)>,
+}
+
 pub struct Login {
     pub creds: Value,
     pub identity: Identity,
@@ -94,4 +121,18 @@ pub trait Provider: Send + Sync {
         bail!("{} has no banked resets", self.name())
     }
     fn begin_login(&self) -> Result<Box<dyn PendingLogin>>;
+    /// The formats the CLI's inference endpoint takes for `model`, best
+    /// first. Empty when the proxy cannot spend this login.
+    fn formats(&self, _model: &str) -> Vec<Format> {
+        Vec::new()
+    }
+    /// Where a `format` request for `model` goes, spending `creds`.
+    fn upstream(&self, _creds: &Value, _format: Format, _model: &str) -> Option<Upstream> {
+        None
+    }
+    /// Brings a request body to what the endpoint accepts from a client
+    /// sending `user_agent`, or says why it cannot.
+    fn shape(&self, _format: Format, _body: &mut Value, _user_agent: Option<&str>) -> Result<()> {
+        Ok(())
+    }
 }

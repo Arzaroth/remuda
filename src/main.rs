@@ -352,6 +352,7 @@ fn main() -> Result<()> {
         );
         let app = std::sync::Arc::new(app);
         serve::watch(app.clone());
+        app.start();
         http::serve(app, listener, http::Limits::default());
         return Ok(());
     }
