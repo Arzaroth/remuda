@@ -548,3 +548,428 @@ pub fn describe(
     writeln!(out, "  {verb}: {why}")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{Config, Hours, Span};
+    use jiff::tz::TimeZone;
+
+    const H: i64 = 3_600_000;
+
+    /// Wednesday 2026-10-21, at `hhmm` UTC.
+    fn at(hhmm: &str) -> Zoned {
+        format!("2026-10-21T{hhmm}:00Z")
+            .parse::<Timestamp>()
+            .unwrap()
+            .to_zoned(TimeZone::UTC)
+    }
+
+    fn config() -> Config {
+        toml_edit::de::from_str(
+            r#"
+[schedules.workday]
+days  = ["mon", "tue", "wed", "thu", "fri"]
+hours = "09:00-18:00"
+
+[auto.claude]
+enabled = true
+
+[[auto.claude.rule]]
+when  = "workday"
+order = [["work"], ["perso"]]
+
+[[auto.claude.rule]]
+when    = "otherwise"
+order   = [["perso"], ["work"]]
+reserve = { work = "workday" }
+"#,
+        )
+        .unwrap()
+    }
+
+    /// A login with a 5-hour and a weekly window, `used` percent each,
+    /// resetting in `five` and `week` hours from `now`.
+    fn login(now: &Zoned, five: (u64, i64), week: (u64, i64)) -> Figures {
+        let t = |h: i64| {
+            Some(Timestamp::from_millisecond(now.timestamp().as_millisecond() + h * H).unwrap())
+        };
+        Figures::Known(vec![
+            Window {
+                minutes: Some(300),
+                used: five.0,
+                resets_at: t(five.1),
+            },
+            Window {
+                minutes: Some(10080),
+                used: week.0,
+                resets_at: t(week.1),
+            },
+        ])
+    }
+
+    fn run(
+        c: &Config,
+        now: &Zoned,
+        active: Option<&str>,
+        switched: Option<i64>,
+        f: &[(&str, Figures)],
+    ) -> Decision {
+        decide(&Input {
+            auto: &c.auto["claude"],
+            schedules: &c.schedules,
+            now,
+            active,
+            switched_at: switched.map(|h| {
+                Timestamp::from_millisecond(now.timestamp().as_millisecond() - h * H).unwrap()
+            }),
+            figures: &f.iter().map(|(n, x)| (n.to_string(), x.clone())).collect(),
+        })
+    }
+
+    fn switch_to(d: &Decision) -> Option<&str> {
+        match &d.action {
+            Action::Switch { to, .. } => Some(to),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn a_schedule_holds_its_days_and_hours_and_runs_past_midnight() {
+        let workday = &config().schedules["workday"];
+        assert!(contains(workday, &at("09:00")));
+        assert!(!contains(workday, &at("18:00")));
+        assert!(!contains(workday, &at("08:59")));
+        let nights = Schedule {
+            days: vec![Day::Tue],
+            hours: Some(Hours {
+                start: 22 * 60,
+                end: 6 * 60,
+            }),
+        };
+        assert!(
+            contains(&nights, &at("05:59")),
+            "Tuesday's night, on Wednesday"
+        );
+        assert!(!contains(&nights, &at("22:00")), "Wednesday has no night");
+        let weekend = Schedule {
+            days: vec![Day::Sat, Day::Sun],
+            hours: None,
+        };
+        assert!(!contains(&weekend, &at("12:00")));
+        assert_eq!(
+            next_start(&weekend, &at("12:00")).unwrap().to_string(),
+            "2026-10-24T00:00:00+00:00[UTC]"
+        );
+        assert_eq!(
+            next_start(workday, &at("12:00")).unwrap().to_string(),
+            "2026-10-22T09:00:00+00:00[UTC]"
+        );
+        assert_eq!(
+            next_start(workday, &at("08:00")).unwrap().to_string(),
+            "2026-10-21T09:00:00+00:00[UTC]"
+        );
+    }
+
+    #[test]
+    fn during_work_hours_the_first_tier_wins_over_a_better_score() {
+        let c = config();
+        let now = at("10:00");
+        let d = run(
+            &c,
+            &now,
+            Some("perso"),
+            None,
+            &[
+                ("work", login(&now, (10, 2), (10, 150))),
+                ("perso", login(&now, (10, 2), (10, 10))),
+            ],
+        );
+        assert_eq!(d.rule.as_deref(), Some("rule 1 (workday)"));
+        assert_eq!(switch_to(&d), Some("work"));
+    }
+
+    #[test]
+    fn a_maxed_login_is_left_at_once_for_the_next_tier() {
+        let c = config();
+        let now = at("10:00");
+        let d = run(
+            &c,
+            &now,
+            Some("work"),
+            Some(0),
+            &[
+                ("work", login(&now, (100, 2), (40, 50))),
+                ("perso", login(&now, (10, 2), (10, 100))),
+            ],
+        );
+        assert_eq!(switch_to(&d), Some("perso"));
+        assert!(
+            matches!(&d.action, Action::Switch { why, .. } if why == "work's 5-hour window maxed")
+        );
+    }
+
+    #[test]
+    fn at_night_a_reserved_login_waits_for_its_schedule() {
+        let c = config();
+        let now = at("20:00");
+        let d = run(
+            &c,
+            &now,
+            Some("perso"),
+            None,
+            &[
+                ("work", login(&now, (0, 2), (50, 30))),
+                ("perso", login(&now, (100, 2), (10, 100))),
+            ],
+        );
+        let work = d.logins.iter().find(|s| s.name == "work").unwrap();
+        assert_eq!(
+            (work.tier, work.note.as_str()),
+            (None, "kept for workday (Thu 09:00)")
+        );
+        assert_eq!(
+            d.action,
+            Action::Stay {
+                why: "every login it may pick is maxed or has no figures".into()
+            }
+        );
+    }
+
+    #[test]
+    fn at_night_a_reserved_login_whose_week_ends_first_is_spent_first() {
+        let c = config();
+        let now = at("20:00");
+        let d = run(
+            &c,
+            &now,
+            Some("perso"),
+            None,
+            &[
+                ("work", login(&now, (0, 2), (50, 6))),
+                ("perso", login(&now, (10, 2), (10, 100))),
+            ],
+        );
+        let work = d.logins.iter().find(|s| s.name == "work").unwrap();
+        assert_eq!(work.tier, Some(0));
+        assert!(work.note.starts_with("kept for workday, free now"));
+        assert_eq!(switch_to(&d), Some("work"));
+    }
+
+    #[test]
+    fn within_a_tier_the_headroom_a_reset_would_wipe_goes_first() {
+        let mut c = config();
+        let a = c.auto.get_mut("claude").unwrap();
+        a.rules.clear();
+        a.logins = vec!["a".into(), "b".into()];
+        let now = at("10:00");
+        let figures = [
+            ("a", login(&now, (0, 2), (60, 24))),
+            ("b", login(&now, (0, 2), (10, 144))),
+        ];
+        let d = run(&c, &now, Some("b"), None, &figures);
+        assert_eq!(d.rule, None);
+        assert_eq!(switch_to(&d), Some("a"), "40%/24h beats 90%/144h");
+        let d = run(&c, &now, Some("a"), None, &figures);
+        assert_eq!(
+            d.action,
+            Action::Stay {
+                why: "a is the best pick".into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_small_gain_or_a_recent_switch_keeps_the_login() {
+        let mut c = config();
+        let a = c.auto.get_mut("claude").unwrap();
+        a.rules.clear();
+        a.logins = vec!["a".into(), "b".into()];
+        let now = at("10:00");
+        let close = [
+            ("a", login(&now, (0, 2), (45, 50))),
+            ("b", login(&now, (0, 2), (50, 50))),
+        ];
+        let d = run(&c, &now, Some("b"), None, &close);
+        assert!(
+            matches!(&d.action, Action::Stay { why } if why.starts_with("b is within 25% of a"))
+        );
+
+        let far = [
+            ("a", login(&now, (0, 2), (50, 10))),
+            ("b", login(&now, (0, 2), (10, 150))),
+        ];
+        c.auto.get_mut("claude").unwrap().dwell = Span(3600);
+        let d = run(&c, &now, Some("b"), Some(0), &far);
+        assert_eq!(
+            d.action,
+            Action::Stay {
+                why: "stays on b until Wed 11:00, the least time on a login".into()
+            }
+        );
+        let d = run(&c, &now, Some("b"), Some(2), &far);
+        assert_eq!(switch_to(&d), Some("a"));
+    }
+
+    #[test]
+    fn a_login_without_figures_is_not_picked_and_the_active_one_is_not_left_blind() {
+        let c = config();
+        let now = at("10:00");
+        let d = run(
+            &c,
+            &now,
+            Some("perso"),
+            None,
+            &[
+                (
+                    "work",
+                    Figures::Missing("TokenGauge: 401 Unauthorized".into()),
+                ),
+                ("perso", login(&now, (10, 2), (10, 100))),
+            ],
+        );
+        assert_eq!(
+            d.action,
+            Action::Stay {
+                why: "perso is the best pick".into()
+            }
+        );
+        let d = run(
+            &c,
+            &now,
+            Some("work"),
+            None,
+            &[
+                (
+                    "work",
+                    Figures::Missing("TokenGauge: 401 Unauthorized".into()),
+                ),
+                ("perso", login(&now, (10, 2), (10, 100))),
+            ],
+        );
+        assert!(
+            matches!(&d.action, Action::Stay { why } if why.starts_with("work has no figures"))
+        );
+    }
+
+    #[test]
+    fn a_login_outside_the_rule_is_left_once_its_time_is_up() {
+        let c = config();
+        let now = at("10:00");
+        let f = [
+            ("work", login(&now, (10, 2), (10, 100))),
+            ("perso", login(&now, (10, 2), (10, 100))),
+        ];
+        let d = run(&c, &now, Some("other"), Some(0), &f);
+        assert!(matches!(d.action, Action::Stay { .. }));
+        let d = run(&c, &now, Some("other"), Some(1), &f);
+        assert_eq!(switch_to(&d), Some("work"));
+        let d = run(&c, &now, None, Some(0), &f);
+        assert_eq!(switch_to(&d), Some("work"), "nothing signed in");
+    }
+
+    #[test]
+    fn figures_are_held_back_until_tokengauge_has_caught_up() {
+        let usage = serde_json::json!({
+            "updatedAt": 1000,
+            "providers": {"claude": {"windows": [{"minutes": 300, "usedPercent": 5, "resetsAt": null}],
+                "accounts": {"work": {"error": "401 Unauthorized", "windows": []},
+                             "perso": {"stale": true, "staleReason": "timed out", "windows": []}}}}
+        });
+        let ms = |v| Timestamp::from_millisecond(v).ok();
+        assert_eq!(
+            figures(Some(&usage), "claude", None, ms(2000)),
+            Err("waiting for TokenGauge to fetch after the last switch".into())
+        );
+        assert_eq!(
+            figures(None, "claude", None, None),
+            Err("TokenGauge has written no figures".into())
+        );
+        assert_eq!(
+            figures(Some(&usage), "codex", None, None),
+            Err("TokenGauge has no figures for codex".into())
+        );
+        let f = figures(Some(&usage), "claude", Some("old"), ms(500)).unwrap();
+        assert_eq!(
+            f["work"],
+            Figures::Missing("TokenGauge: 401 Unauthorized".into())
+        );
+        assert_eq!(
+            f["perso"],
+            Figures::Missing("TokenGauge's figures are stale: timed out".into())
+        );
+        assert_eq!(
+            f["old"],
+            Figures::Known(vec![Window {
+                minutes: Some(300),
+                used: 5,
+                resets_at: None
+            }]),
+            "a snapshot naming no credential holds the active login's"
+        );
+    }
+
+    #[test]
+    fn a_live_login_auto_mode_cannot_keep_holds_it() {
+        use crate::ops::LiveState;
+        let c = config();
+        let now = at("10:00");
+        let cx = Context {
+            schedules: &c.schedules,
+            usage: None,
+            switched_at: None,
+            now: &now,
+        };
+        let why =
+            |live: LiveState| match assess(&c.auto["claude"], "claude", &live, &cx, None).action {
+                Action::Hold { why } => why,
+                other => panic!("{other:?}"),
+            };
+        assert_eq!(
+            why(LiveState::Unstored {
+                email: Some("x@example.com".into())
+            }),
+            "the CLI is on a login remuda has not stored (x@example.com): import it first"
+        );
+        assert!(
+            why(LiveState::Stored {
+                name: "work".into(),
+                synced: false
+            })
+            .contains("could not be confirmed")
+        );
+        assert_eq!(
+            why(LiveState::SignedOut),
+            "TokenGauge has written no figures"
+        );
+    }
+
+    #[test]
+    fn a_busy_cli_turns_a_switch_into_a_hold() {
+        let c = config();
+        let now = at("10:00");
+        let usage = serde_json::json!({"updatedAt": now.timestamp().as_millisecond(), "providers": {"claude": {
+            "windows": [], "accounts": {
+                "work": {"windows": [{"minutes": 300, "usedPercent": 1, "resetsAt": null}]},
+                "perso": {"windows": [{"minutes": 300, "usedPercent": 1, "resetsAt": null}]}}}}});
+        let cx = Context {
+            schedules: &c.schedules,
+            usage: Some(&usage),
+            switched_at: None,
+            now: &now,
+        };
+        let live = crate::ops::LiveState::Stored {
+            name: "perso".into(),
+            synced: true,
+        };
+        let d = assess(
+            &c.auto["claude"],
+            "claude",
+            &live,
+            &cx,
+            Some("waiting for every Codex session to end".into()),
+        );
+        assert_eq!(d.action, Action::Hold {
+            why: "would switch to work (work comes before perso), waiting for every Codex session to end".into()
+        });
+    }
+}
