@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-21
+
 ### Added
 
 - Auto mode ceilings: a window can count as full before 100% (`ceiling`), and
