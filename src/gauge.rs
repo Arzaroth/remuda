@@ -284,13 +284,18 @@ mod tests {
             .map(|w| {
                 (
                     w["title"].as_str().unwrap(),
+                    w["minutes"].as_u64().unwrap(),
                     w["usedPercent"].as_u64().unwrap(),
                 )
             })
             .collect();
         assert_eq!(
             titles,
-            [("5 hours", 16), ("Weekly", 100), ("Fable only", 3)]
+            [
+                ("5 hours", 300, 16),
+                ("Weekly", 10080, 100),
+                ("Fable only", 10080, 3)
+            ]
         );
         let codex = &usage["providers"]["codex"];
         assert_eq!(codex["stale"], true);
@@ -302,9 +307,10 @@ mod tests {
 
         let legacy = json!([{"provider": "claude", "usage": {"primary": {"usedPercent": 5}}}]);
         std::fs::write(&file, legacy.to_string()).unwrap();
+        let window = &read(&file).unwrap()["providers"]["claude"]["windows"][0];
         assert_eq!(
-            read(&file).unwrap()["providers"]["claude"]["windows"][0]["title"],
-            "Usage"
+            (&window["title"], &window["minutes"]),
+            (&json!("Usage"), &Value::Null)
         );
 
         let named = json!({
