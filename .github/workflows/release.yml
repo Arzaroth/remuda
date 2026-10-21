@@ -12,6 +12,7 @@ on:
       - '.github/workflows/release.yml'
       - 'scripts/install.sh'
       - 'scripts/package.sh'
+      - 'scripts/arch.sh'
       - 'packaging/**'
       - 'systemd/**'
       - 'Cargo.toml'
@@ -155,7 +156,90 @@ jobs:
           done
           ls -l dist
 
-      # What scripts/install.sh checks a download against before running it.
+      - name: Upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dist-assets
+          path: dist/*
+          if-no-files-found: error
+
+  # makepkg needs an Arch system. The -bin package repackages the archives the
+  # job above made; the source one is built to prove its PKGBUILD, and only
+  # that PKGBUILD ships.
+  arch:
+    needs: assets
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Tools
+        run: pacman -Syu --noconfirm --needed base-devel pacman-contrib cargo git
+
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.REF }}
+          persist-credentials: false
+
+      - name: The tag
+        run: |
+          if [[ $PUBLISH == true ]]; then
+            echo "REF_NAME=${REF#refs/tags/}" >>"$GITHUB_ENV"
+          else
+            echo "REF_NAME=v$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)" >>"$GITHUB_ENV"
+          fi
+
+      - name: The release archives
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist-assets
+          path: dist
+
+      - name: Build the packages
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          version="${REF_NAME#v}"
+          safe="${REF_NAME//[^A-Za-z0-9._-]/_}"
+          git config --global --add safe.directory "$PWD"
+          if [[ $PUBLISH == true ]]; then
+            curl -fsSL "https://github.com/$REPOSITORY/archive/refs/tags/$REF_NAME.tar.gz" -o source.tar.gz
+          else
+            git archive --prefix="remuda-$version/" HEAD -o source.tar.gz
+          fi
+          useradd -m builder
+          chown -R builder .
+          su builder -c "scripts/arch.sh bin $version dist"
+          su builder -c "scripts/arch.sh source $version dist source.tar.gz"
+          mkdir -p out
+          cp dist/remuda-bin-*.pkg.tar.zst out/
+          tar -czf "out/remuda-$safe-pkgbuild.tar.gz" -C dist/arch .
+
+      - name: Upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dist-arch
+          path: out/*
+          if-no-files-found: error
+
+  checksums:
+    needs: [assets, arch]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.REF }}
+          persist-credentials: false
+
+      - name: Download
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+
+      # What scripts/install.sh checks a download against before running it,
+      # taken once every asset is in.
       - name: SHA256SUMS
         run: |
           cd dist
@@ -176,7 +260,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: assets
+    needs: checksums
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
@@ -218,4 +302,5 @@ jobs:
             dist/*.tar.gz
             dist/*.deb
             dist/*.rpm
+            dist/*.pkg.tar.zst
             dist/SHA256SUMS
