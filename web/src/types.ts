@@ -105,6 +105,12 @@ export type Proxy = {
   routes: ProxyRoute[];
 };
 
+export type WarmStatus =
+  | { state: 'pinged'; at: number; model: string; lastPing?: number }
+  | { state: 'failed'; at: number; error: string; lastPing?: number }
+  | { state: 'open'; resetsAt: number; lastPing?: number }
+  | { state: 'waiting'; why: string; lastPing?: number };
+
 export type State = {
   store: string;
   providers: Provider[];
@@ -114,5 +120,6 @@ export type State = {
   usage: { updatedAt: number | null; providers: Record<string, Usage> } | null;
   shown: Record<string, ProviderShown>;
   auto?: Record<string, AutoStatus | { enabled: false } | string>;
+  warm?: Record<string, WarmStatus>;
   proxy: Proxy;
 };

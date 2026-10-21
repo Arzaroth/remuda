@@ -5,6 +5,7 @@ import { ago, date, DAY, HOUR, plural, span, until, usedTone } from '../format';
 import { act, now, store } from '../state';
 import type { Credential, Live, Provider, Window } from '../types';
 import { carriedSince, dropping, dropsLive, overwrite, planFor, shownFor, taken } from '../usage';
+import { warmLine } from '../warm';
 import { Icon } from './Icon';
 import { Meter } from './Meter';
 
@@ -320,6 +321,12 @@ function Row(props: { c: Credential; live: Live | undefined }) {
         <Lifetime title="Access token" at={c().expiresAt} horizon={8 * HOUR} warnBelow={HOUR} />
         <Lifetime title="Sign-in lasts" at={c().refreshTokenExpiresAt} horizon={30 * DAY} warnBelow={3 * DAY} />
       </div>
+      <Show when={store.s!.warm?.[`${c().provider}/${c().name}`]}>
+        {(w) => {
+          const line = () => warmLine(w(), now());
+          return <div class={`aside warm ${line().tone}`}>{line().text}</div>;
+        }}
+      </Show>
       <footer class="actions">
         <button
           class="btn go"

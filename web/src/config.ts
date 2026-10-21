@@ -17,7 +17,11 @@ export function percent(text: string): number | null {
   const n = Math.round(Number(text));
   return text.trim() && Number.isFinite(n) ? Math.min(100, Math.max(1, n)) : null;
 }
-export type Config = { schedules?: Record<string, Schedule>; auto?: Record<string, Auto> };
+export type Config = {
+  schedules?: Record<string, Schedule>;
+  auto?: Record<string, Auto>;
+  warm?: Record<string, string[]>;
+};
 export type Problem = { at: string; message: string };
 export type Loaded = { config: Config; version: string; problems: Problem[]; path: string };
 
@@ -32,7 +36,7 @@ export const DAYS: [Day, string][] = [
   ['sun', 'Sun'],
 ];
 
-const OPTIONAL_TABLES = new Set(['reserve', 'schedules', 'auto', 'ceilings']);
+const OPTIONAL_TABLES = new Set(['reserve', 'schedules', 'auto', 'ceilings', 'warm']);
 const unset = (k: string, v: unknown): boolean =>
   v === undefined ||
   v === false ||
@@ -130,4 +134,14 @@ export function headline(s: Status, active: string | null): { text: string; tone
   if (a.kind === 'switch')
     return { text: s.switched?.at === s.at ? `Switched to ${a.to}` : `Switching to ${a.to}`, tone: 'good' };
   return { text: active ? `Stays on ${active}` : 'Stays', tone: 'good' };
+}
+
+/** Adds `name` to the logins kept warm for `provider`, or takes it off. */
+export function toggleWarm(c: Config, provider: string, name: string) {
+  const all = (c.warm ??= {});
+  const list = (all[provider] ??= []);
+  const i = list.indexOf(name);
+  if (i >= 0) list.splice(i, 1);
+  else list.push(name);
+  if (!list.length) delete all[provider];
 }

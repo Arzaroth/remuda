@@ -21,6 +21,7 @@ import {
   scheduleName,
   scheduleUses,
   span,
+  toggleWarm,
 } from '../config';
 import { ago } from '../format';
 import { now, store, toast } from '../state';
@@ -265,8 +266,11 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
   const at = () => `auto.${props.p.id}`;
   const own = () =>
     props.problems.filter(
-      (p) => (p.at === at() || p.at.startsWith(`${at()}.`)) && !p.at.startsWith(`${at()}.rule[`),
+      (p) =>
+        p.at === `warm.${props.p.id}` ||
+        ((p.at === at() || p.at.startsWith(`${at()}.`)) && !p.at.startsWith(`${at()}.rule[`)),
     );
+  const warm = () => draft.c.warm?.[props.p.id] ?? [];
   const addRule = () =>
     set((x) =>
       (x.rule ??= []).push({ when: Object.keys(draft.c.schedules ?? {})[0] ?? OTHERWISE, order: [[]] }),
@@ -369,6 +373,22 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
           </For>
         </div>
       </div>
+      <Show when={loginsOf(props.p.id).length}>
+        <div class="pickable">
+          <span class="aside">Keep the 5-hour window open: reopened with a one-token ping as soon as it closes, even with auto mode off</span>
+          <div class="chips">
+            <For each={loginsOf(props.p.id)}>
+              {(name) => (
+                <Chip
+                  name={name}
+                  on={warm().includes(name)}
+                  onClick={() => edit((c) => toggleWarm(c, props.p.id, name))}
+                />
+              )}
+            </For>
+          </div>
+        </div>
+      </Show>
       <Show when={loginsOf(props.p.id).length}>
         <div class="pickable">
           <span class="aside">A login's own ceiling for its shortest window (Claude's 5-hour one)</span>
