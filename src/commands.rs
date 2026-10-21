@@ -1443,6 +1443,34 @@ mod tests {
     }
 
     #[test]
+    fn a_config_rename_and_rm_cannot_update_is_said_after_their_message() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let config = e.tmp.path().join("config.toml");
+        std::fs::create_dir(&config).unwrap();
+        let mut out = Vec::new();
+        rename(&e.store, &config, &e.claude, "work", "job", &mut out).unwrap();
+        let said = text(out);
+        assert!(
+            said.starts_with("renamed claude/work to claude/job\nwarning: "),
+            "{said}"
+        );
+        assert!(said.contains("still names claude/work"), "{said}");
+        let mut out = Vec::new();
+        remove(
+            &e.store,
+            &config,
+            &e.claude,
+            &LiveState::SignedOut,
+            "job",
+            &mut out,
+        )
+        .unwrap();
+        assert!(text(out).starts_with("removed claude/job\nwarning: "));
+        assert!(e.store.get("claude", "job").unwrap().is_none());
+    }
+
+    #[test]
     fn rename_says_where_the_credential_went() {
         let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);
