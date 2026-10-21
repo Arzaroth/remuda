@@ -1,5 +1,5 @@
 import { For } from 'solid-js';
-import { brand } from '../brand';
+import { Brand } from './Brand';
 import { store } from '../state';
 import { inUse } from '../usage';
 
@@ -11,7 +11,7 @@ export function Tabs(props: { value: string; onChange: (id: string) => void }) {
       <For each={tabs()}>
         {(t) => (
           <button aria-pressed={props.value === t.id} onClick={() => props.onChange(t.id)}>
-            {t.id !== 'all' && <span class="brand-dot" style={{ background: brand(t.id) }} />}
+            {t.id !== 'all' && <Brand provider={t.id} name={t.name} size={16} />}
             {t.name}
             <span class="count">{count(t.id)}</span>
           </button>

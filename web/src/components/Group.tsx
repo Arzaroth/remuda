@@ -1,11 +1,11 @@
 import { createSignal, For, Match, onMount, Show, Switch } from 'solid-js';
-import { brand } from '../brand';
 import { createConfirm } from '../confirm';
 import { ago, date, DAY, HOUR, plural, span, until, usedTone } from '../format';
 import { act, now, store } from '../state';
 import type { Credential, Live, Provider, Window } from '../types';
 import { carriedSince, dropping, dropsLive, overwrite, planFor, shownFor, taken } from '../usage';
 import { warmLine } from '../warm';
+import { Brand } from './Brand';
 import { Icon } from './Icon';
 import { Meter } from './Meter';
 
@@ -17,8 +17,9 @@ export function Group(props: { p: Provider; titled: boolean }) {
     <section class="group">
       <Show when={props.titled}>
         <div class="group-head">
-          <span class="brand-dot" style={{ background: brand(props.p.id) }} />
+          <Brand provider={props.p.id} name={props.p.name} size={26} />
           <h2>{props.p.name}</h2>
+          <span class="group-count">{creds().length}</span>
         </div>
       </Show>
       <Show when={live()}>{(l) => <LiveNote p={props.p} live={l()} />}</Show>

@@ -1,4 +1,5 @@
 import { createMemo, For, Show } from 'solid-js';
+import { Brand } from './Brand';
 import { createStore } from 'solid-js/store';
 import { brand } from '../brand';
 import { date, plural, until, usedTone } from '../format';
@@ -45,9 +46,13 @@ function Tile(props: { p: Provider }) {
   };
   return (
     <div class="tile" style={{ '--brand': brand(props.p.id) }}>
+      <Brand provider={props.p.id} size={230} ghost />
       <div class="tile-head">
-        <b>{props.p.name}</b>
-        <span>{plural(creds().length, 'login')}</span>
+        <Brand provider={props.p.id} name={props.p.name} size={62} scorched />
+        <div>
+          <b>{props.p.name}</b>
+          <span>{plural(creds().length, 'login')}</span>
+        </div>
       </div>
       <Show
         when={combined().length}

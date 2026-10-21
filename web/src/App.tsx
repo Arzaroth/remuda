@@ -1,4 +1,5 @@
 import { createSignal, For, Show } from 'solid-js';
+import { Iron } from './components/Brand';
 import { act, store } from './state';
 import { inUse } from './usage';
 import { remember, remembered } from './storage';
@@ -25,6 +26,7 @@ export function App() {
   };
   return (
     <>
+      <Iron />
       <main>
         <div class="top">
           <div class="brand">

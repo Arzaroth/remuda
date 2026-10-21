@@ -2,6 +2,7 @@ import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from
 import { createStore, produce, reconcile, unwrap } from 'solid-js/store';
 import { api } from '../api';
 import { brand } from '../brand';
+import { Brand } from './Brand';
 import {
   auto,
   canonical,
@@ -278,7 +279,7 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
   return (
     <div class="auto-card" style={{ '--brand': brand(props.p.id) }}>
       <div class="auto-card-head">
-        <span class="brand-dot" style={{ background: brand(props.p.id) }} />
+        <Brand provider={props.p.id} name={props.p.name} size={22} />
         <h3>{props.p.name}</h3>
         <button
           class="switch"
@@ -374,8 +375,12 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
         </div>
       </div>
       <Show when={props.p.warm && loginsOf(props.p.id).length}>
-        <div class="pickable">
-          <span class="aside">Keep the 5-hour window open: reopened with the smallest request as soon as it closes, even with auto mode off</span>
+        <div class="pickable keep-warm">
+          <span class="aside">Keep the 5-hour window open</span>
+          <span class="aside">
+            The moment a picked login's window closes, remuda opens a new one with the smallest request it takes. Works
+            with auto mode off.
+          </span>
           <div class="chips">
             <For each={loginsOf(props.p.id)}>
               {(name) => (
