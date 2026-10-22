@@ -88,6 +88,7 @@ mod tests {
     struct Test {
         providers: Vec<Box<dyn Provider>>,
         settings: settings::Settings,
+        spent: Mutex<Vec<(String, Option<String>)>>,
     }
 
     impl Backend for Test {
@@ -96,6 +97,12 @@ mod tests {
         }
         fn providers(&self) -> Vec<&dyn Provider> {
             self.providers.iter().map(|p| p.as_ref()).collect()
+        }
+        fn spent(&self, provider: &str, refused: Option<&str>) {
+            self.spent
+                .lock()
+                .unwrap()
+                .push((provider.to_owned(), refused.map(str::to_owned)));
         }
     }
 
@@ -113,7 +120,7 @@ mod tests {
     }
 
     struct Running {
-        _backend: Arc<Test>,
+        backend: Arc<Test>,
         control: Control,
         port: u16,
     }
@@ -122,13 +129,14 @@ mod tests {
         let backend = Arc::new(Test {
             providers,
             settings: on(),
+            spent: Mutex::default(),
         });
         let control = Control::default();
         let weak: Weak<dyn Backend> = Arc::downgrade(&backend) as Weak<dyn Backend>;
         control.apply(weak, &backend.settings);
         let port = control.status().0.expect("the proxy did not start");
         Running {
-            _backend: backend,
+            backend,
             control,
             port,
         }
@@ -305,6 +313,11 @@ mod tests {
             &json!({"model": "claude-x", "messages": []}),
         );
         assert_eq!(status, 429);
+        assert_eq!(
+            *p.backend.spent.lock().unwrap(),
+            [("claude".to_owned(), None)],
+            "an upstream's own refusal is not the login's"
+        );
         assert!(head.contains("retry-after: 30"), "{head}");
         assert_eq!(body, r#"{"type":"error"}"#);
     }
@@ -335,6 +348,11 @@ mod tests {
         );
         assert_eq!(status, 503);
         assert!(body.contains("signed out"), "{body}");
+        let told = p.backend.spent.lock().unwrap().clone();
+        assert_eq!(told.len(), 2);
+        assert!(told.iter().all(|(id, _)| id == "claude"));
+        assert!(told[0].1.as_deref().unwrap().contains("expired"));
+        assert!(told[1].1.as_deref().unwrap().contains("signed out"));
     }
 
     const CLAUDE_HELLO: &str = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"usage\":{\"input_tokens\":3}}}\n\n\
@@ -585,6 +603,7 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
         let backend: Arc<dyn Backend> = Arc::new(Test {
             providers: Vec::new(),
             settings: on(),
+            spent: Mutex::default(),
         });
         let off = settings::Settings {
             enabled: false,

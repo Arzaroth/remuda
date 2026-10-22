@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::fsx::{lock_file, now_ms};
+use crate::fsx::now_ms;
 use crate::store::Store;
 
 /// Past this size the log moves to `.log.1.jsonl`, replacing the one there,
@@ -108,6 +108,12 @@ impl Event {
     fn same_subject(&self, other: &Event) -> bool {
         self.kind == other.kind && self.provider == other.provider && self.name == other.name
     }
+
+    /// Whether `other` is about this event's login, or about any of its
+    /// provider's when this event names none.
+    fn touches(&self, other: &Event) -> bool {
+        self.provider == other.provider && (self.name.is_none() || self.name == other.name)
+    }
 }
 
 fn path(store: &Store) -> PathBuf {
@@ -121,33 +127,54 @@ fn rotated_path(store: &Store) -> PathBuf {
 /// Best effort, as the other records: a log that cannot be written never
 /// fails the command it describes.
 pub fn note(store: &Store, event: Event) {
-    if let Err(e) = append(store, &event, false) {
-        eprintln!("warning: could not log this: {e:#}");
-    }
+    append(store, &event, false);
 }
 
-/// Logs a failure only when the latest event about the same thing does not
-/// already say it, so a login every timer run fails to refresh is one line
-/// rather than one per run.
+/// Logs a failure unless the log already says it and nothing about that
+/// login has gone right since, so a login every timer run fails to refresh
+/// is one line rather than one per run.
 pub fn note_once(store: &Store, event: Event) {
-    if let Err(e) = append(store, &event, true) {
+    append(store, &event, true);
+}
+
+fn append(store: &Store, event: &Event, once: bool) {
+    if let Err(e) = try_append(store, event, once) {
         eprintln!("warning: could not log this: {e:#}");
     }
 }
 
-fn append(store: &Store, event: &Event, once: bool) -> Result<()> {
+fn already_said(logged: &[Event], event: &Event) -> bool {
+    for e in logged.iter().rev().filter(|e| event.touches(e)) {
+        if e.ok {
+            return false;
+        }
+        if e.same_subject(event) {
+            return e.message == event.message;
+        }
+    }
+    false
+}
+
+fn lock(store: &Store) -> Result<File> {
+    let path = store.root().join(".log.lock");
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .mode(0o600)
+        .open(&path)
+        .with_context(|| format!("failed to open {}", path.display()))?;
+    file.lock()
+        .with_context(|| format!("failed to lock {}", path.display()))?;
+    Ok(file)
+}
+
+fn try_append(store: &Store, event: &Event, once: bool) -> Result<()> {
     if !store.root().is_dir() {
         return Ok(());
     }
-    let _lock = lock_file(&store.root().join(".log.lock"))?;
-    if once
-        && !event.ok
-        && read(store)
-            .iter()
-            .rev()
-            .find(|e| e.same_subject(event))
-            .is_some_and(|last| !last.ok && last.message == event.message)
-    {
+    let _lock = lock(store)?;
+    if once && !event.ok && already_said(&read_unlocked(store), event) {
         return Ok(());
     }
     let path = path(store);
@@ -185,7 +212,16 @@ fn ends_a_line(file: &mut File) -> Result<bool> {
 }
 
 /// Every event kept, oldest first. A line that does not parse is skipped.
+/// The log's lock keeps a rotation from landing between the two reads.
 pub fn read(store: &Store) -> Vec<Event> {
+    if !store.root().is_dir() {
+        return Vec::new();
+    }
+    let _lock = lock(store);
+    read_unlocked(store)
+}
+
+fn read_unlocked(store: &Store) -> Vec<Event> {
     [rotated_path(store), path(store)]
         .iter()
         .filter_map(|p| fs::read_to_string(p).ok())
@@ -260,8 +296,10 @@ mod tests {
         let (_tmp, store) = store();
         note(&store, failed("x"));
         use std::os::unix::fs::PermissionsExt;
-        let mode = fs::metadata(path(&store)).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o600);
+        for file in [path(&store), store.root().join(".log.lock")] {
+            let mode = fs::metadata(file).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
     }
 
     #[test]
@@ -282,6 +320,22 @@ mod tests {
         );
         note_once(&store, failed("timed out"));
         assert_eq!(read(&store).len(), 5);
+
+        let provider_wide = || Event::new(Kind::Switch, false, "busy").about("claude", None);
+        note_once(&store, provider_wide());
+        note_once(&store, provider_wide());
+        assert_eq!(read(&store).len(), 6);
+        note(
+            &store,
+            Event::new(Kind::Store, true, "signed in").about("claude", Some("perso")),
+        );
+        note_once(&store, provider_wide());
+        note_once(&store, failed("timed out"));
+        assert_eq!(
+            read(&store).len(),
+            8,
+            "a success about any login clears a failure about the CLI, not one about another login"
+        );
     }
 
     #[test]

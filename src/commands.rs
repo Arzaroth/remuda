@@ -458,7 +458,10 @@ pub fn refresh(
             }
             if !entry.verified {
                 let why = "not refreshing, it does not match its sidecar";
-                logbook::note_once(store, refreshing(&entry, false, why));
+                logbook::note_once(
+                    store,
+                    Event::new(Kind::Refresh, false, why).about(p.id(), Some(&entry.name)),
+                );
                 report.problem(err, format!("{}: {why}", entry.qualified()))?;
                 continue;
             }
@@ -477,16 +480,12 @@ pub fn refresh(
             if !scope.force && !due {
                 continue;
             }
-            match ops::refresh_entry(store, p, &mut entry).and_then(|()| store.save(&entry)) {
+            match ops::refresh_saved(store, p, &mut entry) {
                 Ok(()) => {
-                    logbook::note(store, refreshing(&entry, true, "refreshed"));
                     writeln!(out, "{}: refreshed", entry.qualified())?;
                     report.refreshed.push(entry.qualified());
                 }
-                Err(e) => {
-                    logbook::note_once(store, refreshing(&entry, false, format!("{e:#}")));
-                    report.problem(err, format!("{}: {e:#}", entry.qualified()))?
-                }
+                Err(e) => report.problem(err, format!("{}: {e:#}", entry.qualified()))?,
             }
         }
     }
@@ -494,10 +493,6 @@ pub fn refresh(
         0 => Ok(()),
         n => Err(Failed(n).into()),
     }
-}
-
-fn refreshing(entry: &Entry, ok: bool, message: impl Into<String>) -> Event {
-    Event::new(Kind::Refresh, ok, message).about(&entry.provider, Some(&entry.name))
 }
 
 pub fn label(
@@ -1015,6 +1010,16 @@ mod tests {
             e.stored_refresh_token("active").as_deref(),
             Some("r-active")
         );
+        let logged = logbook::read(&e.store);
+        assert_eq!(logged.len(), 1);
+        assert_eq!(
+            (
+                logged[0].subject().as_str(),
+                logged[0].ok,
+                logged[0].message.as_str()
+            ),
+            ("claude/stale", true, "refreshed")
+        );
     }
 
     #[test]
@@ -1046,6 +1051,11 @@ mod tests {
         assert!(result.is_err());
         assert!(text(err).contains("not refreshing"));
         assert_eq!(e.stored_refresh_token("work").as_deref(), Some("r-work"));
+        let logged = logbook::read(&e.store);
+        assert_eq!(
+            (logged[0].subject().as_str(), logged[0].ok),
+            ("claude", false)
+        );
     }
 
     #[test]
@@ -1295,6 +1305,16 @@ mod tests {
         );
         let entry = e.store.get("claude", "new").unwrap().unwrap();
         assert_eq!(e.stored_refresh_token("new").as_deref(), Some("r-login"));
+        let logged = logbook::read(&e.store);
+        assert_eq!(
+            (logged[0].kind, logged[0].subject().as_str()),
+            (Kind::Store, "claude/new")
+        );
+        assert!(
+            logged[0]
+                .message
+                .starts_with("signed in and stored claude/new")
+        );
         assert_eq!(
             entry.meta.oauth_account.as_ref().unwrap()["fullName"],
             "Someone"

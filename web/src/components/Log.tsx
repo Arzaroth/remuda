@@ -40,16 +40,19 @@ export function Log() {
   const [error, setError] = createSignal<string | null>(null);
   const [provider, setProvider] = createSignal<string | null>(null);
   const [failures, setFailures] = createSignal(false);
+  let fetches = 0;
   createEffect(
-    on(now, () =>
+    on(now, () => {
+      const seq = ++fetches;
       api<{ events: LogEvent[] }>('/api/log').then(
         (r) => {
+          if (seq !== fetches) return;
           setEvents(r.events);
           setError(null);
         },
-        (e) => setError((e as Error).message),
-      ),
-    ),
+        (e) => seq === fetches && setError((e as Error).message),
+      );
+    }),
   );
   const shown = createMemo(() => days(events() ?? [], { provider: provider(), failures: failures() }));
   return (

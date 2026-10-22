@@ -278,12 +278,16 @@ impl App {
                             let error = format!("{e:#}");
                             if before["error"].as_str() != Some(error.as_str()) {
                                 eprintln!("keep warm: could not ping {key}: {error}");
-                            }
-                            logbook::note_once(
-                                &self.store,
-                                Event::new(Kind::Warm, false, format!("could not ping: {error}"))
+                                logbook::note(
+                                    &self.store,
+                                    Event::new(
+                                        Kind::Warm,
+                                        false,
+                                        format!("could not ping: {error}"),
+                                    )
                                     .about(&planned.provider, Some(&planned.name)),
-                            );
+                                );
+                            }
                             json!({"state": "failed", "at": at, "error": error,
                                    "lastPing": at, "lastOk": false})
                         }
@@ -314,6 +318,7 @@ impl App {
                 let mut seen = self.auto.lock().unwrap();
                 if seen.get("error").and_then(Value::as_str) != Some(&format!("{e:#}")) {
                     eprintln!("auto mode: {e:#}");
+                    logbook::note(&self.store, Event::new(Kind::Auto, false, format!("{e:#}")));
                 }
                 *seen = BTreeMap::from([("error".to_owned(), json!(format!("{e:#}")))]);
                 return;
@@ -366,17 +371,17 @@ impl App {
                         seen["error"] = json!(format!("{e:#}"));
                         if last.map(|l| &l["error"]) != Some(&seen["error"]) {
                             eprintln!("auto mode: could not switch {} to {to}: {e:#}", p.name());
+                            logbook::note(
+                                &self.store,
+                                Event::new(
+                                    Kind::Switch,
+                                    false,
+                                    format!("could not switch to {to}: {e:#}"),
+                                )
+                                .about(p.id(), None)
+                                .by(By::Auto),
+                            );
                         }
-                        logbook::note_once(
-                            &self.store,
-                            Event::new(
-                                Kind::Switch,
-                                false,
-                                format!("could not switch to {to}: {e:#}"),
-                            )
-                            .about(p.id(), None)
-                            .by(By::Auto),
-                        );
                     }
                 }
             } else if last.map(gist) != Some(gist(&seen)) {
@@ -857,7 +862,6 @@ impl proxy::Backend for App {
             }
             _ => return,
         };
-        drop(all);
         logbook::note(&self.store, event.about(provider, None));
     }
 }
@@ -1461,6 +1465,12 @@ mod tests {
         let warm = || call(&app, "GET", "/api/state", Value::Null).1["warm"].clone();
         assert_eq!(warm()["claude/work"]["state"], "pinged");
         assert_eq!(warm()["claude/work"]["model"], "claude-haiku-4-5");
+        let pinged: Vec<String> = logbook::read(&e.store)
+            .into_iter()
+            .filter(|e| e.kind == Kind::Warm && e.ok)
+            .map(|e| e.subject())
+            .collect();
+        assert_eq!(pinged, ["claude/work", "claude/perso"]);
         assert_eq!(warm()["claude/perso"]["state"], "pinged");
         assert_eq!(warm()["claude/ghost"]["state"], "waiting");
         assert_eq!(e.live_refresh_token().as_deref(), Some("r-perso"));
@@ -1619,12 +1629,17 @@ mod tests {
 
         assert_eq!(e.live_refresh_token().as_deref(), Some("r-perso"));
         let logged = logbook::read(&e.store);
-        assert_eq!(logged.len(), 1, "{logged:?}");
+        let seen: Vec<(Kind, String, bool)> =
+            logged.iter().map(|e| (e.kind, e.subject(), e.ok)).collect();
         assert_eq!(
-            (logged[0].kind, logged[0].subject().as_str(), logged[0].ok),
-            (Kind::Switch, "claude", false)
+            seen,
+            [
+                (Kind::Refresh, "claude/work".to_owned(), false),
+                (Kind::Switch, "claude".to_owned(), false),
+            ],
+            "the refresh before the switch and the switch fail once each"
         );
-        assert!(logged[0].message.starts_with("could not switch to work: "));
+        assert!(logged[1].message.starts_with("could not switch to work: "));
         let (_, state) = call(&app, "GET", "/api/state", Value::Null);
         let claude = &state["auto"]["claude"];
         assert_eq!(claude["decision"]["action"]["to"], "work");
@@ -1846,6 +1861,16 @@ mod tests {
         let (status, r) = call(&app, "POST", "/api/reset", json!({"name": "work"}));
         assert_eq!(status, 200, "{r}");
         assert_eq!(r["message"], "claude/work: banked reset applied");
+        let logged = logbook::read(&e.store);
+        assert_eq!(
+            (
+                logged[0].kind,
+                logged[0].subject().as_str(),
+                logged[0].ok,
+                logged[0].by
+            ),
+            (Kind::Reset, "claude/work", true, Some(By::Page))
+        );
         asked.assert();
         spent.assert();
         assert_eq!(nudged(), "{\"cmd\":\"refresh\"}\n");
@@ -1931,6 +1956,11 @@ mod tests {
         );
         assert!(error.len() < 400, "{error}");
         assert!(nudges.accept().is_err(), "a failed reset nudged TokenGauge");
+        let logged = logbook::read(&e.store);
+        assert_eq!(
+            (logged[0].kind, logged[0].ok, logged[0].message.as_str()),
+            (Kind::Reset, false, error)
+        );
     }
 
     #[test]
