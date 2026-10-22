@@ -29,7 +29,8 @@ For each CLI whose auto mode is on (`App::auto_round`), under the store lock:
    daemon has likely stopped), or one older than the CLI's last switch (by hand
    or by auto mode): it waits for TokenGauge to fetch again. A snapshot from
    before TokenGauge stamped its time is as old as its file. A login whose figures carry an error, are stale or are missing
-   cannot be picked this round. A snapshot that names no credential (before
+   cannot be picked this round, nor can one a `remuda run` session holds
+   ([run.md](run.md)). A snapshot that names no credential (before
    TokenGauge 0.37) holds the active login's figures only.
 3. Decide (`auto::decide`, below).
 4. If the decision is a switch, switch as `remuda use` does, never

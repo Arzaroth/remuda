@@ -39,7 +39,8 @@ file. Any other provider refuses.
 ## `remuda rm <name>`
 
 Deletes the credential and its sidecar, and takes it out of `config.toml`.
-Refuses the active credential: switch away first.
+Refuses the active credential: switch away first. Refuses one a `remuda run`
+session holds as well ([run.md](run.md)).
 
 ## Sources
 

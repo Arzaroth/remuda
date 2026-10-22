@@ -83,6 +83,8 @@ records when each provider was last switched; see
 [../features/switching.md](../features/switching.md). None is under a
 provider directory, and all are dot-files, so none is a credential to
 TokenGauge. They are written through `fsx::write_record`, best effort.
+`<store>/.runs/<cli>/<name>/` holds a `remuda run` session's directory and
+lock while it runs; see [../features/run.md](../features/run.md).
 `<store>/.log.jsonl` (and `.log.1.jsonl` once it rotates) is the log, appended
 to under `<store>/.log.lock`; see [../features/log.md](../features/log.md).
 

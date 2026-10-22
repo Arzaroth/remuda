@@ -4,7 +4,9 @@
 (`ops::switch_by`, with who asked; auto mode's `ops::switch_when` also says why):
 
 1. Sync the live login back (`ops::sync_live`).
-2. If the target is already active, say so and stop.
+2. If the target is already active, say so and stop. A target a `remuda run`
+   session holds is refused, since its tokens would then be in two places
+   ([run.md](run.md)).
 3. If the live login is unstored, matched only by an account id that could not
    be confirmed, or one remuda cannot store (a Codex API key), refuse:
    switching would lose it. `--discard` switches anyway.

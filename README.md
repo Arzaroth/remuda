@@ -104,6 +104,9 @@ take `-p <cli>`: `claude` (the default), `codex`, `cursor`, `glm`, `grok`,
 | `remuda import <name> [-p <cli>]` | Store the login the CLI is signed into right now |
 | `remuda login <name> [-p <cli>] [--no-browser]` | Sign another account in through the browser and store it, without touching the CLI |
 | `remuda use <name>` | Make a stored credential the one its CLI uses |
+| `remuda run <name> [-- args]` | Start Claude Code or Codex on a stored login for this session only, without switching; `remuda claude <name>` is the same |
+| `remuda pin [name] [--remove <cli>]` | Pin a login to this directory in `.remuda.toml`, or show the pins in force |
+| `remuda shell-init <shell>` | Print functions that start `claude` and `codex` on the login pinned where they run |
 | `remuda env <name>` | Print the `export` line that selects a stored API key in a shell |
 | `remuda ls [--json]` | List stored credentials, marking the active ones |
 | `remuda refresh [name] [--force] [--within MIN]` | Refresh the inactive credentials expiring within `MIN` minutes (default 60) |
@@ -128,6 +131,29 @@ and not while `codex login` is running. Grok and Kimi show a code to approve
 and Cursor a confirmation, and remuda waits for the provider to say it is
 done, from any machine's browser. GLM and opencode Go open their key page and
 ask for the key.
+
+## A login per session, and per repository
+
+`remuda run work` starts Claude Code on `work` without switching what every
+other terminal uses; `remuda codex perso -- exec "..."` does the same for
+Codex. The session gets a `CLAUDE_CONFIG_DIR` (or `CODEX_HOME`) of its own
+under the store. Everything in your real one is linked into it, so history,
+projects, settings and MCP servers stay shared. Only the files holding the
+login are its own. When the CLI exits, the tokens it refreshed go back to the
+store, and anything else it changed in those files goes back into yours.
+While it runs, that login is left alone: not refreshed, switched to, removed or
+pinged.
+
+Pin a login to a repository and every `claude` started there uses it:
+
+```bash
+cd ~/src/job && remuda pin claude/work      # writes .remuda.toml
+eval "$(remuda shell-init zsh)"             # in ~/.zshrc
+claude                                      # Claude Code on work, here only
+```
+
+Elsewhere, `claude` runs as it always did. A `.remuda.toml` owned by another
+user is ignored.
 
 ## The page
 

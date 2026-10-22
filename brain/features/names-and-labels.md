@@ -12,7 +12,7 @@ sidecar. No text, or only whitespace, clears it.
 `remuda rename <name> <new>` moves the credential and its sidecar, refusing a
 name that is taken or invalid. Renaming the active credential is fine: the
 match is by token and account, not by name. `config.toml` follows the new name
-([architecture/config.md](../architecture/config.md)).
+([architecture/config.md](../architecture/config.md)). A login a `remuda run` session holds cannot be renamed until it ends.
 
 ## Sources
 

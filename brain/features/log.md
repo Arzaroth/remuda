@@ -18,6 +18,7 @@ whole store:
 | `reset` | A banked reset was spent from the page, or refused |
 | `proxy` | The proxy turned a CLI's active login down (signed out, expired, unreadable), and when it spends it again |
 | `store` | A login was stored by `import` or a sign-in, renamed or removed |
+| `run` | A `remuda run` session started, ended, ended with tokens set aside, or was finished after its process died |
 
 Labels are not logged. A failed refresh the log already says is not written
 again (`logbook::note_once`): a revoked spare the timer fails to refresh every

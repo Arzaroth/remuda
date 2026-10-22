@@ -6,12 +6,15 @@ done.
 
 ## Decisions before roadmap work
 
+- [ ] `remuda run`: check against a real Codex session that what it writes
+      under `CODEX_HOME` (sessions, history, logs) goes through the links, and
+      that a setting it rewrites by rename is not lost with the session's
+      directory.
+- [ ] Auto mode: a Codex `remuda run` session counts as a running `codex`, so
+      it holds the global switch too; tell the two apart by `CODEX_HOME` in
+      the process's environment.
 - [ ] Auto-switch: whether a session in the middle of a request can be told
       apart, so a switch can wait for it. Until then auto mode does not try.
-- [ ] `remuda run`: flock or process check to mark a login in use, and how a
-      stale mark from a crashed session gets cleared.
-- [ ] `remuda run`: which files under `CODEX_HOME` Codex writes during a
-      session (sessions, history, logs) and whether symlinking them is safe.
 - [ ] Hub and satellites: hand over credentials or proxy the API. The local
       proxy exists; check how each CLI copes with a credential that has no
       refresh token before ruling the first way out.
