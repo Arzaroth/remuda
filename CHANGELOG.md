@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-22
+
 ### Added
 
 - `remuda run <name>` starts Claude Code or Codex on a stored login for that
