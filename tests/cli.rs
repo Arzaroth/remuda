@@ -486,6 +486,9 @@ fn completions_cover_every_command() {
         "rename",
         "auto",
         "log",
+        "run",
+        "pin",
+        "shell-init",
         "serve",
         "open",
         "--update",
@@ -960,4 +963,83 @@ fn run_starts_the_cli_on_a_login_of_its_own_and_keeps_what_it_rotated() {
         );
     }
     assert!(home.fails(&["run", "glm"]).contains("cannot start"));
+}
+
+#[test]
+fn a_pinned_directory_starts_its_cli_on_the_pinned_login() {
+    let home = Home::new();
+    home.sign_in("a-work", "r-work", "u-work");
+    home.ok(&["import", "work"]);
+    home.sign_in("a-perso", "r-perso", "u-perso");
+    home.ok(&["import", "perso"]);
+    let path = fake_claude(&home);
+    let repo = home.path("repo");
+    let sub = repo.join("src");
+    std::fs::create_dir_all(&sub).unwrap();
+    let at = |dir: &Path, args: &[&str]| {
+        home.command(args)
+            .current_dir(dir)
+            .env("PATH", &path)
+            .output()
+            .unwrap()
+    };
+
+    let out = at(&repo, &["pin", "work"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.join(".remuda.toml")).unwrap(),
+        "claude = \"work\"\n"
+    );
+    let shown = String::from_utf8(at(&sub, &["pin"]).stdout).unwrap();
+    assert!(shown.starts_with("claude: work ("), "{shown}");
+
+    for args in [
+        &["run", "claude"][..],
+        &["claude", "--", "-p", "hi"],
+        &["claude", "-p", "hi"],
+    ] {
+        let out = at(&sub, args);
+        assert_eq!(
+            out.status.code(),
+            Some(7),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let dir = std::fs::read_to_string(home.path("seen-dir")).unwrap();
+        assert!(dir.contains(".runs/claude/work/home"), "{args:?}: {dir}");
+    }
+    assert_eq!(
+        std::fs::read_to_string(home.path("seen-args")).unwrap(),
+        "-p hi\n"
+    );
+    let out = at(&home.path(""), &["claude", "perso"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(home.path("seen-dir")).unwrap(),
+        "\n"
+    );
+
+    assert!(at(&repo, &["pin", "--remove", "claude"]).status.success());
+    let out = at(&sub, &["run", "claude"]);
+    assert!(out.status.success());
+    assert_eq!(
+        std::fs::read_to_string(home.path("seen-dir")).unwrap(),
+        "\n"
+    );
+
+    let init = home.ok(&["shell-init", "bash"]);
+    assert!(
+        init.contains("claude() { command remuda run claude -- \"$@\"; }"),
+        "{init}"
+    );
+    assert!(init.contains("codex()"), "{init}");
+    assert!(home.fails(&["nope"]).contains("unrecognized subcommand"));
 }
