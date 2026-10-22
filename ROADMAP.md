@@ -73,7 +73,7 @@ and TLS above.
 
 ## Banked resets: what is left
 
-A Claude login's banked resets are on its card, and the page spends one
+A Claude login's banked resets are in its details, and the page spends one
 ([brain/features/web-page.md](brain/features/web-page.md)). Still to come:
 
 - **Codex**, which calls them rate limit reset credits (`/usage` in Codex: "View
@@ -101,11 +101,10 @@ A Claude login's banked resets are on its card, and the page spends one
 ## A management page
 
 `remuda serve` grows from one page into a small management app, along the lines
-of CLIProxyAPI's management center: a sidebar with sections (Dashboard, Quota,
-Accounts, Add an account, Settings, Logs) and a settings section for what
-remuda gains on the way: the refresh timer, the hub's bind address and
-satellites. Auto mode brought the config file and the first settings the page
-edits; this section grows on what it started.
+of CLIProxyAPI's management center. The page already has a sidebar with an
+overview, a page per CLI (its logins and its automation), the API proxy and
+status; still to come are a Logs page and a settings page for what remuda
+gains on the way: the refresh timer, the hub's bind address and satellites.
 
 The page is already written in Solid under `web/`, which Vite builds into the
 one file the binary compiles in, so sections grow there as components.

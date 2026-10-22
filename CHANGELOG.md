@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The page is reorganised around a sidebar: an overview, a page per CLI with
+  its logins and its automation on two tabs, the API proxy and status, each
+  with its own address so back and bookmarks work. A CLI's logins are a list
+  you can order by headroom or name, with a meter per window in each row and
+  the rest a click away. Every CLI is shown by its real logo, from
+  TokenGauge, Add a login is a dialog, and the page works on a phone.
+- The page has two looks to choose from, Sage and Instrument, beside the
+  light and dark themes.
+
 ## [0.20.0] - 2026-10-21
 
 ### Added

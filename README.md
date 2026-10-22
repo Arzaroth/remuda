@@ -202,8 +202,8 @@ do and why.
 A 5-hour window only starts at its first message. Keep-warm reopens a login's
 window with the smallest request it takes as soon as it closes, so one is always running
 and the next reset keeps coming: a 7am ping gives you an hour of the 7-12
-window, then a fresh one at noon. Pick the logins on each CLI's card in the
-page's Auto mode section, or in `config.toml`:
+window, then a fresh one at noon. Pick the logins on the Automation tab of each
+CLI's page, or in `config.toml`:
 
 ```toml
 [warm]
@@ -218,7 +218,7 @@ own token and never refreshed by remuda.
 ## The proxy
 
 `remuda serve` can also run an API proxy for any OpenAI or Anthropic client,
-switched on from the page's API proxy card, which also makes its access keys.
+switched on from the page's API proxy page, which also makes its access keys.
 
 | Protocol | Base URL |
 | --- | --- |

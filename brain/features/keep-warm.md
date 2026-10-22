@@ -8,7 +8,7 @@ fresh window at noon. Nothing is lost by opening a window early.
 
 Logins opt in by name in `config.toml`'s `[warm]` table
 ([architecture/config.md](../architecture/config.md)), or with the "Keep the
-5-hour window open" chips on each CLI's card in the page's Auto mode section.
+5-hour window open" chips on the Automation tab of each CLI's page.
 It is independent of auto mode: either works with the other off.
 
 ## Who runs it
@@ -70,7 +70,8 @@ mode's next round for up to the ping's deadline.
 
 `/api/state`'s `warm` has, per `provider/name`, the last round's outcome:
 `pinged` (when, which model), `failed` (the error), `open` (until when) or
-`waiting` (why). A login card shows it as one line. The service's log gets a
+`waiting` (why). A login's row carries a "Kept warm" pill and its details
+show the outcome as one line. The service's log gets a
 line for each ping that went through, and one for a failure each time its
 error changes.
 
