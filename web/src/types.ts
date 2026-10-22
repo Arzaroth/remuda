@@ -8,6 +8,7 @@ export type Credential = {
   email: string;
   plan: string | null;
   active: boolean;
+  running?: boolean;
   expiresAt: number | null;
   refreshTokenExpiresAt: number | null;
   verified: boolean;
@@ -113,7 +114,7 @@ export type WarmStatus =
 
 export type LogEvent = {
   at: number;
-  kind: 'switch' | 'auto' | 'refresh' | 'warm' | 'reset' | 'proxy' | 'store';
+  kind: 'switch' | 'auto' | 'refresh' | 'warm' | 'reset' | 'proxy' | 'store' | 'run';
   provider?: string;
   name?: string;
   by?: 'cli' | 'page' | 'auto';
