@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- The API proxy page has a Shell field with the two `export` lines a client
+  reads (`ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY`, or `OPENAI_BASE_URL`
+  and `OPENAI_API_KEY`), copied in one click with the whole key.
+
 ## [0.24.0] - 2026-10-22
 
 ### Added

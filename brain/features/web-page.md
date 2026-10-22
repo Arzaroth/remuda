@@ -80,7 +80,10 @@ Add a login.
 - **API proxy** ([proxy.md](proxy.md)): an on/off switch and whether it
   listens, an OpenAI / Claude switch that shows that protocol's base URL with
   a copy button, the access key masked with show and copy buttons (a picker
-  when there are several), Manage keys to make and remove keys (a second
+  when there are several), the two shell `export` lines that protocol's
+  clients read (`OPENAI_BASE_URL` and `OPENAI_API_KEY`, or
+  `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY`) with one copy button, the
+  key masked until shown but always copied whole, Manage keys to make and remove keys (a second
   click removes) and change the port, and the models it routes per CLI with
   the formats its endpoint speaks. The protocol last picked is remembered.
 - **Status**: whether the refresh timer is enabled, when it last ran, how
