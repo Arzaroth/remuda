@@ -194,8 +194,11 @@ default), dropping the `Origin` it would refuse; open
 `http://localhost:5173/serve.html#<token>`. The page makes no external
 requests and has a light and a dark theme and two looks; its fonts
 (Archivo and Schibsted Grotesk, Latin subsets, from `@fontsource-variable`)
-and TokenGauge's provider icons (`web/src/icons.ts`, MIT OR WTFPL) are
-inlined too. It reads `/api/events` through `fetch` (an `EventSource`
+and the provider marks and colours (`web/src/icons.ts`) are inlined too.
+`icons.ts` is `selvedge::brands` written out, the table TokenGauge draws from:
+`tests/brands.rs` fails when it differs from the pinned selvedge, and
+`REMUDA_BLESS=1 cargo test --test brands` rewrites it. A brand with no colour
+(Grok, Z.ai, opencode) is drawn in the page's ink. It reads `/api/events` through `fetch` (an `EventSource`
 cannot send the token header). A browser allows only about 6 connections per
 host across all its tabs, so one tab follows the stream, holding the Web Lock
 `remuda-events`, and passes each change to the others over the

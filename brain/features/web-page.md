@@ -14,8 +14,8 @@ refresh timer is off or its last run is over 75 minutes old and red when it
 reported problems (`healthTone`). Its foot holds Add a login, Refresh tokens,
 the theme switch and the look switch. On a narrow screen it becomes a bar
 along the top, with Add a login first; Refresh tokens and the two switches
-move to the foot of the Status page. Each CLI is shown by its own logo, TokenGauge's provider icons
-(`icons.ts`), in the sidebar, the page heads, the overview, the proxy and
+move to the foot of the Status page. Each CLI is shown by its own logo, in its own colour, both shared with
+TokenGauge through selvedge (`icons.ts`), in the sidebar, the page heads, the overview, the proxy and
 Add a login.
 
 - **Overview** has one tile per CLI, edged in the CLI's colour (TokenGauge's:
