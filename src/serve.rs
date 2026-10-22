@@ -233,7 +233,15 @@ impl App {
         for planned in planned {
             let key = format!("{}/{}", planned.provider, planned.name);
             let before = memory.get(&key).cloned().unwrap_or_else(|| json!({}));
-            let mut seen = match planned.due {
+            let due = match planned.due {
+                warm::Due::Now
+                    if crate::session::in_use(&self.store, &planned.provider, &planned.name) =>
+                {
+                    warm::Due::Not("in a `remuda run` session".into())
+                }
+                due => due,
+            };
+            let mut seen = match due {
                 warm::Due::Open { resets_at } => {
                     json!({"state": "open", "resetsAt": resets_at.as_millisecond()})
                 }
@@ -336,11 +344,13 @@ impl App {
             let Some(p) = self.providers().into_iter().find(|p| p.id() == id) else {
                 continue;
             };
+            let in_use = |name: &str| crate::session::in_use(&self.store, p.id(), name);
             let cx = auto::Context {
                 schedules: &config.schedules,
                 usage: usage.as_ref(),
                 switched_at: switches.get(id).copied(),
                 now,
+                in_use: &in_use,
             };
             if !settings.enabled {
                 after.insert(id.clone(), json!({"enabled": false}));
@@ -1428,6 +1438,36 @@ mod tests {
         );
         assert_eq!(claude["switched"]["to"], "work", "the last switch is kept");
         assert_eq!(e.live_refresh_token().as_deref(), Some("r-work"));
+    }
+
+    #[test]
+    fn auto_mode_and_keep_warm_leave_a_login_in_a_run_session_alone() {
+        let mut server = mockito::Server::new();
+        let pinged = server.mock("POST", "/v1/messages").expect(0).create();
+        let e = env(&server.url());
+        let app = on_perso(&e, true);
+        std::fs::write(
+            places(&e).config,
+            "[auto.claude]\nenabled = true\nlogins = [\"work\", \"perso\"]\n[warm]\nclaude = [\"work\"]\n",
+        )
+        .unwrap();
+        let _held = crate::session::lease(&e.store, "claude", "work").unwrap();
+        snapshot(&e, crate::fsx::now_ms() - 1000, 100, 10);
+
+        app.auto_round(&Zoned::now());
+        app.warm_round(jiff::Timestamp::now());
+
+        assert_eq!(e.live_refresh_token().as_deref(), Some("r-perso"));
+        let (_, state) = call(&app, "GET", "/api/state", Value::Null);
+        assert_ne!(
+            state["auto"]["claude"]["decision"]["action"]["kind"],
+            "switch"
+        );
+        assert_eq!(
+            state["warm"]["claude/work"],
+            json!({"state": "waiting", "why": "in a `remuda run` session"})
+        );
+        pinged.assert();
     }
 
     #[test]

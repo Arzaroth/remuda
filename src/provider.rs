@@ -44,6 +44,24 @@ pub struct Login {
     pub identity: Identity,
 }
 
+/// How `remuda run` starts a CLI on a login of its own: the command, the
+/// variable that moves its files, and what of them a session does not share.
+pub struct RunSpec {
+    pub command: &'static str,
+    pub var: &'static str,
+    /// Files a session starts from a copy of, without the login's keys, and
+    /// whose other keys it merges back when it ends.
+    pub copied: Vec<Copied>,
+    /// Names in the CLI's directory a session neither links nor copies.
+    pub private: &'static [&'static str],
+}
+
+pub struct Copied {
+    pub from: std::path::PathBuf,
+    pub name: &'static str,
+    pub login_keys: &'static [&'static str],
+}
+
 /// A sign-in the browser has been sent to. Claude's ends with a code the user
 /// pastes back, Codex's with a callback to a local listener.
 pub trait PendingLogin: Send {
@@ -116,6 +134,15 @@ pub trait Provider: Send + Sync {
     }
     /// Returns the account id the token endpoint answered for, when it says.
     fn refresh(&self, creds: &mut Value) -> Result<Option<String>>;
+    /// None for a CLI `remuda run` cannot point at a directory of its own.
+    fn run_spec(&self) -> Option<RunSpec> {
+        None
+    }
+    /// The same provider with the CLI's files under `dir`, as a `remuda run`
+    /// session sees them.
+    fn relocated(&self, _dir: &std::path::Path) -> Option<Box<dyn Provider>> {
+        None
+    }
     /// Spends one of the login's banked usage-limit resets.
     fn redeem_reset(&self, _entry: &Entry) -> Result<String> {
         bail!("{} has no banked resets", self.name())

@@ -589,6 +589,9 @@ pub struct Context<'a> {
     pub usage: Option<&'a Value>,
     pub switched_at: Option<i64>,
     pub now: &'a Zoned,
+    /// Whether a `remuda run` session holds the login, which no switch may
+    /// then land on.
+    pub in_use: &'a dyn Fn(&str) -> bool,
 }
 
 /// The decision for one CLI from its live login and TokenGauge's snapshot. A
@@ -628,10 +631,15 @@ pub fn assess(
     let switched_at = cx
         .switched_at
         .and_then(|ms| Timestamp::from_millisecond(ms).ok());
-    let figures = match figures(cx.usage, provider, active, switched_at, cx.now.timestamp()) {
+    let mut figures = match figures(cx.usage, provider, active, switched_at, cx.now.timestamp()) {
         Ok(f) => f,
         Err(why) => return Decision::hold(why),
     };
+    for (name, f) in figures.iter_mut() {
+        if Some(name.as_str()) != active && (cx.in_use)(name) {
+            *f = Figures::Missing("in a `remuda run` session".into());
+        }
+    }
     let mut decision = decide(&Input {
         auto,
         schedules: cx.schedules,
@@ -1070,6 +1078,7 @@ reserve = { work = "workday" }
             usage: None,
             switched_at: None,
             now: &now,
+            in_use: &|_| false,
         };
         let tmp = tempfile::tempdir().unwrap();
         let claude =

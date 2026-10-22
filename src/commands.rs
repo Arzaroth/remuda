@@ -8,6 +8,7 @@ use crate::fsx::now_ms;
 use crate::logbook::{self, Event, Kind};
 use crate::ops::{self, LiveState};
 use crate::provider::Provider;
+use crate::session;
 use crate::store::{Entry, Store, validate_name};
 
 pub fn find<'a>(providers: &[&'a dyn Provider], id: &str) -> Result<&'a dyn Provider> {
@@ -58,7 +59,10 @@ pub struct Live<'a> {
 
 /// One CLI's unreadable files do not stop the others from being listed or
 /// refreshed.
+/// Finishes a `remuda run` session that died first, then syncs every live
+/// login back.
 pub fn sync_all<'a>(store: &Store, providers: &[&'a dyn Provider]) -> Result<Vec<Live<'a>>> {
+    session::recover(store, providers);
     Ok(providers
         .iter()
         .map(|p| Live {
@@ -137,6 +141,7 @@ pub fn list_json(store: &Store, lives: &[Live]) -> Result<Value> {
                 "accountId": e.meta.account_id,
                 "plan": plan_shown(p, &e),
                 "active": live.state.active_name() == Some(e.name.as_str()),
+                "running": session::in_use(store, p.id(), &e.name),
                 "expiresAt": p.expires_at(&e.creds),
                 "refreshTokenExpiresAt": p.refresh_expires_at(&e.creds),
                 "verified": e.verified,
@@ -194,9 +199,14 @@ pub fn list(store: &Store, lives: &[Live], as_json: bool, out: &mut dyn Write) -
                 .refresh_expires_at(&e.creds)
                 .map(|t| format!(", refresh {}", human(t - now)))
                 .unwrap_or_default();
+            let running = if session::in_use(store, p.id(), &e.name) {
+                ", in a run session"
+            } else {
+                ""
+            };
             writeln!(
                 out,
-                "{mark} {:w$}  {:we$}  {:wp$}  token {access}{refresh}",
+                "{mark} {:w$}  {:we$}  {:wp$}  token {access}{refresh}{running}",
                 shown, e.meta.email, plan
             )?;
         }
@@ -476,6 +486,17 @@ pub fn refresh(
                 }
                 continue;
             }
+            if session::in_use(store, p.id(), &entry.name) {
+                if scope.only.is_some() {
+                    writeln!(
+                        out,
+                        "{}: in a `remuda run` session, whose {} refreshes it",
+                        entry.qualified(),
+                        p.name()
+                    )?;
+                }
+                continue;
+            }
             let due = ops::expires_in_ms(p, &entry).is_none_or(|ms| ms < scope.within_min * 60_000);
             if !scope.force && !due {
                 continue;
@@ -563,12 +584,6 @@ pub fn auto(
     let usage = crate::gauge::read(snapshot);
     let switches = crate::runs::switches(store);
     let now = jiff::Zoned::now();
-    let cx = |id: &str| crate::auto::Context {
-        schedules: &config.schedules,
-        usage: usage.as_ref(),
-        switched_at: switches.get(id).copied(),
-        now: &now,
-    };
     let mut first = true;
     for (id, auto) in &config.auto {
         let Some(live) = lives.iter().find(|l| l.provider.id() == id) else {
@@ -578,7 +593,15 @@ pub fn auto(
             writeln!(out)?;
         }
         first = false;
-        let decision = crate::auto::assess(auto, live.provider, &live.state, &cx(id));
+        let in_use = |name: &str| session::in_use(store, id, name);
+        let cx = crate::auto::Context {
+            schedules: &config.schedules,
+            usage: usage.as_ref(),
+            switched_at: switches.get(id).copied(),
+            now: &now,
+            in_use: &in_use,
+        };
+        let decision = crate::auto::assess(auto, live.provider, &live.state, &cx);
         crate::auto::describe(
             live.provider.name(),
             auto,
@@ -660,6 +683,16 @@ pub fn log(
     Ok(())
 }
 
+fn refuse_in_use(store: &Store, p: &dyn Provider, name: &str) -> Result<()> {
+    if session::in_use(store, p.id(), name) {
+        bail!(
+            "{}/{name} is in a `remuda run` session; end it first",
+            p.id()
+        );
+    }
+    Ok(())
+}
+
 pub fn rename(
     store: &Store,
     config: &Path,
@@ -668,6 +701,7 @@ pub fn rename(
     to: &str,
     out: &mut dyn Write,
 ) -> Result<()> {
+    refuse_in_use(store, p, from)?;
     store.rename(p.id(), from, to)?;
     let message = format!("renamed {0}/{from} to {0}/{to}", p.id());
     logbook::note(
@@ -706,6 +740,7 @@ pub fn remove(
             p.id()
         );
     }
+    refuse_in_use(store, p, name)?;
     store.remove(p.id(), name)?;
     let message = format!("removed {}/{name}", p.id());
     logbook::note(
@@ -1762,6 +1797,49 @@ mod tests {
         )
         .unwrap();
         assert_eq!(text(out), "nothing logged about perso\n");
+    }
+
+    #[test]
+    fn a_login_in_a_run_session_is_neither_refreshed_switched_to_renamed_nor_removed() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", 60_000);
+        let _held = session::lease(&e.store, "claude", "work").unwrap();
+        let mut out = Vec::new();
+        refresh(
+            &e.store,
+            &live(&e, LiveState::SignedOut),
+            RefreshScope {
+                only: Some((&e.claude, "work")),
+                force: true,
+                within_min: 60,
+            },
+            &mut out,
+            &mut Vec::new(),
+            &mut Report::default(),
+        )
+        .unwrap();
+        assert!(text(out).contains("in a `remuda run` session"));
+        assert_eq!(e.stored_refresh_token("work").as_deref(), Some("r-work"));
+
+        let err = ops::switch(&e.store, &e.claude, "work", false).unwrap_err();
+        assert!(err.to_string().contains("`remuda run` session"), "{err}");
+        let config = e.tmp.path().join("config.toml");
+        for err in [
+            rename(&e.store, &config, &e.claude, "work", "job", &mut Vec::new()).unwrap_err(),
+            remove(
+                &e.store,
+                &config,
+                &e.claude,
+                &LiveState::SignedOut,
+                "work",
+                &mut Vec::new(),
+            )
+            .unwrap_err(),
+        ] {
+            assert!(err.to_string().contains("end it first"), "{err}");
+        }
+        let listed = list_json(&e.store, &live(&e, LiveState::SignedOut)).unwrap();
+        assert_eq!(listed["credentials"][0]["running"], true);
     }
 
     #[test]

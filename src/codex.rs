@@ -12,7 +12,7 @@ use crate::fsx::{Changed, lock_file, now_ms, read_json, rfc3339, update_json};
 use crate::oauth::{self, claims};
 use crate::paths;
 use crate::pkce;
-use crate::provider::{Format, Identity, Login, PendingLogin, Provider, Upstream};
+use crate::provider::{Format, Identity, Login, PendingLogin, Provider, RunSpec, Upstream};
 use crate::store::Entry;
 
 // Mirrors codex-cli 0.153.4's ChatGPT sign-in.
@@ -122,7 +122,6 @@ impl Codex {
         })
     }
 
-    #[cfg(test)]
     pub fn at(dir: &std::path::Path, api: Api, callback_port: u16) -> Self {
         Codex {
             auth_path: dir.join("auth.json"),
@@ -233,6 +232,23 @@ impl Provider for Codex {
     /// TokenGauge refreshes the live auth.json in place under this lock.
     fn lock_live(&self) -> Result<Option<std::fs::File>> {
         lock_file(&self.auth_path.with_file_name("auth.json.lock")).map(Some)
+    }
+
+    fn run_spec(&self) -> Option<RunSpec> {
+        Some(RunSpec {
+            command: "codex",
+            var: "CODEX_HOME",
+            copied: Vec::new(),
+            private: &["auth.json", "auth.json.lock"],
+        })
+    }
+
+    fn relocated(&self, dir: &std::path::Path) -> Option<Box<dyn Provider>> {
+        Some(Box::new(Codex::at(
+            dir,
+            self.api.clone(),
+            self.callback_port,
+        )))
     }
 
     fn refresh(&self, creds: &mut Value) -> Result<Option<String>> {

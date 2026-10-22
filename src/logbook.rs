@@ -23,6 +23,7 @@ pub enum Kind {
     Reset,
     Proxy,
     Store,
+    Run,
 }
 
 impl Kind {
@@ -35,6 +36,7 @@ impl Kind {
             Kind::Reset => "reset",
             Kind::Proxy => "proxy",
             Kind::Store => "store",
+            Kind::Run => "run",
         }
     }
 }
