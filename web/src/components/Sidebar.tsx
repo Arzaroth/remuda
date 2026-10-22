@@ -76,6 +76,12 @@ export function Sidebar(props: { onAdd: () => void }) {
             <span class="sr">{s().proxy?.enabled ? 'on' : 'off'}</span>
           </a>
         </Show>
+        <a class="nav-item" href={href({ page: 'log' })} aria-current={here({ page: 'log' }) ? 'page' : undefined}>
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M4 5h12M4 10h12M4 15h8" />
+          </svg>
+          Log
+        </a>
         <a class="nav-item" href={href({ page: 'status' })} aria-current={here({ page: 'status' }) ? 'page' : undefined}>
           <svg viewBox="0 0 20 20" aria-hidden="true">
             <path d="M2 10h4l2-5 4 10 2-5h4" />

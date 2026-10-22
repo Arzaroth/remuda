@@ -71,6 +71,9 @@ pub struct App {
     me: OnceLock<Weak<App>>,
 }
 
+/// The latest events the page's Log shows; `remuda log` reaches further back.
+const LOG_SHOWN: usize = 500;
+
 /// Opens a sign-in page in a private window; false leaves it to the page.
 pub type Opener = Box<dyn Fn(&str) -> bool + Send + Sync>;
 
@@ -485,7 +488,7 @@ impl App {
                 .map(|e| e.path())
                 .collect::<Vec<_>>()
         };
-        let is_json = |p: &PathBuf| p.extension().is_some_and(|x| x == "json");
+        let is_json = |p: &PathBuf| p.extension().is_some_and(|x| x == "json" || x == "jsonl");
         let mut files = Vec::new();
         for path in entries(self.store.root()) {
             if path.is_dir() {
@@ -617,6 +620,7 @@ impl App {
                 Ok(state)
             }
             ("GET", "/api/config") => self.config(),
+            ("GET", "/api/log") => Ok(json!({ "events": logbook::recent(store, None, LOG_SHOWN) })),
             ("POST", "/api/config/check") => {
                 let problems = match sent_config(&body) {
                     Ok(config) => config.check(&|id| self.logins(id)),
@@ -1233,6 +1237,15 @@ mod tests {
         );
         let (_, r) = call(&app, "POST", "/api/remove", json!({"name": "job"}));
         assert_eq!(r["message"], "removed claude/job");
+        let (_, log) = call(&app, "GET", "/api/log", Value::Null);
+        let kinds: Vec<&str> = log["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["kind"].as_str().unwrap())
+            .collect();
+        assert_eq!(kinds, ["switch", "store", "store"]);
+        assert_eq!(log["events"][0]["by"], "page");
 
         let (_, r) = call(&app, "POST", "/api/refresh", json!({}));
         assert_eq!(r["message"], "nothing was due");
@@ -2077,6 +2090,12 @@ mod tests {
         std::fs::write(&places(&e).snapshot, "{}").unwrap();
         let snapshot = app.fingerprint();
         assert_ne!(snapshot, labelled);
+
+        let backend: &dyn proxy::Backend = &app;
+        backend.spent("claude", Some("signed out"));
+        let logged = app.fingerprint();
+        assert_ne!(logged, snapshot, "a line in the log wakes the page");
+        let snapshot = logged;
 
         let elsewhere = e.tmp.path().join("kept-elsewhere.json");
         std::fs::write(&elsewhere, "{}").unwrap();

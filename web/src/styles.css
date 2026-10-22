@@ -168,7 +168,7 @@ main { min-width: 0; padding: 34px clamp(20px, 4vw, 52px) 120px; }
 .page-tabs a[aria-current='page'] { color: var(--ink); border-bottom-color: var(--ink); }
 
 /* Panels */
-.tile, .list, .auto-card, .proxy, .health { background: var(--panel); border-radius: var(--r-l); box-shadow: var(--lift), inset 0 0 0 1px var(--rule); }
+.tile, .list, .auto-card, .proxy, .health, .log { background: var(--panel); border-radius: var(--r-l); box-shadow: var(--lift), inset 0 0 0 1px var(--rule); }
 
 /* Usage tiles: the overview grid, and the hero of a CLI's page. */
 .strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 16px; }
@@ -493,4 +493,24 @@ input:hover, select:hover { border-color: var(--muted); }
 @media (prefers-reduced-motion: reduce) {
   .meter i { animation: none; transition: none; }
   .switch i, .switch i::after, #toast, .more svg { transition: none; }
+}
+
+.log-filters { margin-bottom: 18px; }
+.log { padding: 6px 22px 10px; }
+.log h2 { margin: 16px 0 6px; font-size: 13px; font-weight: 650; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.log ul { margin: 0; padding: 0; list-style: none; }
+.log-row { display: grid; grid-template-columns: 52px 72px minmax(0, 180px) minmax(0, 1fr); gap: 12px; align-items: baseline; padding: 9px 0; }
+.log-row + .log-row { border-top: 1px solid var(--rule); }
+.log-row time { color: var(--muted); font-variant-numeric: tabular-nums; }
+.log-row .pill { justify-self: start; }
+.log-subject { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.log-subject .spec { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.log-message { overflow-wrap: anywhere; }
+.log-row.bad .log-message b { color: var(--bad); }
+.log-by { color: var(--muted); }
+.log-more { margin-top: 14px; }
+@media (max-width: 720px) {
+  .log { padding: 4px 16px 8px; }
+  .log-row { grid-template-columns: auto auto minmax(0, 1fr); }
+  .log-message { grid-column: 1 / -1; }
 }

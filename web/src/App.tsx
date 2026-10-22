@@ -7,6 +7,7 @@ import { AddAccount } from './components/AddAccount';
 import { AutoMode, dirty } from './components/AutoMode';
 import { Logins } from './components/Group';
 import { Health } from './components/Health';
+import { Log } from './components/Log';
 import { Proxy } from './components/Proxy';
 import { ProviderIcon } from './components/ProviderIcon';
 import { Sidebar } from './components/Sidebar';
@@ -112,6 +113,9 @@ export function App() {
                   <div class="page">
                     <Proxy />
                   </div>
+                </Match>
+                <Match when={route().page === 'log'}>
+                  <Log />
                 </Match>
                 <Match when={route().page === 'status'}>
                   <div class="page">
