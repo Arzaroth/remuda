@@ -55,16 +55,22 @@ the CLI's own files, never the session's copy.
 
 While the CLI runs, remuda ignores SIGINT, SIGQUIT, SIGHUP and SIGTERM, so
 remuda is still there to sync the tokens back. The CLI gets the handling
-remuda was started with. When the CLI dies of a signal, remuda dies of the
-same one, so a shell loop sees an interrupt; otherwise remuda exits with the
-CLI's code.
+remuda was started with. When one of those signals killed the CLI, remuda
+dies of it too, so a shell loop sees an interrupt; otherwise remuda exits
+with the CLI's code (128 and the signal for a crash). A `remuda run` that
+`exec`s the CLI as it is, from inside a session, gives it back its own
+directory.
 
 ## When it ends
 
-The session's lock is shared, and the CLI inherits remuda's hold on it. So the
-session lasts while any of its processes runs: remuda, a joined terminal, or
-a CLI whose remuda was killed. When remuda's CLI exits, it lets go and
-`session::recover` finishes the session if nothing else holds it. A session
+Every remuda running a CLI in the session holds its shared lock, and notes
+the CLI's pid and start time beside it (`cli-<remuda pid>`). The session lasts
+while either says something runs: a remuda, a joined terminal, or a CLI whose
+remuda was killed. The CLI's own children (an MCP server, a background job)
+hold nothing, so one left running does not keep the session open. When
+remuda's CLI exits, it lets go and `session::recover` finishes the session
+if nothing else runs in it. A session directory with no lock, left by a
+process that kept the session's directory but not its lease, is finished too. A session
 whose processes all died is finished by the next command that syncs a live
 login, which is nearly every command. `session::finish`, under the store
 lock and the session's exclusive lock:
@@ -79,16 +85,23 @@ lock and the session's exclusive lock:
    command to try. A session that ended signed out is said as well, since
    its CLI may have spent the store's refresh token first.
 2. **What the CLI made.** Entries in `home` that are not links go into the
-   CLI's own directory: ones it did not have, and files the CLI rewrote by
-   rename, which replaced their link. A file that also changed outside since
-   the session started is not overwritten: the session's copy lands beside
-   it as `<name>.remuda-run`.
+   CLI's own directory, copied when it is on another filesystem: ones it did
+   not have, and files the CLI rewrote by rename, which replaced their link.
+   A file that also changed outside since the session started is not
+   overwritten: the session's copy lands beside it as `<name>.remuda-run`
+   (with a time after it when that is taken).
 3. **The copied files.** What the session changed in them goes back into the
    CLI's own, through the same compare-and-swap a switch uses, the login's
    keys excepted. The merge goes key by key, one level down
    (`projects.<dir>`, `mcpServers.<name>`, `mcpOAuth.<server>`). Where both
-   sides changed a key, the CLI's own copy wins, except for a token: the one
-   with the later `expiresAt` is the one a refresh rotated to.
+   sides changed a key, the CLI's own copy wins, except for a token both
+   still hold: the one with the later `expiresAt` is the one a refresh
+   rotated to. What the CLI removed meanwhile stays removed.
+
+   The copy of `.credentials.json` keeps the CLI's MCP logins (`mcpOAuth`), so
+   a session can use them. Their refresh tokens are then in two files: an MCP
+   server that revokes a reused refresh token may ask both sides to sign in
+   to it again.
 4. The directory is removed. Its links are unlinked, never followed.
 
 Anything that fails keeps the directory, for the next command to try again.
@@ -111,7 +124,7 @@ checks that the locked file is still the one at that path.
 
 A Codex run session is not one of the `codex` processes auto mode waits out
 ([auto-mode.md](auto-mode.md)): it is told apart by `REMUDA_OUTER_CODEX_HOME`
-in its environment.
+in its environment beside a `CODEX_HOME` under `.runs`.
 
 ## Pins
 
@@ -131,8 +144,10 @@ keeps each allowed file's path and the digest of its contents, as direnv does
 with `.envrc`. So a `.remuda.toml` that came with a clone cannot choose which
 of your logins spends until you look at it. `remuda pin <name>` writes the pin
 into `./.remuda.toml`, keeping the rest of the file as written, and allows
-the result. `remuda pin --remove <cli>` drops one, and `remuda pin --allow`
-trusts the nearest file as it is. `remuda pin` alone shows the pins in force
+the result. It refuses a file that is a link, belongs to someone else, or was
+not allowed already, so it never vouches for pins nobody read. `remuda pin
+--remove <cli>` drops one, and `remuda pin --allow` trusts the nearest file as
+it is and prints what it holds. `remuda pin` alone shows the pins in force
 here.
 
 A file that is not allowed, is a link, belongs to another user or does not

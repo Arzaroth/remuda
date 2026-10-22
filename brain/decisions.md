@@ -337,9 +337,12 @@ key by key when the session ends, the login's keys excepted, so what the
 session changed is not lost. The CLI's own copy wins where both changed,
 except for a token, where the later expiry wins.
 
-The session is marked by a shared `flock` that every process of it holds,
-the CLI included, through an inherited descriptor, rather than a pid file:
-the kernel drops it however the processes die. Two terminals on one login
+The session is marked by a shared `flock` every remuda in it holds, which
+the kernel drops however remuda dies, and by the pid and start time of each
+CLI it started, so a CLI whose remuda was killed keeps the session. Handing
+the CLI the lock itself was turned down: every child it starts would inherit
+it, and an MCP server or a background job left running would hold the
+session open for good. Two terminals on one login
 share one session, as they share the CLI's own directory, since a second
 directory would put the login's refresh token in two places. The session
 ends with its last process. Its directory, and the hold on the login, stay
