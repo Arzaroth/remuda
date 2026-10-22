@@ -203,6 +203,7 @@ fn two_accounts_imported_switched_and_removed() {
         "{log}"
     );
     assert_eq!(home.ok(&["log", "work", "-n", "1"]).lines().count(), 1);
+    assert!(home.fails(&["log", "-n", "0"]).contains("0"));
     let listed: Value = serde_json::from_str(&home.ok(&["log", "--json", "perso"])).unwrap();
     assert_eq!(listed.as_array().unwrap().len(), 3);
     assert!(

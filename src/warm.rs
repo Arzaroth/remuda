@@ -182,8 +182,7 @@ pub fn creds(store: &Store, p: &dyn Provider, name: &str, active: Option<&str>) 
         bail!("it does not match its sidecar, so remuda will not spend or refresh it");
     }
     if p.renews() && ops::expires_in_ms(p, &entry).is_some_and(|left| left < FRESH_FOR_MS) {
-        ops::refresh_entry(store, p, &mut entry)?;
-        store.save(&entry)?;
+        ops::refresh_saved(store, p, &mut entry)?;
     }
     Ok(entry.creds)
 }

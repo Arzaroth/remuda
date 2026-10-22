@@ -131,10 +131,12 @@ enum Cmd {
     /// Show what remuda did: switches and who made them, refreshes, auto
     /// mode, keep-warm, the proxy. PROVIDER, NAME or PROVIDER/NAME narrows it.
     Log {
+        /// A provider (claude), a login (claude/work) or a bare name.
         name: Option<String>,
         /// How many of the latest events to show.
-        #[arg(short = 'n', long, default_value_t = 50)]
-        lines: usize,
+        #[arg(short = 'n', long, default_value_t = 50, value_parser = clap::value_parser!(u64).range(1..))]
+        lines: u64,
+        /// Print the events as JSON.
         #[arg(long)]
         json: bool,
     },
@@ -489,7 +491,7 @@ fn main() -> Result<()> {
         Cmd::Log { name, lines, json } => commands::log(
             &store,
             name.as_deref(),
-            lines,
+            usize::try_from(lines).unwrap_or(usize::MAX),
             json,
             &jiff::tz::TimeZone::system(),
             out,

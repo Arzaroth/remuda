@@ -250,6 +250,21 @@ pub fn expires_in_ms(p: &dyn Provider, entry: &Entry) -> Option<i64> {
 /// Leaves `entry` unusable on error; only save it on success. Tokens that
 /// turn out to belong to another account are already rotated by then, so they
 /// are kept aside rather than dropped.
+/// [`refresh_entry`], then the save, logged either way.
+pub fn refresh_saved(store: &Store, p: &dyn Provider, entry: &mut Entry) -> Result<()> {
+    let done = refresh_entry(store, p, entry).and_then(|()| store.save(entry));
+    let event = match &done {
+        Ok(()) => Event::new(Kind::Refresh, true, "refreshed"),
+        Err(e) => Event::new(Kind::Refresh, false, format!("{e:#}")),
+    }
+    .about(&entry.provider, Some(&entry.name));
+    match done {
+        Ok(()) => logbook::note(store, event),
+        Err(_) => logbook::note_once(store, event),
+    }
+    done
+}
+
 pub fn refresh_entry(store: &Store, p: &dyn Provider, entry: &mut Entry) -> Result<()> {
     if let Some(account) = p.refresh(&mut entry.creds)?
         && account != entry.meta.account_id
@@ -340,8 +355,7 @@ pub fn switch_when(
     }
     let refreshed = expires_in_ms(p, &target).is_some_and(|ms| ms < 5 * 60 * 1000);
     if refreshed {
-        refresh_entry(store, p, &mut target)?;
-        store.save(&target)?;
+        refresh_saved(store, p, &mut target)?;
     }
     let _live = p.lock_live()?;
     ready()?;
