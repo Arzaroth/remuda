@@ -436,8 +436,16 @@ function Row(props: { c: Credential; live: Live | undefined }) {
             <div class="actions">
               <button
                 class="btn"
-                disabled={c().active || unverified()}
-                title={c().active ? 'The CLI refreshes the login in use itself' : unverified() ? undefined : 'Refresh its tokens now'}
+                disabled={c().active || unverified() || c().running}
+                title={
+                  c().active
+                    ? 'The CLI refreshes the login in use itself'
+                    : c().running
+                      ? 'Its `remuda run` session refreshes it'
+                      : unverified()
+                        ? undefined
+                        : 'Refresh its tokens now'
+                }
                 onClick={() => act('/api/refresh', { name: spec(), force: true })}
               >
                 <Icon name="refresh" /> Refresh
@@ -447,8 +455,8 @@ function Row(props: { c: Credential; live: Live | undefined }) {
               <button
                 class="btn danger"
                 data-armed={confirms.remove.text() ? '1' : undefined}
-                disabled={c().active}
-                title={c().active ? 'Switch to another login first' : 'Remove'}
+                disabled={c().active || c().running}
+                title={c().active ? 'Switch to another login first' : c().running ? 'End its `remuda run` session first' : 'Remove'}
                 onClick={remove}
               >
                 {confirms.remove.text() ?? (
