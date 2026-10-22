@@ -346,7 +346,9 @@ impl App {
                 after.insert(id.clone(), json!({"enabled": false}));
                 continue;
             }
-            let decision = match ops::sync_live(&self.store, p) {
+            let synced = ops::sync_live(&self.store, p);
+            let readable = synced.is_ok();
+            let decision = match synced {
                 Ok(live) => auto::assess(settings, p, &live, &cx),
                 Err(e) => auto::Decision::hold(format!("{e:#}")),
             };
@@ -391,7 +393,7 @@ impl App {
                 eprintln!("auto mode: {} {kind}: {why}", p.name());
                 logbook::note(
                     &self.store,
-                    Event::new(Kind::Auto, true, format!("{kind}: {why}")).about(p.id(), None),
+                    Event::new(Kind::Auto, readable, format!("{kind}: {why}")).about(p.id(), None),
                 );
             }
             after.insert(id.clone(), seen);

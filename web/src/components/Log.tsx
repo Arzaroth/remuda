@@ -54,6 +54,10 @@ export function Log() {
       );
     }),
   );
+  const clis = createMemo(() => {
+    const named = new Set((events() ?? []).map((e) => e.provider));
+    return store.s!.providers.filter((p) => named.has(p.id) || inUse(store.s!).some((u) => u.id === p.id));
+  });
   const shown = createMemo(() => days(events() ?? [], { provider: provider(), failures: failures() }));
   return (
     <div class="page">
@@ -67,7 +71,7 @@ export function Log() {
         <button type="button" class="chip" aria-pressed={provider() === null} onClick={() => setProvider(null)}>
           Every CLI
         </button>
-        <For each={inUse(store.s!)}>
+        <For each={clis()}>
           {(p) => (
             <button type="button" class="chip" aria-pressed={provider() === p.id} onClick={() => setProvider(p.id)}>
               {p.name}
