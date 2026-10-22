@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-22
+
 ### Changed
 
 - The page is reorganised around a sidebar: an overview, a page per CLI with
