@@ -200,7 +200,8 @@ and the provider marks and colours (`web/src/icons.ts`) are inlined too.
 `REMUDA_BLESS=1 cargo test --test brands` rewrites it. A mark is tinted in its
 `mark` colour and accents use `color` (`brand.ts`); either one missing is the
 page's ink, so Grok, Z.ai and opencode are drawn in ink, and Kimi's K too,
-beside the blue dot its mark carries. It reads `/api/events` through `fetch` (an `EventSource`
+beside the blue dot its mark carries. Where the marks and the fonts come from,
+and their licences, is in `THIRD-PARTY.md`. It reads `/api/events` through `fetch` (an `EventSource`
 cannot send the token header). A browser allows only about 6 connections per
 host across all its tabs, so one tab follows the stream, holding the Web Lock
 `remuda-events`, and passes each change to the others over the
