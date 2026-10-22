@@ -105,7 +105,7 @@ take `-p <cli>`: `claude` (the default), `codex`, `cursor`, `glm`, `grok`,
 | `remuda login <name> [-p <cli>] [--no-browser]` | Sign another account in through the browser and store it, without touching the CLI |
 | `remuda use <name>` | Make a stored credential the one its CLI uses |
 | `remuda run <name> [-- args]` | Start Claude Code or Codex on a stored login for this session only, without switching; `remuda claude <name>` is the same |
-| `remuda pin [name] [--remove <cli>]` | Pin a login to this directory in `.remuda.toml`, or show the pins in force |
+| `remuda pin [name] [--remove <cli>] [--allow]` | Pin a login to this directory in `.remuda.toml`, show the pins in force, or trust a `.remuda.toml` as it is |
 | `remuda shell-init <shell>` | Print functions that start `claude` and `codex` on the login pinned where they run |
 | `remuda env <name>` | Print the `export` line that selects a stored API key in a shell |
 | `remuda ls [--json]` | List stored credentials, marking the active ones |
@@ -139,10 +139,10 @@ other terminal uses; `remuda codex perso -- exec "..."` does the same for
 Codex. The session gets a `CLAUDE_CONFIG_DIR` (or `CODEX_HOME`) of its own
 under the store. Everything in your real one is linked into it, so history,
 projects, settings and MCP servers stay shared. Only the files holding the
-login are its own. When the CLI exits, the tokens it refreshed go back to the
-store, and anything else it changed in those files goes back into yours.
-While it runs, that login is left alone: not refreshed, switched to, removed or
-pinged.
+login are its own. A second terminal on the same login joins the session.
+When the last one exits, the tokens the CLI refreshed go back to the store,
+and anything else it changed goes back into your files. While it runs, that
+login is left alone: not refreshed, switched to, removed or pinged.
 
 Pin a login to a repository and every `claude` started there uses it:
 
@@ -152,8 +152,9 @@ eval "$(remuda shell-init zsh)"             # in ~/.zshrc
 claude                                      # Claude Code on work, here only
 ```
 
-Elsewhere, `claude` runs as it always did. A `.remuda.toml` owned by another
-user is ignored.
+Elsewhere, `claude` runs as it always did. A `.remuda.toml` that `remuda pin`
+did not write, one that came with a clone say, is ignored until `remuda pin
+--allow` trusts it.
 
 ## The page
 
@@ -322,6 +323,8 @@ opencode/<name>.json      {"key": ...}
                           oauthAccount block
 .dirs.json                where the last interactive command found each
                           CLI's login, for the refresh timer
+.runs/<cli>/<name>/       a `remuda run` session's directory, while it runs
+.pins.json                the .remuda.toml files allowed, with their digests
 .log.jsonl                what remuda did, one event per line, for
                           `remuda log` and the page's Log; it moves to
                           .log.1.jsonl at 1 MiB, .log.lock guards both

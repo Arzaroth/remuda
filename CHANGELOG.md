@@ -9,10 +9,13 @@
   (`remuda claude work` for short). The session shares your history, projects,
   settings and MCP servers, the tokens its CLI refreshes go back to the store
   when it exits, and while it runs that login is not refreshed, switched to,
-  removed or pinged. `ls` and the page say which logins are in a session.
+  removed or pinged. A second terminal on the same login joins the session.
+  `ls` and the page say which logins are in a session.
 - Pins: `remuda pin claude/work` writes `.remuda.toml` in a repository, and
   with `eval "$(remuda shell-init zsh)"` every `claude` or `codex` started
-  there runs on the pinned login. Elsewhere they run as before.
+  there runs on the pinned login. Elsewhere they run as before. A
+  `.remuda.toml` remuda did not write is read only once `remuda pin --allow`
+  trusts it.
 
 ## [0.23.0] - 2026-10-22
 
