@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail};
 
 use crate::fsx::now_ms;
+use crate::logbook::{self, By, Event, Kind};
 use crate::provider::{Identity, Provider};
 use crate::store::{Entry, Store};
 use serde_json::Value;
@@ -268,17 +269,31 @@ fn guards_live(discard: bool, live: &LiveState) -> bool {
 }
 
 /// Returns what to tell the user.
+#[cfg(test)]
 pub fn switch(store: &Store, p: &dyn Provider, name: &str, discard: bool) -> Result<String> {
-    switch_when(store, p, name, discard, &|| Ok(()))
+    switch_by(store, p, name, discard, By::Cli)
 }
 
-/// [`switch`], asking `ready` once the live login is locked, right before the
-/// write: auto mode refuses there when a session has started meanwhile.
+pub fn switch_by(
+    store: &Store,
+    p: &dyn Provider,
+    name: &str,
+    discard: bool,
+    by: By,
+) -> Result<String> {
+    switch_when(store, p, name, discard, by, None, &|| Ok(()))
+}
+
+/// [`switch_by`], asking `ready` once the live login is locked, right before
+/// the write: auto mode refuses there when a session has started meanwhile.
+/// The switch is logged with `why` it was made.
 pub fn switch_when(
     store: &Store,
     p: &dyn Provider,
     name: &str,
     discard: bool,
+    by: By,
+    why: Option<&str>,
     ready: &dyn Fn() -> Result<()>,
 ) -> Result<String> {
     let mut target = store
@@ -345,12 +360,23 @@ pub fn switch_when(
         }
     }
     crate::runs::switched(store, p.id(), now_ms());
-    Ok(format!(
+    let message = format!(
         "switched {} to {} ({})",
         p.name(),
         target.name,
         target.meta.email
-    ))
+    );
+    let logged = match why {
+        Some(why) => format!("{message}: {why}"),
+        None => message.clone(),
+    };
+    logbook::note(
+        store,
+        Event::new(Kind::Switch, true, logged)
+            .about(p.id(), Some(name))
+            .by(by),
+    );
+    Ok(message)
 }
 
 #[cfg(test)]

@@ -105,6 +105,12 @@ fn pick<'b>(
             format!("the proxy cannot spend {} logins", p.name()),
         ));
     }
+    let creds = active(p);
+    backend.spent(p.id(), creds.as_ref().err().map(|r| r.message.as_str()));
+    Ok((p, model.to_owned(), creds?))
+}
+
+fn active(p: &dyn Provider) -> Result<Value, Refusal> {
     let creds = p
         .live()
         .map_err(|e| refuse(503, format!("{} login unreadable: {e:#}", p.name())))?
@@ -128,7 +134,7 @@ fn pick<'b>(
             ),
         ));
     }
-    Ok((p, model.to_owned(), creds))
+    Ok(creds)
 }
 
 pub fn forward(backend: &dyn Backend, mut call: Call, out: &mut impl Write) -> Result<(), Refusal> {

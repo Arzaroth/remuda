@@ -17,6 +17,9 @@ use crate::provider::Provider;
 pub trait Backend: Send + Sync {
     fn settings(&self) -> Result<settings::Settings>;
     fn providers(&self) -> Vec<&dyn Provider>;
+    /// Told on each request whether the provider's active login could be
+    /// spent, and why not.
+    fn spent(&self, _provider: &str, _refused: Option<&str>) {}
 }
 
 /// Whether the listener runs, and on which port; started, moved and stopped

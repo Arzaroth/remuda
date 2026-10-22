@@ -13,6 +13,7 @@ mod gauge;
 mod grok;
 mod http;
 mod kimi;
+mod logbook;
 mod oauth;
 mod ops;
 mod paths;
@@ -39,6 +40,7 @@ use crate::codex::Codex;
 use crate::cursor::Cursor;
 use crate::grok::Grok;
 use crate::kimi::Kimi;
+use crate::logbook::By;
 use crate::project::REMUDA;
 use crate::provider::Provider;
 use crate::store::Store;
@@ -126,6 +128,16 @@ enum Cmd {
     Remove { name: String },
     /// Say which login auto mode puts each CLI on now, and why, without switching.
     Auto,
+    /// Show what remuda did: switches and who made them, refreshes, auto
+    /// mode, keep-warm, the proxy. PROVIDER, NAME or PROVIDER/NAME narrows it.
+    Log {
+        name: Option<String>,
+        /// How many of the latest events to show.
+        #[arg(short = 'n', long, default_value_t = 50)]
+        lines: usize,
+        #[arg(long)]
+        json: bool,
+    },
     /// Serve a local page to list, switch and sign in credentials from the browser.
     Serve {
         #[arg(long, default_value_t = 7429)]
@@ -159,6 +171,7 @@ impl Cmd {
             Cmd::Rename { .. } => Some("renaming"),
             Cmd::Remove { .. } => Some("removing"),
             Cmd::Auto => Some("checking auto mode"),
+            Cmd::Log { .. } => Some("reading the log"),
             Cmd::Serve { .. } => Some("serving"),
             Cmd::Import { .. }
             | Cmd::Login { .. }
@@ -392,7 +405,7 @@ fn main() -> Result<()> {
     match command {
         Cmd::Use { name, discard } => {
             let (p, name) = commands::resolve(&store, &providers, &name)?;
-            println!("{}", ops::switch(&store, p, &name, discard)?);
+            println!("{}", ops::switch_by(&store, p, &name, discard, By::Cli)?);
             gauge::nudge(&paths::tokengauge_snapshot());
             Ok(())
         }
@@ -473,6 +486,14 @@ fn main() -> Result<()> {
                 out,
             )
         }
+        Cmd::Log { name, lines, json } => commands::log(
+            &store,
+            name.as_deref(),
+            lines,
+            json,
+            &jiff::tz::TimeZone::system(),
+            out,
+        ),
         Cmd::Remove { name } => {
             let (p, name) = commands::resolve(&store, &providers, &name)?;
             let state = ops::sync_live(&store, p)?;

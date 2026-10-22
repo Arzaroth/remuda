@@ -5,6 +5,7 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
 use crate::fsx::now_ms;
+use crate::logbook::{self, Event, Kind};
 use crate::ops::{self, LiveState};
 use crate::provider::Provider;
 use crate::store::{Entry, Store, validate_name};
@@ -263,7 +264,12 @@ pub fn import(
     let entry = Entry::new(p.id(), name, creds, identity, now_ms());
     ensure_new_account(store, &entry)?;
     store.save(&entry)?;
-    writeln!(out, "{}", stored_message(p, &entry))?;
+    let message = stored_message(p, &entry);
+    logbook::note(
+        store,
+        Event::new(Kind::Store, true, &message).about(p.id(), Some(name)),
+    );
+    writeln!(out, "{message}")?;
     Ok(())
 }
 
@@ -382,6 +388,11 @@ pub fn save_login(
     }
     ensure_new_account(store, &entry)?;
     store.save(&entry)?;
+    let message = format!("signed in and {}", stored_message(p, &entry));
+    logbook::note(
+        store,
+        Event::new(Kind::Store, true, message).about(p.id(), Some(name)),
+    );
     Ok(entry)
 }
 
@@ -433,13 +444,12 @@ pub fn refresh(
             continue;
         }
         if let LiveState::Unreadable { error } = &live.state {
-            report.problem(
-                err,
-                format!(
-                    "{}: not refreshing, its login cannot be read: {error}",
-                    p.id()
-                ),
-            )?;
+            let why = format!("not refreshing, its login cannot be read: {error}");
+            logbook::note_once(
+                store,
+                Event::new(Kind::Refresh, false, &why).about(p.id(), None),
+            );
+            report.problem(err, format!("{}: {why}", p.id()))?;
             continue;
         }
         for mut entry in store.list(p.id())? {
@@ -447,13 +457,9 @@ pub fn refresh(
                 continue;
             }
             if !entry.verified {
-                report.problem(
-                    err,
-                    format!(
-                        "{}: not refreshing, it does not match its sidecar",
-                        entry.qualified()
-                    ),
-                )?;
+                let why = "not refreshing, it does not match its sidecar";
+                logbook::note_once(store, refreshing(&entry, false, why));
+                report.problem(err, format!("{}: {why}", entry.qualified()))?;
                 continue;
             }
             if live.state.active_name() == Some(entry.name.as_str()) {
@@ -473,10 +479,14 @@ pub fn refresh(
             }
             match ops::refresh_entry(store, p, &mut entry).and_then(|()| store.save(&entry)) {
                 Ok(()) => {
+                    logbook::note(store, refreshing(&entry, true, "refreshed"));
                     writeln!(out, "{}: refreshed", entry.qualified())?;
                     report.refreshed.push(entry.qualified());
                 }
-                Err(e) => report.problem(err, format!("{}: {e:#}", entry.qualified()))?,
+                Err(e) => {
+                    logbook::note_once(store, refreshing(&entry, false, format!("{e:#}")));
+                    report.problem(err, format!("{}: {e:#}", entry.qualified()))?
+                }
             }
         }
     }
@@ -484,6 +494,10 @@ pub fn refresh(
         0 => Ok(()),
         n => Err(Failed(n).into()),
     }
+}
+
+fn refreshing(entry: &Entry, ok: bool, message: impl Into<String>) -> Event {
+    Event::new(Kind::Refresh, ok, message).about(&entry.provider, Some(&entry.name))
 }
 
 pub fn label(
@@ -603,6 +617,54 @@ pub fn auto(
     Ok(())
 }
 
+/// The latest `lines` events, oldest first, in local time.
+pub fn log(
+    store: &Store,
+    spec: Option<&str>,
+    lines: usize,
+    json: bool,
+    tz: &jiff::tz::TimeZone,
+    out: &mut dyn Write,
+) -> Result<()> {
+    let events = logbook::recent(store, spec, lines);
+    if json {
+        writeln!(out, "{}", serde_json::to_string_pretty(&events)?)?;
+        return Ok(());
+    }
+    if events.is_empty() {
+        match spec {
+            Some(spec) => writeln!(out, "nothing logged about {spec}")?,
+            None => writeln!(out, "nothing logged yet")?,
+        }
+        return Ok(());
+    }
+    let width = events.iter().map(|e| e.subject().len()).max().unwrap_or(0);
+    for e in &events {
+        let when = jiff::Timestamp::from_millisecond(e.at)
+            .map(|t| {
+                t.to_zoned(tz.clone())
+                    .strftime("%Y-%m-%d %H:%M:%S")
+                    .to_string()
+            })
+            .unwrap_or_default();
+        let failed = if e.ok { "" } else { "failed: " };
+        let by = match e.by {
+            Some(logbook::By::Cli) => "  [cli]",
+            Some(logbook::By::Page) => "  [page]",
+            Some(logbook::By::Auto) => "  [auto mode]",
+            None => "",
+        };
+        writeln!(
+            out,
+            "{when}  {:<7}  {:<width$}  {failed}{}{by}",
+            e.kind.as_str(),
+            e.subject(),
+            e.message
+        )?;
+    }
+    Ok(())
+}
+
 pub fn rename(
     store: &Store,
     config: &Path,
@@ -612,7 +674,12 @@ pub fn rename(
     out: &mut dyn Write,
 ) -> Result<()> {
     store.rename(p.id(), from, to)?;
-    writeln!(out, "renamed {0}/{from} to {0}/{to}", p.id())?;
+    let message = format!("renamed {0}/{from} to {0}/{to}", p.id());
+    logbook::note(
+        store,
+        Event::new(Kind::Store, true, &message).about(p.id(), Some(to)),
+    );
+    writeln!(out, "{message}")?;
     if let Err(e) = crate::config::rename_login(config, p.id(), from, to) {
         writeln!(
             out,
@@ -645,7 +712,12 @@ pub fn remove(
         );
     }
     store.remove(p.id(), name)?;
-    writeln!(out, "removed {}/{name}", p.id())?;
+    let message = format!("removed {}/{name}", p.id());
+    logbook::note(
+        store,
+        Event::new(Kind::Store, true, &message).about(p.id(), Some(name)),
+    );
+    writeln!(out, "{message}")?;
     if let Err(e) = crate::config::forget_login(config, p.id(), name) {
         writeln!(
             out,
@@ -791,6 +863,12 @@ mod tests {
         assert_eq!(e.stored_refresh_token("work").as_deref(), Some("r1"));
         let stored = e.store.get("claude", "work").unwrap().unwrap();
         assert!(stored.creds.get("mcpOAuth").is_none());
+        let logged = logbook::read(&e.store);
+        assert_eq!(logged.len(), 1);
+        assert_eq!(
+            (logged[0].kind, logged[0].subject().as_str()),
+            (Kind::Store, "claude/work")
+        );
 
         let err = import(
             &e.store,
@@ -1518,6 +1596,152 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn a_failing_refresh_is_logged_once_and_store_changes_every_time() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/v1/oauth/token")
+            .with_status(400)
+            .with_body(r#"{"error":"invalid_grant"}"#)
+            .create();
+        let e = env(&server.url());
+        e.stored("dead", "u-dead", HOUR);
+        e.stored("spare", "u-spare", HOUR);
+        for _ in 0..2 {
+            let _ = refresh(
+                &e.store,
+                &live(&e, LiveState::SignedOut),
+                RefreshScope {
+                    only: Some((&e.claude, "dead")),
+                    force: true,
+                    within_min: 60,
+                },
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut Report::default(),
+            );
+        }
+        let config = e.tmp.path().join("config.toml");
+        rename(
+            &e.store,
+            &config,
+            &e.claude,
+            "spare",
+            "job",
+            &mut Vec::new(),
+        )
+        .unwrap();
+        remove(
+            &e.store,
+            &config,
+            &e.claude,
+            &LiveState::SignedOut,
+            "job",
+            &mut Vec::new(),
+        )
+        .unwrap();
+
+        let events = logbook::read(&e.store);
+        let seen: Vec<(Kind, String, bool)> =
+            events.iter().map(|e| (e.kind, e.subject(), e.ok)).collect();
+        assert_eq!(
+            seen,
+            [
+                (Kind::Refresh, "claude/dead".to_owned(), false),
+                (Kind::Store, "claude/job".to_owned(), true),
+                (Kind::Store, "claude/job".to_owned(), true),
+            ]
+        );
+        assert!(
+            events[0]
+                .message
+                .starts_with("the refresh token was rejected")
+        );
+        assert_eq!(events[1].message, "renamed claude/spare to claude/job");
+        assert_eq!(events[2].message, "removed claude/job");
+        let line = std::fs::read_to_string(e.store.root().join(".log.jsonl")).unwrap();
+        assert!(
+            !line.contains("r-dead") && !line.contains("a-dead"),
+            "{line}"
+        );
+    }
+
+    #[test]
+    fn the_log_prints_each_event_on_a_line_with_who_did_it() {
+        let e = env(&OFFLINE);
+        let mut out = Vec::new();
+        log(
+            &e.store,
+            None,
+            10,
+            false,
+            &jiff::tz::TimeZone::UTC,
+            &mut out,
+        )
+        .unwrap();
+        assert_eq!(text(out), "nothing logged yet\n");
+
+        e.stored("work", "u-work", HOUR);
+        let at = |ms, event: Event| Event { at: ms, ..event };
+        logbook::note(
+            &e.store,
+            at(
+                0,
+                Event::new(Kind::Switch, true, "switched Claude Code to work")
+                    .about("claude", Some("work"))
+                    .by(logbook::By::Auto),
+            ),
+        );
+        logbook::note(
+            &e.store,
+            at(
+                61_000,
+                Event::new(Kind::Proxy, false, "Codex is signed out").about("codex", None),
+            ),
+        );
+        let mut out = Vec::new();
+        log(
+            &e.store,
+            None,
+            10,
+            false,
+            &jiff::tz::TimeZone::UTC,
+            &mut out,
+        )
+        .unwrap();
+        assert_eq!(
+            text(out),
+            "1970-01-01 00:00:00  switch   claude/work  switched Claude Code to work  [auto mode]\n\
+             1970-01-01 00:01:01  proxy    codex        failed: Codex is signed out\n"
+        );
+
+        let mut out = Vec::new();
+        log(
+            &e.store,
+            Some("codex"),
+            1,
+            true,
+            &jiff::tz::TimeZone::UTC,
+            &mut out,
+        )
+        .unwrap();
+        let shown: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(shown.as_array().unwrap().len(), 1);
+        assert_eq!(shown[0]["kind"], "proxy");
+
+        let mut out = Vec::new();
+        log(
+            &e.store,
+            Some("perso"),
+            10,
+            false,
+            &jiff::tz::TimeZone::UTC,
+            &mut out,
+        )
+        .unwrap();
+        assert_eq!(text(out), "nothing logged about perso\n");
     }
 
     #[test]
