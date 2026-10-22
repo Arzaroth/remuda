@@ -1,4 +1,4 @@
-import { brand } from '../brand';
+import { markColor } from '../brand';
 import { ICONS } from '../icons';
 
 export function ProviderIcon(props: { provider: string; size?: number }) {
@@ -11,7 +11,7 @@ export function ProviderIcon(props: { provider: string; size?: number }) {
       height={props.size ?? 18}
       fill="currentColor"
       aria-hidden="true"
-      style={{ color: brand(props.provider) }}
+      style={{ color: markColor(props.provider) }}
       innerHTML={icon()?.inner ?? '<circle cx="12" cy="12" r="8"/>'}
     />
   );

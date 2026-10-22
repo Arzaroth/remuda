@@ -19,15 +19,16 @@ fn inner(svg: &str) -> String {
 fn expected() -> String {
     let mut ts = String::from(
         "// Written by tests/brands.rs from selvedge::brands.\n\
-         export const ICONS: Record<string, { viewBox: string; inner: string; color: string | null }> = {\n",
+         export const ICONS: Record<string, { viewBox: string; inner: string; color: string | null; mark: string | null }> = {\n",
     );
     for b in selvedge::brands::BRANDS {
         ts += &format!(
-            "  {}: {{ viewBox: {}, inner: {}, color: {} }},\n",
+            "  {}: {{ viewBox: {}, inner: {}, color: {}, mark: {} }},\n",
             b.id,
             serde_json::to_string(view_box(b.svg)).unwrap(),
             serde_json::to_string(&inner(b.svg)).unwrap(),
             serde_json::to_string(&b.color).unwrap(),
+            serde_json::to_string(&b.mark_color()).unwrap(),
         );
     }
     ts + "};\n"
