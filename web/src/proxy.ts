@@ -9,6 +9,16 @@ export const PROTOCOLS: { id: Protocol; name: string; format: string }[] = [
 
 export const baseUrl = (p: Proxy, protocol: Protocol) => p.baseUrls[protocol];
 
+const ENV: Record<Protocol, [string, string]> = {
+  openai: ['OPENAI_BASE_URL', 'OPENAI_API_KEY'],
+  claude: ['ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY'],
+};
+
+export const exports = (p: Proxy, protocol: Protocol, key: string) => {
+  const [url, secret] = ENV[protocol];
+  return `export ${url}="${baseUrl(p, protocol)}"\nexport ${secret}="${key}"`;
+};
+
 export const masked = (key: string) => '•'.repeat(Math.min(Math.max(key.length, 8), 24));
 
 export function status(p: Proxy): { text: string; tone: 'good' | 'bad' | 'muted' } {
