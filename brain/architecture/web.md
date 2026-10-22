@@ -197,8 +197,10 @@ requests and has a light and a dark theme and two looks; its fonts
 and the provider marks and colours (`web/src/icons.ts`) are inlined too.
 `icons.ts` is `selvedge::brands` written out, the table TokenGauge draws from:
 `tests/brands.rs` fails when it differs from the pinned selvedge, and
-`REMUDA_BLESS=1 cargo test --test brands` rewrites it. A brand with no colour
-(Grok, Z.ai, opencode) is drawn in the page's ink. It reads `/api/events` through `fetch` (an `EventSource`
+`REMUDA_BLESS=1 cargo test --test brands` rewrites it. A mark is tinted in its
+`mark` colour and accents use `color` (`brand.ts`); either one missing is the
+page's ink, so Grok, Z.ai and opencode are drawn in ink, and Kimi's K too,
+beside the blue dot its mark carries. It reads `/api/events` through `fetch` (an `EventSource`
 cannot send the token header). A browser allows only about 6 connections per
 host across all its tabs, so one tab follows the stream, holding the Web Lock
 `remuda-events`, and passes each change to the others over the
