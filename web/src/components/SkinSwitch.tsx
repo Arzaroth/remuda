@@ -3,8 +3,9 @@ import { Choice } from './Choice';
 
 type Skin = 'sage' | 'instrument';
 
+const [skin, setSkin] = createSignal<Skin>((document.documentElement.dataset.skin as Skin) || 'sage');
+
 export function SkinSwitch() {
-  const [skin, setSkin] = createSignal<Skin>((document.documentElement.dataset.skin as Skin) || 'sage');
   const pick = (k: Skin) => {
     document.documentElement.dataset.skin = k;
     try {

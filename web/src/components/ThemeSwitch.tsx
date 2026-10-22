@@ -3,8 +3,9 @@ import { Choice } from './Choice';
 
 type Theme = 'auto' | 'light' | 'dark';
 
+const [theme, setTheme] = createSignal<Theme>((document.documentElement.dataset.theme as Theme) || 'auto');
+
 export function ThemeSwitch() {
-  const [theme, setTheme] = createSignal<Theme>((document.documentElement.dataset.theme as Theme) || 'auto');
   const pick = (t: Theme) => {
     if (t === 'auto') delete document.documentElement.dataset.theme;
     else document.documentElement.dataset.theme = t;
