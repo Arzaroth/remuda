@@ -139,9 +139,13 @@ other terminal uses; `remuda codex perso -- exec "..."` does the same for
 Codex. The session gets a `CLAUDE_CONFIG_DIR` (or `CODEX_HOME`) of its own
 under the store. Everything in your real one is linked into it, so history,
 projects, settings and MCP servers stay shared. Only the files holding the
-login are its own. A second terminal on the same login joins the session.
-When the last one exits, the tokens the CLI refreshed go back to the store,
-and anything else it changed goes back into your files. While it runs, that
+login are its own: for Claude Code, copies of `.credentials.json` and
+`.claude.json` holding that login. A second terminal on the same login joins
+the session. When the last one exits, the tokens the CLI refreshed go back to
+the store once remuda has confirmed whose they are, and what else it changed
+in those copies is merged back into yours. Offline, the session's directory
+stays under the store, holding the login, until a later command can confirm
+them. While it runs, that
 login is left alone: not refreshed, switched to, removed or pinged.
 
 Pin a login to a repository and every `claude` started there uses it:
@@ -323,7 +327,8 @@ opencode/<name>.json      {"key": ...}
                           oauthAccount block
 .dirs.json                where the last interactive command found each
                           CLI's login, for the refresh timer
-.runs/<cli>/<name>/       a `remuda run` session's directory, while it runs
+.runs/<cli>/<name>/       a `remuda run` session's directory, until its
+                          tokens are back in the store
 .pins.json                the .remuda.toml files allowed, with their digests
 .log.jsonl                what remuda did, one event per line, for
                           `remuda log` and the page's Log; it moves to
