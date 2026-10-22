@@ -17,6 +17,7 @@ mod logbook;
 mod oauth;
 mod ops;
 mod paths;
+mod pins;
 mod pkce;
 mod project;
 mod provider;
@@ -130,13 +131,30 @@ enum Cmd {
     /// Say which login auto mode puts each CLI on now, and why, without switching.
     Auto,
     /// Start a CLI on a stored login without switching the one every other
-    /// session uses: NAME, PROVIDER/NAME, or a provider alone for the login it
-    /// uses now. Anything after `--` goes to the CLI.
+    /// session uses: NAME, PROVIDER/NAME, or a provider alone for the login
+    /// `.remuda.toml` pins here, else the one it uses now. Anything after `--`
+    /// goes to the CLI.
     Run {
         name: String,
         #[arg(last = true)]
         args: Vec<String>,
     },
+    /// Pin a login for this directory and below in ./.remuda.toml, so
+    /// `remuda run <cli>` starts it there; with no NAME, show the pins in force.
+    Pin {
+        name: Option<String>,
+        /// Unpin this CLI from ./.remuda.toml instead.
+        #[arg(long, value_name = "CLI", conflicts_with = "name")]
+        remove: Option<String>,
+    },
+    /// Print shell functions that start `claude` and `codex` through
+    /// `remuda run`, for the login pinned where they start:
+    /// `eval "$(remuda shell-init zsh)"`.
+    ShellInit { shell: String },
+    /// `remuda claude [NAME] [ARGS...]`, read before clap so the CLI's own
+    /// arguments reach it untouched.
+    #[command(skip)]
+    Cli(Vec<String>),
     /// Show what remuda did: switches and who made them, refreshes, auto
     /// mode, keep-warm, the proxy. PROVIDER, NAME or PROVIDER/NAME narrows it.
     Log {
@@ -183,7 +201,8 @@ impl Cmd {
             Cmd::Remove { .. } => Some("removing"),
             Cmd::Auto => Some("checking auto mode"),
             Cmd::Log { .. } => Some("reading the log"),
-            Cmd::Run { .. } => None,
+            Cmd::Run { .. } | Cmd::Cli(_) | Cmd::ShellInit { .. } => None,
+            Cmd::Pin { name, .. } => name.as_ref().map(|_| "pinning"),
             Cmd::Serve { .. } => Some("serving"),
             Cmd::Import { .. }
             | Cmd::Login { .. }
@@ -329,9 +348,75 @@ fn exec(command: &str, args: &[String]) -> Result<()> {
     Err(err).with_context(|| format!("failed to start {command}"))
 }
 
+/// `remuda claude work -- x` and `remuda claude x`: a first word is the
+/// login only when that CLI has one stored by that name, so the CLI's own
+/// arguments pass through untouched.
+fn shorthand(
+    store: &Store,
+    providers: &[&dyn Provider],
+    words: &[String],
+) -> Result<(String, Vec<String>)> {
+    let (cli, rest) = words.split_first().context("no command")?;
+    let p = providers
+        .iter()
+        .find(|p| p.id() == cli && p.run_spec().is_some())
+        .with_context(|| format!("unrecognized subcommand '{cli}'; see `remuda --help`"))?;
+    let named = rest.first().filter(|w| {
+        !w.starts_with('-')
+            && store::validate_name(w).is_ok()
+            && store.get(p.id(), w).ok().flatten().is_some()
+    });
+    let (target, rest) = match named {
+        Some(name) => (format!("{cli}/{name}"), &rest[1..]),
+        None => (cli.clone(), rest),
+    };
+    let args = match rest.split_first() {
+        Some((dashes, after)) if dashes == "--" => after.to_vec(),
+        _ => rest.to_vec(),
+    };
+    Ok((target, args))
+}
+
+fn pin(
+    store: &Store,
+    providers: &[&dyn Provider],
+    name: Option<&str>,
+    remove: Option<&str>,
+) -> Result<()> {
+    let here = std::env::current_dir().context("cannot tell which directory this is")?;
+    if let Some(cli) = remove {
+        let p = commands::find(providers, cli)?;
+        let file = pins::set(&here, p.id(), None)?;
+        println!("unpinned {} in {}", p.name(), file.display());
+        return Ok(());
+    }
+    if let Some(spec) = name {
+        let (p, name) = commands::resolve(store, providers, spec)?;
+        p.run_spec()
+            .with_context(|| format!("remuda run cannot start {} yet", p.name()))?;
+        let file = pins::set(&here, p.id(), Some(&name))?;
+        println!("pinned {} to {name} in {}", p.name(), file.display());
+        return Ok(());
+    }
+    let mut any = false;
+    for p in providers.iter().filter(|p| p.run_spec().is_some()) {
+        if let Some(pin) = pins::find(&here, p.id())? {
+            println!("{}: {} ({})", p.id(), pin.name, pin.file.display());
+            any = true;
+        }
+    }
+    if !any {
+        println!("nothing is pinned here");
+    }
+    Ok(())
+}
+
 fn run(store: &Store, providers: &[&dyn Provider], target: &str, args: &[String]) -> Result<()> {
     let (p, name) = match providers.iter().find(|p| p.id() == target) {
-        Some(p) => (*p, None),
+        Some(p) => {
+            let here = std::env::current_dir().unwrap_or_default();
+            (*p, pins::find(&here, p.id())?.map(|pin| pin.name))
+        }
         None => {
             let (p, name) = commands::resolve(store, providers, target)?;
             (p, Some(name))
@@ -378,10 +463,22 @@ fn run(store: &Store, providers: &[&dyn Provider], target: &str, args: &[String]
     std::process::exit(exit_code(status));
 }
 
+/// The CLIs `remuda <cli> [NAME] [ARGS...]` starts.
+const SHORTHAND: [&str; 2] = ["claude", "codex"];
+
 fn main() -> Result<()> {
-    let cli = Cli::parse();
-    let Some(command) = cli.command else {
-        return update(cli.check_update);
+    let argv: Vec<String> = std::env::args_os()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    let command = match argv.get(1) {
+        Some(first) if SHORTHAND.contains(&first.as_str()) => Cmd::Cli(argv[1..].to_vec()),
+        _ => {
+            let cli = Cli::parse();
+            match cli.command {
+                Some(command) => command,
+                None => return update(cli.check_update),
+            }
+        }
     };
     if let Cmd::Open { no_browser } = command {
         return open(no_browser);
@@ -509,6 +606,21 @@ fn main() -> Result<()> {
     if let Cmd::Run { name, args } = &command {
         return run(&store, &providers, name, args);
     }
+    if let Cmd::Cli(words) = &command {
+        let (target, args) = shorthand(&store, &providers, words)?;
+        return run(&store, &providers, &target, &args);
+    }
+    if let Cmd::ShellInit { shell } = &command {
+        let commands: Vec<&str> = providers
+            .iter()
+            .filter_map(|p| p.run_spec().map(|s| s.command))
+            .collect();
+        print!("{}", pins::shell_init(shell, &commands)?);
+        return Ok(());
+    }
+    if let Cmd::Pin { name, remove } = &command {
+        return pin(&store, &providers, name.as_deref(), remove.as_deref());
+    }
 
     let _lock = store.lock()?;
     match command {
@@ -622,6 +734,9 @@ fn main() -> Result<()> {
         }
         Cmd::Login { .. }
         | Cmd::Run { .. }
+        | Cmd::Cli(_)
+        | Cmd::ShellInit { .. }
+        | Cmd::Pin { .. }
         | Cmd::Serve { .. }
         | Cmd::Open { .. }
         | Cmd::Completions { .. }
