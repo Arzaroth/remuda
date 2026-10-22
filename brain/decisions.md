@@ -334,19 +334,34 @@ instead: Claude Code's `.claude.json` carries `oauthAccount` as well as
 projects and MCP servers, and a link would let the session write another
 account into the file every other session reads. The copies are merged back
 key by key when the session ends, the login's keys excepted, so what the
-session changed is not lost. The CLI's own copy wins where both changed. A
-lease, the `flock` the session holds, marks the login in use rather than a
-pid file, since the kernel drops it however the process dies. A directory
-left with no lease held is a session that died, finished by the next command
+session changed is not lost. The CLI's own copy wins where both changed,
+except for a token, where the later expiry wins.
+
+The session is marked by a shared `flock` that every process of it holds,
+the CLI included, through an inherited descriptor, rather than a pid file:
+the kernel drops it however the processes die. Two terminals on one login
+share one session, as they share the CLI's own directory, since a second
+directory would put the login's refresh token in two places. The session
+ends with its last process. Its directory, and the hold on the login, stay
+until its tokens are safely back in the store, so a token nobody can
+identify yet waits for the next command rather than being set aside
 ([features/run.md](features/run.md)).
 
-## A pin is read only from a file the user owns
+A session exports what the variable it moved held outside
+(`REMUDA_OUTER_<VAR>`), and remuda reads that first. Otherwise a remuda run
+from inside the session would take the session's copy for the CLI's own
+files and switch or refresh the wrong login.
+
+## A pin is read only once allowed
 
 A `.remuda.toml` chooses which of the user's logins spends in a directory, and
-a cloned repository could carry one. As git does with `safe.directory`, a file
-another user owns is ignored. An unpinned `remuda run claude` `exec`s the CLI
-without touching the store, so shell functions that route every `claude`
-through remuda cost nothing where nothing is pinned.
+a clone can carry one, owned by the user like anything they cloned. So a file
+is read only once allowed as it is (`<store>/.pins.json`, a digest per path),
+as direnv does with `.envrc`. `remuda pin` allows what it writes, and a link
+or another user's file is never read. A file that cannot be used is passed
+over with a warning rather than failing, since the shell functions route
+every `claude` through remuda. An unpinned run `exec`s the CLI before
+touching the store, so routing costs nothing where nothing is pinned.
 
 ## Packages are made from the release archive
 

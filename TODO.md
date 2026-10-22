@@ -6,13 +6,10 @@ done.
 
 ## Decisions before roadmap work
 
-- [ ] `remuda run`: check against a real Codex session that what it writes
-      under `CODEX_HOME` (sessions, history, logs) goes through the links, and
-      that a setting it rewrites by rename is not lost with the session's
-      directory.
-- [ ] Auto mode: a Codex `remuda run` session counts as a running `codex`, so
-      it holds the global switch too; tell the two apart by `CODEX_HOME` in
-      the process's environment.
+- [ ] `remuda run`: check against real Claude Code and Codex sessions that
+      what they write under their directory goes through the links or comes
+      back at the end, and that two terminals joined in one session refresh
+      without signing each other out.
 - [ ] Auto-switch: whether a session in the middle of a request can be told
       apart, so a switch can wait for it. Until then auto mode does not try.
 - [ ] Hub and satellites: hand over credentials or proxy the API. The local

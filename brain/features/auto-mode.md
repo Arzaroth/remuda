@@ -43,7 +43,9 @@ For each CLI whose auto mode is on (`App::auto_round`), under the store lock:
    the switch's own sync and refresh is caught. A process counts by name, by a
    release binary named after its target (`codex-x86_64-...`), or as a
    `codex.js` script under node, bun or deno; not being able to read `/proc`
-   counts as a session running.
+   counts as a session running. A `remuda run` session's `codex`, which has
+   `REMUDA_OUTER_CODEX_HOME` in its environment, does not count: it is on
+   files of its own ([run.md](run.md)).
 
 What each CLI's round decided, and the last switch auto mode made, are kept in
 memory and sent to the page with the state. The service's log gets a line for
