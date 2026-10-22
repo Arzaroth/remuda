@@ -368,6 +368,11 @@ function Row(props: { c: Credential; live: Live | undefined }) {
               Unverified
             </span>
           </Show>
+          <Show when={c().running}>
+            <span class="pill run-pill" title="A `remuda run` session uses it: it is not refreshed, switched to or removed until it ends">
+              In a session
+            </span>
+          </Show>
           <Show when={warm()}>
             {(w) => (
               <span class={`pill warm-pill ${w().state === 'failed' ? 'bad' : ''}`} title={warmLine(w(), now()).text}>
@@ -390,7 +395,12 @@ function Row(props: { c: Credential; live: Live | undefined }) {
             when={!c().active}
             fallback={<span class="in-use">In use</span>}
           >
-            <button class="btn go" data-armed={confirms.use.text() ? '1' : undefined} disabled={unverified()} onClick={use}>
+            <button
+              class="btn go"
+              data-armed={confirms.use.text() ? '1' : undefined}
+              disabled={unverified() || c().running}
+              onClick={use}
+            >
               {confirms.use.text() ?? 'Use'}
             </button>
           </Show>

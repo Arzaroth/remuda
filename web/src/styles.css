@@ -230,6 +230,7 @@ main { min-width: 0; padding: 34px clamp(20px, 4vw, 52px) 120px; }
 .pill.odd { background: transparent; box-shadow: inset 0 0 0 1px var(--warn); color: var(--warn); }
 .pill.warm-pill { color: var(--good); background: color-mix(in srgb, var(--good) 13%, transparent); }
 .pill.warm-pill.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 13%, transparent); }
+.pill.run-pill { color: var(--focus); background: color-mix(in srgb, var(--focus) 13%, transparent); }
 .compact { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; min-width: 0; }
 .cw { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 6px; align-items: baseline; }
 .cw-title { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
