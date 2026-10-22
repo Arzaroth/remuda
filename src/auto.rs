@@ -526,8 +526,15 @@ pub fn figures(
 
 /// How many processes under `proc` (a `/proc`) run one of `names`: by
 /// name, by a release binary named after its target (`codex-x86_64-...`), or
-/// as a script under node, bun or deno. `me` is left out.
-pub fn running(proc: &std::path::Path, names: &[&str], me: u32) -> std::io::Result<usize> {
+/// as a script under node, bun or deno. `me` is left out, and so is a
+/// process whose environment holds `apart`: a `remuda run` session, on files
+/// of its own.
+pub fn running(
+    proc: &std::path::Path,
+    names: &[&str],
+    me: u32,
+    apart: Option<&str>,
+) -> std::io::Result<usize> {
     let is = |base: &[u8]| {
         names.iter().any(|n| {
             let n = n.as_bytes();
@@ -563,7 +570,16 @@ pub fn running(proc: &std::path::Path, names: &[&str], me: u32) -> std::io::Resu
             .first()
             .is_some_and(|a| matches!(a.as_slice(), b"node" | b"bun" | b"deno"))
             && args.get(1).is_some_and(|a| is(a));
-        if is(comm.trim_ascii_end()) || args.first().is_some_and(|a| is(a)) || script {
+        if !(is(comm.trim_ascii_end()) || args.first().is_some_and(|a| is(a)) || script) {
+            continue;
+        }
+        let own = apart.is_some_and(|marker| {
+            let environ = std::fs::read(entry.path().join("environ")).unwrap_or_default();
+            environ
+                .split(|b| *b == 0)
+                .any(|kv| kv.starts_with(marker.as_bytes()) && kv.get(marker.len()) == Some(&b'='))
+        });
+        if !own {
             count += 1;
         }
     }
@@ -577,7 +593,13 @@ pub fn sessions_open(p: &dyn Provider) -> Option<String> {
     if names.is_empty() {
         return None;
     }
-    match running(std::path::Path::new("/proc"), names, std::process::id()) {
+    let apart = p.run_spec().map(|s| crate::paths::outer(s.var));
+    match running(
+        std::path::Path::new("/proc"),
+        names,
+        std::process::id(),
+        apart.as_deref(),
+    ) {
         Ok(0) => None,
         Ok(_) => Some(format!("waiting for every {} session to end", p.name())),
         Err(e) => Some(format!("cannot see whether {} runs: {e}", p.name())),
@@ -1121,7 +1143,7 @@ reserve = { work = "workday" }
         process(proc, 10, "zsh", &["-zsh"]);
         process(proc, 11, "vim", &["vim", "codex"]);
         process(proc, 12, "codexx", &["/usr/bin/codexx"]);
-        assert_eq!(running(proc, &["codex"], 1).unwrap(), 0);
+        assert_eq!(running(proc, &["codex"], 1, None).unwrap(), 0);
 
         process(proc, 20, "codex", &["codex", "exec"]);
         process(
@@ -1136,13 +1158,24 @@ reserve = { work = "workday" }
             "node",
             &["/usr/bin/node", "/usr/lib/node_modules/codex.js"],
         );
-        assert_eq!(running(proc, &["codex"], 1).unwrap(), 3);
+        assert_eq!(running(proc, &["codex"], 1, None).unwrap(), 3);
         assert_eq!(
-            running(proc, &["codex"], 20).unwrap(),
+            running(proc, &["codex"], 20, None).unwrap(),
             2,
             "itself is left out"
         );
-        assert!(running(&proc.join("gone"), &["codex"], 1).is_err());
+        assert!(running(&proc.join("gone"), &["codex"], 1, None).is_err());
+        std::fs::write(
+            proc.join("20").join("environ"),
+            b"HOME=/h\0REMUDA_OUTER_CODEX_HOME=\0CODEX_HOME=/s\0",
+        )
+        .unwrap();
+        let apart = Some("REMUDA_OUTER_CODEX_HOME");
+        assert_eq!(
+            running(proc, &["codex"], 1, apart).unwrap(),
+            2,
+            "a run session's codex is on its own files"
+        );
     }
 
     #[test]

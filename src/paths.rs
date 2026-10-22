@@ -5,10 +5,18 @@ fn home() -> PathBuf {
     env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
 }
 
+/// Set by `remuda run` beside the variable it points at the session's
+/// directory, to what that variable was outside: a remuda started from
+/// inside the session acts on the CLI's own files, never the session's.
+pub fn outer(var: &str) -> String {
+    format!("REMUDA_OUTER_{var}")
+}
+
 /// A directory named relative to where remuda was started means something
 /// else from anywhere else, the refresh timer included.
 fn var_dir(name: &str) -> Option<PathBuf> {
-    let dir = PathBuf::from(env::var_os(name).filter(|v| !v.is_empty())?);
+    let value = env::var_os(outer(name)).or_else(|| env::var_os(name));
+    let dir = PathBuf::from(value.filter(|v| !v.is_empty())?);
     Some(std::path::absolute(&dir).unwrap_or(dir))
 }
 

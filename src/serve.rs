@@ -260,6 +260,9 @@ impl App {
                             continue;
                         };
                         ops::sync_live(&self.store, p).and_then(|live| {
+                            if crate::session::in_use(&self.store, p.id(), &planned.name) {
+                                bail!("a `remuda run` session started on it");
+                            }
                             let active = warm::active(&live).map_err(anyhow::Error::msg)?;
                             warm::creds(&self.store, p, &planned.name, active.as_deref())
                         })
@@ -1451,7 +1454,7 @@ mod tests {
             "[auto.claude]\nenabled = true\nlogins = [\"work\", \"perso\"]\n[warm]\nclaude = [\"work\"]\n",
         )
         .unwrap();
-        let _held = crate::session::lease(&e.store, "claude", "work").unwrap();
+        let _held = crate::session::start(&e.store, &e.claude, "work").unwrap();
         snapshot(&e, crate::fsx::now_ms() - 1000, 100, 10);
 
         app.auto_round(&Zoned::now());
