@@ -527,8 +527,8 @@ pub fn figures(
 /// How many processes under `proc` (a `/proc`) run one of `names`: by
 /// name, by a release binary named after its target (`codex-x86_64-...`), or
 /// as a script under node, bun or deno. `me` is left out, and so is a
-/// process whose environment holds `apart`: a `remuda run` session, on files
-/// of its own.
+/// `remuda run` session's: its environment names, in the variable `apart`
+/// gives, a directory under a store's `.runs`, beside remuda's marker.
 pub fn running(
     proc: &std::path::Path,
     names: &[&str],
@@ -573,11 +573,16 @@ pub fn running(
         if !(is(comm.trim_ascii_end()) || args.first().is_some_and(|a| is(a)) || script) {
             continue;
         }
-        let own = apart.is_some_and(|marker| {
+        let own = apart.is_some_and(|var| {
             let environ = std::fs::read(entry.path().join("environ")).unwrap_or_default();
-            environ
-                .split(|b| *b == 0)
-                .any(|kv| kv.starts_with(marker.as_bytes()) && kv.get(marker.len()) == Some(&b'='))
+            let value = |name: &str| {
+                environ
+                    .split(|b| *b == 0)
+                    .find_map(|kv| kv.strip_prefix(format!("{name}=").as_bytes()))
+                    .map(<[u8]>::to_vec)
+            };
+            value(&crate::paths::outer(var)).is_some()
+                && value(var).is_some_and(|dir| dir.windows(7).any(|w| w == b"/.runs/"))
         });
         if !own {
             count += 1;
@@ -593,12 +598,12 @@ pub fn sessions_open(p: &dyn Provider) -> Option<String> {
     if names.is_empty() {
         return None;
     }
-    let apart = p.run_spec().map(|s| crate::paths::outer(s.var));
+    let apart = p.run_spec().map(|s| s.var);
     match running(
         std::path::Path::new("/proc"),
         names,
         std::process::id(),
-        apart.as_deref(),
+        apart,
     ) {
         Ok(0) => None,
         Ok(_) => Some(format!("waiting for every {} session to end", p.name())),
@@ -1167,14 +1172,18 @@ reserve = { work = "workday" }
         assert!(running(&proc.join("gone"), &["codex"], 1, None).is_err());
         std::fs::write(
             proc.join("20").join("environ"),
-            b"HOME=/h\0REMUDA_OUTER_CODEX_HOME=\0CODEX_HOME=/s\0",
+            b"HOME=/h\0REMUDA_OUTER_CODEX_HOME=\0CODEX_HOME=/s/.runs/codex/w/home\0",
         )
         .unwrap();
-        let apart = Some("REMUDA_OUTER_CODEX_HOME");
+        std::fs::write(
+            proc.join("21").join("environ"),
+            b"REMUDA_OUTER_CODEX_HOME=\0CODEX_HOME=/h/.codex\0",
+        )
+        .unwrap();
         assert_eq!(
-            running(proc, &["codex"], 1, apart).unwrap(),
+            running(proc, &["codex"], 1, Some("CODEX_HOME")).unwrap(),
             2,
-            "a run session's codex is on its own files"
+            "a run session's codex is on its own files, one that only kept the marker is not"
         );
     }
 

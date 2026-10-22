@@ -32,8 +32,7 @@ mod units;
 mod warm;
 
 use std::ffi::OsString;
-use std::io::{self, BufRead};
-use std::os::fd::RawFd;
+use std::io::{self, BufRead, Write};
 
 use anyhow::{Context, Result, bail};
 use clap::{CommandFactory, Parser, Subcommand};
@@ -315,9 +314,13 @@ const SHIELDED: [libc::c_int; 4] = [libc::SIGINT, libc::SIGQUIT, libc::SIGHUP, l
 
 /// Waits for the CLI with the signals that end a terminal session ignored,
 /// so remuda outlives it and syncs its tokens back. The CLI starts with the
-/// signal handling remuda was given, and with the session's lease, so the
-/// session lasts as long as the CLI does even if remuda is killed.
-fn shielded(cmd: &mut std::process::Command, lease: RawFd) -> io::Result<std::process::ExitStatus> {
+/// signal handling remuda was given, and its process is noted in the session,
+/// which then lasts as long as it does even if remuda is killed.
+fn shielded(
+    cmd: &mut std::process::Command,
+    lease: &mut session::Lease,
+    place: &std::path::Path,
+) -> io::Result<std::process::ExitStatus> {
     use std::os::unix::process::CommandExt;
     // SAFETY: the previous handlers are put back once the CLI exits.
     let before: Vec<libc::sighandler_t> = SHIELDED
@@ -325,46 +328,60 @@ fn shielded(cmd: &mut std::process::Command, lease: RawFd) -> io::Result<std::pr
         .map(|s| unsafe { libc::signal(*s, libc::SIG_IGN) })
         .collect();
     let inherited = before.clone();
-    // SAFETY: signal() and fcntl() are async-signal-safe, and nothing else
-    // runs between fork and exec.
+    // SAFETY: signal() is async-signal-safe, and nothing else runs between
+    // fork and exec.
     unsafe {
         cmd.pre_exec(move || {
             for (s, h) in SHIELDED.iter().zip(&inherited) {
                 libc::signal(*s, *h);
             }
-            if libc::fcntl(lease, libc::F_SETFD, 0) == -1 {
-                return Err(io::Error::last_os_error());
-            }
             Ok(())
         });
     }
-    let status = cmd.status();
+    let status = cmd.spawn().and_then(|mut child| {
+        lease.started(place, child.id());
+        child.wait()
+    });
     for (s, h) in SHIELDED.iter().zip(before) {
         unsafe { libc::signal(*s, h) };
     }
     status
 }
 
-/// Ends remuda as the CLI ended: with its code, or by the signal that killed
-/// it, which a shell tells apart from an exit.
+/// Ends remuda as the CLI ended: with its code, or, when a terminal's
+/// signal killed it, by that signal, which a shell tells apart from an exit.
 fn exit_as(status: std::process::ExitStatus) -> ! {
     use std::os::unix::process::ExitStatusExt;
     if let Some(signal) = status.signal() {
-        // SAFETY: the default handler is put back so the signal ends remuda.
-        unsafe {
-            libc::signal(signal, libc::SIG_DFL);
-            libc::raise(signal);
+        if SHIELDED.contains(&signal) {
+            // SAFETY: the default handler is put back so the signal ends remuda.
+            unsafe {
+                libc::signal(signal, libc::SIG_DFL);
+                libc::raise(signal);
+            }
         }
         std::process::exit(128 + signal);
     }
     std::process::exit(status.code().unwrap_or(1));
 }
 
-/// The CLI as it is, in place of remuda: nothing to sync back after.
-fn exec(command: &str, args: &[OsString]) -> Result<()> {
+/// The CLI as it is, in place of remuda: nothing to sync back after. Started
+/// from inside a session, it gets the CLI's own directory back.
+fn exec(spec: &provider::RunSpec, args: &[OsString]) -> Result<()> {
     use std::os::unix::process::CommandExt;
-    let err = std::process::Command::new(command).args(args).exec();
-    Err(err).with_context(|| format!("failed to start {command}"))
+    let mut cmd = std::process::Command::new(spec.command);
+    cmd.args(args);
+    let outer = paths::outer(spec.var);
+    if let Some(outside) = std::env::var_os(&outer) {
+        if outside.is_empty() {
+            cmd.env_remove(spec.var);
+        } else {
+            cmd.env(spec.var, outside);
+        }
+        cmd.env_remove(&outer);
+    }
+    let err = cmd.exec();
+    Err(err).with_context(|| format!("failed to start {}", spec.command))
 }
 
 /// `remuda claude work -- x` and `remuda claude x`: a first word is the
@@ -403,8 +420,12 @@ fn pin(
 ) -> Result<()> {
     let here = std::env::current_dir().context("cannot tell which directory this is")?;
     if allow {
-        let file = pins::allow_nearest(store, &here)?;
-        println!("pins in {} are allowed", file.display());
+        let (file, text) = pins::allow_nearest(store, &here)?;
+        println!(
+            "allowed {}, which holds:\n{}",
+            file.display(),
+            text.trim_end()
+        );
         return Ok(());
     }
     if let Some(cli) = remove {
@@ -449,7 +470,7 @@ fn run(store: &Store, providers: &[&dyn Provider], target: &str, args: &[OsStrin
         .run_spec()
         .with_context(|| format!("remuda run cannot start {} yet", p.name()))?;
     let Some(name) = name else {
-        return exec(spec.command, args);
+        return exec(&spec, args);
     };
     let started = {
         let _lock = store.lock()?;
@@ -460,8 +481,8 @@ fn run(store: &Store, providers: &[&dyn Provider], target: &str, args: &[OsStrin
             Some(session::start(store, p, &name)?)
         }
     };
-    let Some((lease, spec, home)) = started else {
-        return exec(spec.command, args);
+    let Some((mut lease, spec, home)) = started else {
+        return exec(&spec, args);
     };
     eprintln!("remuda: {} on {name} for this session", p.name());
     let outer = paths::outer(spec.var);
@@ -473,11 +494,17 @@ fn run(store: &Store, providers: &[&dyn Provider], target: &str, args: &[OsStrin
             .args(args)
             .env(spec.var, &home)
             .env(&outer, outside),
-        lease.fd(),
+        &mut lease,
+        &session::place(store, p.id(), &name),
     );
     match store.lock() {
         Ok(_lock) => session::leave(store, p, lease),
-        Err(e) => eprintln!("warning: the session is left for the next command to finish: {e:#}"),
+        Err(e) => {
+            let _ = writeln!(
+                io::stderr(),
+                "warning: the session is left for the next command to finish: {e:#}"
+            );
+        }
     }
     exit_as(status.with_context(|| format!("failed to start {}", spec.command))?);
 }
