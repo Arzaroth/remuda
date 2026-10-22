@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-22
+
 ### Added
 
 - remuda keeps a log of what it did: every switch with who made it (the CLI,
