@@ -15,7 +15,8 @@ or by setting `enabled` in its settings file.
 There is no endpoint per client: the path says the format and the model says
 the provider. `ANTHROPIC_BASE_URL=http://127.0.0.1:8317` with
 `ANTHROPIC_API_KEY=<key>` points Claude Code at it; an OpenAI SDK takes
-`base_url` and `api_key`.
+`base_url` and `api_key`, or reads `OPENAI_BASE_URL` and `OPENAI_API_KEY`.
+The page copies both `export` lines for the chosen protocol and key.
 
 | Path | Format |
 | --- | --- |

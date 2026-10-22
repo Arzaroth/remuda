@@ -261,6 +261,9 @@ switched on from the API proxy page, which also makes its access keys.
 ANTHROPIC_BASE_URL=http://127.0.0.1:8317 ANTHROPIC_API_KEY=rmd-... claude
 ```
 
+The page's Shell field copies the matching `export` lines for the protocol
+and key it shows.
+
 The model name picks the CLI whose login answers (`claude-*` Claude Code,
 `gpt-*` Codex, `grok-*`, `kimi-*`, `glm-*`, or `provider/model`, which opencode
 Go needs), and the request spends that CLI's active login: `remuda use`
