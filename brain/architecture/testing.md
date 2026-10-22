@@ -1,7 +1,7 @@
 # Testing
 
-`cargo test` runs the unit tests, `tests/cli.rs`, `tests/install.rs` and
-`tests/packaging.rs`. Nothing reaches the network or touches the developer's
+`cargo test` runs the unit tests, `tests/cli.rs`, `tests/install.rs`,
+`tests/packaging.rs` and `tests/brands.rs`. Nothing reaches the network or touches the developer's
 own logins.
 
 - **Providers take their endpoints and paths as values.** `claude::Api::local`
@@ -54,6 +54,8 @@ own logins.
   `systemd/` is in `nfpm.yaml` and `check-package.sh`, runs the binary by the
   prefix the packages rewrite, and every completion script reaches each
   package.
+- **`tests/brands.rs`** checks `web/src/icons.ts` is `selvedge::brands`
+  written out, and rewrites it under `REMUDA_BLESS=1`.
 
 The page's own logic is tested with Vitest under `web/` (`pnpm test`): which
 figures each login shows, how the summary adds logins up (weighted and
