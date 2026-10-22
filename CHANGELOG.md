@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-22
+
 ### Changed
 
 - Each CLI's logo and colour are the ones TokenGauge draws, both now taken
