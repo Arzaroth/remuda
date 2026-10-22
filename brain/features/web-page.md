@@ -153,9 +153,10 @@ The Automation tab edits `config.toml`
 mode's switch, the minimum time on a login, the margin and the
 ceiling, each login's own ceiling, the fallback, the
 logins it may pick when no rule is in force, and its rules, each with a
-schedule, its tiers and which logins it keeps for a schedule, and, in a band
-of its own, the logins kept warm ([keep-warm.md](keep-warm.md)); and a card of
-schedules, whose days and hours are shared by every CLI. A schedule a rule
+schedule, its tiers and which logins it keeps for a schedule; a card of the
+logins kept warm ([keep-warm.md](keep-warm.md)), apart from auto mode since it
+runs whether auto mode is on or off; and a card of schedules, whose days and
+hours are shared by every CLI. A schedule a rule
 uses cannot be removed, and renaming one renames it in every rule.
 
 Edits stay on the page until Save, and are checked as they are made

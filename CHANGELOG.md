@@ -7,6 +7,8 @@
 - A CLI's Automation tab shows auto mode's switch once: the header's "Auto mode
   on/off" badge is on the Logins tab only, and the card no longer repeats the
   CLI's name.
+- Keep-warm has its own card on the Automation tab, beside auto mode's rather
+  than inside it, since it runs whether auto mode is on or off.
 
 ## [0.21.0] - 2026-10-22
 
