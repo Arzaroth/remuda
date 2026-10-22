@@ -313,6 +313,18 @@ Code's headers and its identity line as the first system block. That is
 against Anthropic's consumer terms for a client that is not Claude Code, and
 the README says so; Claude Code's own requests pass untouched.
 
+## The log is a file of its own, and a repeated failure is one line
+
+What remuda did goes to `<store>/.log.jsonl`, not into the sidecars or
+`.last-switch.json`: the sidecars are TokenGauge's contract, and the records
+keep only the latest of each thing. It is a dot-file at the store's root, so
+TokenGauge never takes it for a credential. It keeps its own lock, since most
+lines are written under the store's and a second `flock` on that file from the
+same process would wait on itself. A failure that repeats is written once,
+until something about that login goes right: the refresh timer runs every half
+hour, and a revoked spare would otherwise fill the log with one line per run
+([features/log.md](features/log.md)).
+
 ## Packages are made from the release archive
 
 The `.deb`, the `.rpm` and `remuda-bin` repackage the per-architecture archive

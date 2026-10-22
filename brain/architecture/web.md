@@ -77,7 +77,7 @@ Responses carry `Cache-Control: no-store`, `nosniff` and `no-referrer`.
 only a holder of the token gets one), it takes one of 8 stream slots, inside
 the 32 connections, or gets a 503. It sends the head and `: connected`, then
 every 2 s compares `App::fingerprint`, the path, modification time and size
-of the store's `*.json` and `*.jsonl` files (the log included), one directory level down, of TokenGauge's
+of the store's `*.json` and `*.jsonl` files (the log included, so a new line also starts a round of auto mode and keep-warm), one directory level down, of TokenGauge's
 snapshot and of `config.toml`, links followed, and sends `data: changed` when it moved. Other files
 in the store are left out: the temp files writes go through, and the redirect
 pages kept there when `$XDG_RUNTIME_DIR` is unset. `App::streams` names the

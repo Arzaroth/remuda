@@ -297,7 +297,8 @@ opencode/<name>.json      {"key": ...}
 .dirs.json                where the last interactive command found each
                           CLI's login, for the refresh timer
 .log.jsonl                what remuda did, one event per line, for
-                          `remuda log` and the page's Log
+                          `remuda log` and the page's Log; it moves to
+                          .log.1.jsonl at 1 MiB, .log.lock guards both
 ```
 
 Files are 0600 and directories 0700. Other tools read the store: TokenGauge
