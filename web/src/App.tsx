@@ -40,7 +40,9 @@ function CliPage(props: { p: Provider; tab: 'logins' | 'automation' }) {
             {count()} {count() === 1 ? 'login' : 'logins'} stored
           </p>
         </div>
-        <AutoBadge p={props.p} />
+        <Show when={props.tab === 'logins'}>
+          <AutoBadge p={props.p} />
+        </Show>
       </header>
       <nav class="page-tabs" aria-label={props.p.name}>
         <a
