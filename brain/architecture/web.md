@@ -77,7 +77,7 @@ Responses carry `Cache-Control: no-store`, `nosniff` and `no-referrer`.
 only a holder of the token gets one), it takes one of 8 stream slots, inside
 the 32 connections, or gets a 503. It sends the head and `: connected`, then
 every 2 s compares `App::fingerprint`, the path, modification time and size
-of the store's `*.json` files, one directory level down, of TokenGauge's
+of the store's `*.json` and `*.jsonl` files (the log included), one directory level down, of TokenGauge's
 snapshot and of `config.toml`, links followed, and sends `data: changed` when it moved. Other files
 in the store are left out: the temp files writes go through, and the redirect
 pages kept there when `$XDG_RUNTIME_DIR` is unset. `App::streams` names the
@@ -101,6 +101,7 @@ access to anything, and it ends when they stop.
 | --- | --- |
 | `GET /api/state` | Same JSON as `ls --json`, plus `providers`, `health`, `usage` and `auto` (each CLI's last auto mode round, `{enabled: false}` for one it is off for, or `error` for a config it cannot read) |
 | `GET /api/events` | A server-sent event stream: `data: changed` when the page should reload the state |
+| `GET /api/log` | `{events}`: the log's latest 500 events, oldest first ([../features/log.md](../features/log.md)) |
 | `GET /api/config` | `{config, version, problems, path}`: the config as JSON, the version to save against, what auto mode cannot act on |
 | `POST /api/config/check` `{config}` | `{problems}` for a config the page has not saved, a malformed one reported `at: "config"` |
 | `POST /api/config` `{config, version}` | Save it ([config.md](config.md)), refused with any problem or when the file changed since `version` |

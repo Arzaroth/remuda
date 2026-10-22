@@ -23,6 +23,8 @@
 6. Note the time in `<store>/.last-switch.json` under the provider id
    (`runs::switched`, best effort), so the page can tell usage TokenGauge
    fetched before the switch from usage of the new login.
+7. Log the switch with who made it, the CLI, the page or auto mode, and, for
+   auto mode, why ([log.md](log.md)).
 
 Once switched, `use` and the page ask TokenGauge's daemon to fetch at once
 (`gauge::nudge`, see [web.md](../architecture/web.md)) rather than at its
@@ -49,3 +51,4 @@ login also carries its `oauthAccount` block and email back (Claude). See
 - [src/claude.rs](../../src/claude.rs) `install`
 - [src/codex.rs](../../src/codex.rs) `install`
 - [src/runs.rs](../../src/runs.rs) `switched`
+- [src/logbook.rs](../../src/logbook.rs), each switch logged with who made it ([log.md](log.md))
