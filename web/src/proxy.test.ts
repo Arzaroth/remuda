@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { baseUrl, masked, status } from './proxy';
+import { baseUrl, exports, masked, status } from './proxy';
 import type { Proxy } from './types';
 
 const proxy = (over: Partial<Proxy> = {}): Proxy => ({
@@ -17,6 +17,15 @@ describe('proxy', () => {
   it('shows one base URL per protocol', () => {
     expect(baseUrl(proxy(), 'openai')).toBe('http://127.0.0.1:8317/v1');
     expect(baseUrl(proxy(), 'claude')).toBe('http://127.0.0.1:8317');
+  });
+
+  it('writes the shell exports each protocol reads', () => {
+    expect(exports(proxy(), 'claude', 'rmd-k')).toBe(
+      'export ANTHROPIC_BASE_URL="http://127.0.0.1:8317"\nexport ANTHROPIC_API_KEY="rmd-k"',
+    );
+    expect(exports(proxy(), 'openai', 'rmd-k')).toBe(
+      'export OPENAI_BASE_URL="http://127.0.0.1:8317/v1"\nexport OPENAI_API_KEY="rmd-k"',
+    );
   });
 
   it('masks a key without giving its length away exactly', () => {
