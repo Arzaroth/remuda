@@ -187,6 +187,29 @@ fn two_accounts_imported_switched_and_removed() {
         home.fails(&["use", "perso"])
             .contains("no credential named perso")
     );
+
+    let log = home.ok(&["log"]);
+    let kinds: Vec<&str> = log
+        .lines()
+        .map(|l| l.split_whitespace().nth(2).unwrap_or_default())
+        .collect();
+    assert_eq!(
+        kinds,
+        ["store", "store", "switch", "store", "store", "store"],
+        "{log}"
+    );
+    assert!(
+        log.contains("switched Claude Code to work (u-work@example.com)  [cli]"),
+        "{log}"
+    );
+    assert_eq!(home.ok(&["log", "work", "-n", "1"]).lines().count(), 1);
+    let listed: Value = serde_json::from_str(&home.ok(&["log", "--json", "perso"])).unwrap();
+    assert_eq!(listed.as_array().unwrap().len(), 3);
+    assert!(
+        !std::fs::read_to_string(home.path(".local/share/remuda/credentials/.log.jsonl"))
+            .unwrap()
+            .contains("r-work")
+    );
 }
 
 #[test]
@@ -354,6 +377,7 @@ fn only_import_and_login_start_a_missing_store() {
         (&["label", "work", "x"], "not labelling"),
         (&["rename", "work", "job"], "not renaming"),
         (&["rm", "work"], "not removing"),
+        (&["log"], "not reading the log"),
         (&["serve", "--no-browser", "--port", "0"], "not serving"),
     ] {
         let err = home.fails(args);
@@ -460,6 +484,7 @@ fn completions_cover_every_command() {
         "label",
         "rename",
         "auto",
+        "log",
         "serve",
         "open",
         "--update",

@@ -13,6 +13,7 @@ use crate::commands::{self, RefreshScope};
 use crate::config;
 use crate::fsx;
 use crate::gauge;
+use crate::logbook::{self, By, Event, Kind};
 use crate::ops;
 use crate::paths;
 use crate::pkce;
@@ -64,6 +65,9 @@ pub struct App {
     /// `provider/name` to what keep-warm last did for that login.
     warm: Mutex<BTreeMap<String, Value>>,
     proxy: proxy::Control,
+    /// Provider to why the proxy last turned its active login down, until
+    /// it next spends it.
+    refused: Mutex<BTreeMap<String, String>>,
     me: OnceLock<Weak<App>>,
 }
 
@@ -155,6 +159,7 @@ impl App {
             auto: Mutex::new(BTreeMap::new()),
             warm: Mutex::new(BTreeMap::new()),
             proxy: proxy::Control::default(),
+            refused: Mutex::new(BTreeMap::new()),
             me: OnceLock::new(),
         }
     }
@@ -254,6 +259,15 @@ impl App {
                         Ok(model) => {
                             pinged = true;
                             eprintln!("keep warm: opened {key}'s 5-hour window on {model}");
+                            logbook::note(
+                                &self.store,
+                                Event::new(
+                                    Kind::Warm,
+                                    true,
+                                    format!("opened the 5-hour window on {model}"),
+                                )
+                                .about(&planned.provider, Some(&planned.name)),
+                            );
                             json!({"state": "pinged", "at": at, "model": model,
                                    "lastPing": at, "lastOk": true})
                         }
@@ -262,6 +276,11 @@ impl App {
                             if before["error"].as_str() != Some(error.as_str()) {
                                 eprintln!("keep warm: could not ping {key}: {error}");
                             }
+                            logbook::note_once(
+                                &self.store,
+                                Event::new(Kind::Warm, false, format!("could not ping: {error}"))
+                                    .about(&planned.provider, Some(&planned.name)),
+                            );
                             json!({"state": "failed", "at": at, "error": error,
                                    "lastPing": at, "lastOk": false})
                         }
@@ -334,7 +353,7 @@ impl App {
                 None => Ok(()),
             };
             if let auto::Action::Switch { to, why } = &decision.action {
-                match ops::switch_when(&self.store, p, to, false, &ready) {
+                match ops::switch_when(&self.store, p, to, false, By::Auto, Some(why), &ready) {
                     Ok(message) => {
                         eprintln!("auto mode: {message}: {why}");
                         seen["switched"] = json!({"at": at, "to": to, "why": why});
@@ -345,15 +364,26 @@ impl App {
                         if last.map(|l| &l["error"]) != Some(&seen["error"]) {
                             eprintln!("auto mode: could not switch {} to {to}: {e:#}", p.name());
                         }
+                        logbook::note_once(
+                            &self.store,
+                            Event::new(
+                                Kind::Switch,
+                                false,
+                                format!("could not switch to {to}: {e:#}"),
+                            )
+                            .about(p.id(), None)
+                            .by(By::Auto),
+                        );
                     }
                 }
             } else if last.map(gist) != Some(gist(&seen)) {
                 let action = &seen["decision"]["action"];
-                eprintln!(
-                    "auto mode: {} {}: {}",
-                    p.name(),
-                    action["kind"].as_str().unwrap_or_default(),
-                    action["why"].as_str().unwrap_or_default()
+                let kind = action["kind"].as_str().unwrap_or_default();
+                let why = action["why"].as_str().unwrap_or_default();
+                eprintln!("auto mode: {} {kind}: {why}", p.name());
+                logbook::note(
+                    &self.store,
+                    Event::new(Kind::Auto, true, format!("{kind}: {why}")).about(p.id(), None),
                 );
             }
             after.insert(id.clone(), seen);
@@ -648,7 +678,7 @@ impl App {
             }
             ("POST", "/api/use") => {
                 let (p, name) = commands::resolve(store, &providers, spec()?)?;
-                let message = ops::switch(store, p, &name, flag("discard"))?;
+                let message = ops::switch_by(store, p, &name, flag("discard"), By::Page)?;
                 gauge::nudge(&self.places.snapshot);
                 Ok(json!({ "message": message }))
             }
@@ -680,7 +710,20 @@ impl App {
                 let entry = store
                     .get(p.id(), &name)?
                     .with_context(|| format!("no credential named {}/{name}", p.id()))?;
-                let message = p.redeem_reset(&entry)?;
+                let message = p.redeem_reset(&entry).inspect_err(|e| {
+                    logbook::note(
+                        store,
+                        Event::new(Kind::Reset, false, format!("{e:#}"))
+                            .about(p.id(), Some(&name))
+                            .by(By::Page),
+                    );
+                })?;
+                logbook::note(
+                    store,
+                    Event::new(Kind::Reset, true, &message)
+                        .about(p.id(), Some(&name))
+                        .by(By::Page),
+                );
                 gauge::nudge(&self.places.snapshot);
                 Ok(json!({ "message": message }))
             }
@@ -794,6 +837,24 @@ impl proxy::Backend for App {
 
     fn providers(&self) -> Vec<&dyn Provider> {
         App::providers(self)
+    }
+
+    fn spent(&self, provider: &str, refused: Option<&str>) {
+        let Ok(mut all) = self.refused.lock() else {
+            return;
+        };
+        let event = match refused {
+            Some(why) if all.get(provider).map(String::as_str) != Some(why) => {
+                all.insert(provider.to_owned(), why.to_owned());
+                Event::new(Kind::Proxy, false, why)
+            }
+            None if all.remove(provider).is_some() => {
+                Event::new(Kind::Proxy, true, "spending the active login again")
+            }
+            _ => return,
+        };
+        drop(all);
+        logbook::note(&self.store, event.about(provider, None));
     }
 }
 
@@ -1145,6 +1206,11 @@ mod tests {
             "switched Claude Code to perso (u-perso@example.com)"
         );
         assert_eq!(e.live_refresh_token().as_deref(), Some("r-perso"));
+        let logged = logbook::read(&e.store);
+        assert_eq!(
+            (logged[0].kind, logged[0].subject().as_str(), logged[0].by),
+            (Kind::Switch, "claude/perso", Some(By::Page))
+        );
 
         let (_, r) = call(
             &app,
@@ -1319,6 +1385,21 @@ mod tests {
         assert_eq!(claude["switched"]["why"], "perso's 5 hours limit maxed");
 
         app.auto_round(&Zoned::now());
+        app.auto_round(&Zoned::now());
+        let logged = logbook::read(&e.store);
+        assert_eq!(logged.len(), 2, "{logged:?}");
+        assert_eq!(
+            (logged[0].kind, logged[0].subject().as_str(), logged[0].by),
+            (Kind::Switch, "claude/work", Some(By::Auto))
+        );
+        assert!(logged[0].message.ends_with(": perso's 5 hours limit maxed"));
+        assert_eq!(
+            (logged[1].kind, logged[1].message.as_str()),
+            (
+                Kind::Auto,
+                "hold: waiting for TokenGauge to fetch after the last switch"
+            )
+        );
 
         let (_, state) = call(&app, "GET", "/api/state", Value::Null);
         let claude = &state["auto"]["claude"];
@@ -1448,6 +1529,12 @@ mod tests {
         app.warm_round(jiff::Timestamp::now() + jiff::SignedDuration::from_mins(11));
         assert_eq!(warm()["state"], "failed");
         refused.assert();
+        let logged = logbook::read(&e.store);
+        assert_eq!(logged.len(), 1, "the same failure twice is one line");
+        assert_eq!(
+            (logged[0].kind, logged[0].subject().as_str(), logged[0].ok),
+            (Kind::Warm, "claude/work", false)
+        );
     }
 
     #[test]
@@ -1515,14 +1602,56 @@ mod tests {
         snapshot(&e, crate::fsx::now_ms() - 1000, 100, 10);
 
         app.auto_round(&Zoned::now());
+        app.auto_round(&Zoned::now());
 
         assert_eq!(e.live_refresh_token().as_deref(), Some("r-perso"));
+        let logged = logbook::read(&e.store);
+        assert_eq!(logged.len(), 1, "{logged:?}");
+        assert_eq!(
+            (logged[0].kind, logged[0].subject().as_str(), logged[0].ok),
+            (Kind::Switch, "claude", false)
+        );
+        assert!(logged[0].message.starts_with("could not switch to work: "));
         let (_, state) = call(&app, "GET", "/api/state", Value::Null);
         let claude = &state["auto"]["claude"];
         assert_eq!(claude["decision"]["action"]["to"], "work");
         assert!(claude["error"].is_string(), "{claude}");
         assert!(claude.get("switched").is_none());
         assert!(state["auto"].get("nope").is_none());
+    }
+
+    #[test]
+    fn the_proxy_logs_a_refused_login_once_and_when_it_is_spent_again() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let app = app(&e, &OFFLINE);
+        let backend: &dyn proxy::Backend = &app;
+        backend.spent("claude", None);
+        backend.spent("claude", Some("Claude Code is signed out"));
+        backend.spent("claude", Some("Claude Code is signed out"));
+        backend.spent("claude", None);
+        backend.spent("claude", None);
+        let seen: Vec<(Kind, String, bool, String)> = logbook::read(&e.store)
+            .into_iter()
+            .map(|e| (e.kind, e.subject(), e.ok, e.message))
+            .collect();
+        assert_eq!(
+            seen,
+            [
+                (
+                    Kind::Proxy,
+                    "claude".to_owned(),
+                    false,
+                    "Claude Code is signed out".to_owned()
+                ),
+                (
+                    Kind::Proxy,
+                    "claude".to_owned(),
+                    true,
+                    "spending the active login again".to_owned()
+                ),
+            ]
+        );
     }
 
     #[test]
