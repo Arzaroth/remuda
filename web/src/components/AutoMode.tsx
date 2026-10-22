@@ -276,10 +276,11 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
   return (
     <div class="auto-card" style={{ '--brand': brand(props.p.id) }}>
       <div class="auto-card-head">
-        <h3>Switch logins automatically</h3>
+        <h2 id={`auto-${props.p.id}`}>Switch logins automatically</h2>
         <button
           class="switch"
           role="switch"
+          aria-labelledby={`auto-${props.p.id}`}
           aria-checked={!!a().enabled}
           onClick={() => set((x) => (x.enabled = !x.enabled))}
         >
@@ -446,27 +447,31 @@ function KeepWarm(props: { p: Provider; problems: Problem[] }) {
   return (
     <div class="auto-card">
       <div class="auto-card-head">
-        <h3>Keep the 5-hour window open</h3>
+        <h2>Keep the 5-hour window open</h2>
       </div>
-      <p class="aside">
-        The moment a picked login's window closes, remuda opens a new one with the smallest request it takes, whether
-        auto mode is on or off.
-      </p>
-      <div class="chips warm-chips">
-        <For each={loginsOf(props.p.id)}>
-          {(name) => (
-            <Chip
-              name={name}
-              on={warm().includes(name)}
-              onClick={() => edit((c) => toggleWarm(c, props.p.id, name))}
-            />
-          )}
-        </For>
-      </div>
-      <Problems list={props.problems.filter((p) => p.at === `warm.${props.p.id}`)} />
+      <Show when={props.p.warm && loginsOf(props.p.id).length}>
+        <p class="aside">
+          The moment a picked login's window closes, remuda opens a new one with the smallest request it takes, whether
+          auto mode is on or off.
+        </p>
+        <div class="chips warm-chips">
+          <For each={loginsOf(props.p.id)}>
+            {(name) => (
+              <Chip
+                name={name}
+                on={warm().includes(name)}
+                onClick={() => edit((c) => toggleWarm(c, props.p.id, name))}
+              />
+            )}
+          </For>
+        </div>
+      </Show>
+      <Problems list={warmProblems(props.problems, props.p.id)} />
     </div>
   );
 }
+
+const warmProblems = (problems: Problem[], id: string) => problems.filter((p) => p.at === `warm.${id}`);
 
 function ScheduleRow(props: { name: string }) {
   const s = () => draft.c.schedules![props.name];
@@ -571,7 +576,7 @@ function Schedules(props: { problems: Problem[] }) {
   return (
     <div class="auto-card">
       <div class="auto-card-head">
-        <h3>Schedules</h3>
+        <h2>Schedules</h2>
       </div>
       <p class="aside">Local time. A range that ends before it starts runs past midnight.</p>
       <For each={Object.keys(draft.c.schedules ?? {})}>{(n) => <ScheduleRow name={n} />}</For>
@@ -670,7 +675,7 @@ export function AutoMode(props: { providers: Provider[] }) {
           <div class="auto-side">
             <For each={props.providers}>
               {(p) => (
-                <Show when={p.warm && loginsOf(p.id).length}>
+                <Show when={(p.warm && loginsOf(p.id).length) || warmProblems(problems(), p.id).length}>
                   <KeepWarm p={p} problems={problems()} />
                 </Show>
               )}

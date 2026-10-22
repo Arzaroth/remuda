@@ -344,11 +344,13 @@ input:hover, select:hover { border-color: var(--muted); }
 /* Automation */
 .auto > .aside code { font-size: 12px; }
 .auto > .aside { margin: 0 0 16px; max-width: 70ch; }
-.auto-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.auto-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(390px, 34%); gap: 16px; align-items: start; }
+@media (max-width: 1280px) { .auto-grid { grid-template-columns: minmax(0, 1fr); } }
 .auto-side { display: grid; gap: 16px; }
 .auto-card { display: grid; gap: 16px; padding: 22px; min-width: 0; }
 .auto-card > .aside { margin: -6px 0 0; }
 .auto-card-head { display: flex; align-items: center; gap: 10px; padding-bottom: 14px; border-bottom: 1px solid var(--rule); }
+.auto-card-head h2 { font-size: 18px; font-weight: 750; line-height: 1.15; }
 .switch { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; border: 0; background: none; cursor: pointer;
   color: var(--muted); font-weight: 650; padding: 0; }
 .switch i { width: 40px; height: 24px; border-radius: 12px; background: var(--track); position: relative; transition: background 0.15s; }
@@ -461,7 +463,6 @@ input:hover, select:hover { border-color: var(--muted); }
   .login-main > .use { grid-area: use; }
   .login-main > .more { grid-area: more; }
   .login-detail { grid-template-columns: 1fr; padding-left: 46px; }
-  .auto-grid { grid-template-columns: minmax(0, 1fr); }
   .tile.bare { grid-template-columns: 1fr; }
   .tile.bare > .others { grid-column: 1; grid-row: auto; padding: 12px 0 0; border-left: 0; border-top: 1px dashed var(--rule-strong); margin-top: 16px; }
 }
