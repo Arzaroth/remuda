@@ -192,7 +192,10 @@ fails when the two differ. `pnpm dev` serves the source with hot reload and
 passes `/api` to a running `remuda serve` on `$REMUDA_PORT` (7429 by
 default), dropping the `Origin` it would refuse; open
 `http://localhost:5173/serve.html#<token>`. The page makes no external
-requests and has a light and a dark theme. It reads `/api/events` through `fetch` (an `EventSource`
+requests and has a light and a dark theme and two looks; its fonts
+(Archivo and Schibsted Grotesk, Latin subsets, from `@fontsource-variable`)
+and TokenGauge's provider icons (`web/src/icons.ts`, MIT OR WTFPL) are
+inlined too. It reads `/api/events` through `fetch` (an `EventSource`
 cannot send the token header). A browser allows only about 6 connections per
 host across all its tabs, so one tab follows the stream, holding the Web Lock
 `remuda-events`, and passes each change to the others over the
@@ -206,7 +209,7 @@ doubling to 30 s; a 401 (the server restarted with another token) stops it
 and frees the lock for another tab.
 None of these reloads happens while an editor is open, a confirmation is
 armed or an input in the list has the focus. A focused button does not hold
-them: Solid keeps the cards' buttons across a redraw, so a clicked one keeps
+them: Solid keeps the rows' buttons across a redraw, so a clicked one keeps
 the focus.
 
 ## Sources

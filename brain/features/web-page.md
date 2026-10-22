@@ -1,14 +1,25 @@
 # The local page
 
-`remuda serve` opens a page in five parts:
+`remuda serve` opens a page with a sidebar of places and one page for each,
+picked by the address's hash (`#/`, `#/cli/<id>`, `#/cli/<id>/automation`,
+`#/proxy`, `#/status`; `route.ts`), so the browser's back button and a
+bookmark work. The token, which also travels in the hash, is read only from
+a hash that does not start with `#/`.
 
-- A health line: whether the refresh timer is enabled, when it last ran, how
-  many credentials it refreshed and, behind a toggle that opens a list under
-  the line, what it skipped or failed on (from `<store>/.last-refresh.json`);
-  whether TokenGauge's snapshot was found and how old it is; and the store's
-  path.
-- A strip with one tile per CLI, edged in the CLI's colour (TokenGauge's:
-  Claude `#de7356`, Codex `#74aa9c`), and a combined meter: one usage window
+The sidebar lists, top to bottom: Overview; one link per CLI in use, with
+its icon, the login in use (or "signed out"), the share used of its tile's
+window over a small meter, and an "auto" tag when auto mode is on; the API
+proxy, with an on/off dot; Status, with a dot that turns amber when the
+refresh timer is off or its last run is over 75 minutes old and red when it
+reported problems (`healthTone`). Its foot holds Add a login, Refresh tokens,
+the theme switch and the look switch. On a narrow screen it becomes a bar
+along the top, with Add a login first; Refresh tokens and the two switches
+move to the foot of the Status page. Each CLI is shown by its own logo, TokenGauge's provider icons
+(`icons.ts`), in the sidebar, the page heads, the overview, the proxy and
+Add a login.
+
+- **Overview** has one tile per CLI, edged in the CLI's colour (TokenGauge's:
+  Claude `#de7356`, Codex `#74aa9c`), with a combined meter: one usage window
   added up over every stored login TokenGauge has figures for, over a bar
   with a segment per login in its own tone, the soonest of their resets,
   and the login in use. A login with no figures for the window (skipped,
@@ -29,24 +40,31 @@
   `localStorage`. The tile shows the window with the highest share
   used until Show, beside one of the other windows listed under it with
   their totals, picks another (5 hours, Weekly, a model-scoped limit, ...);
-  the pick is kept per CLI in the browser's `localStorage`.
-- Tabs: All, then one per CLI, each with its number of stored logins. A tab
-  shows only that CLI's cards and picks it under "Add an account"; the
-  choice is kept in `localStorage`.
-- A CLI with no stored login whose own login is signed out gets no summary
-  tile, tab or section (`usage.ts` `inUse`); "Add an account" still offers
-  it. One signed into a login remuda has not stored stays, to import it. With
-  no CLI in use at all, every one is shown.
-- One card per stored credential, in a grid under its CLI: name, label,
-  email, plan and state pills (the plan is TokenGauge's when the credential
-  file does not say, as for Grok), a row per usage window (its title, percentage
-  and reset over a bar, then "Figures from N minutes ago" when TokenGauge
-  carried them from an earlier ask than its snapshot, `usage.ts` `carriedSince`),
-  a Claude login's banked usage-limit resets and when
-  they expire, with a Reset limits button that asks for a second click before
-  it spends one and then holds until TokenGauge reports the new count, how long its access token and its sign-in (refresh
-  token) have left, and Use, Refresh, Label, Rename and Remove along the
-  bottom. The card in use has a green edge. Remove asks
+  the pick is kept per CLI in the browser's `localStorage`. Each tile links
+  to its CLI's page.
+- A CLI with no stored login whose own login is signed out gets no tile,
+  link or page (`usage.ts` `inUse`); Add a login still offers it. One signed
+  into a login remuda has not stored stays, to import it. With no CLI in use
+  at all, every one is shown.
+- **A CLI's page** opens with its logo, the login in use and how many are
+  stored, and an "Auto mode on/off" badge that leads to its Automation tab.
+  It has two tabs. Logins shows the CLI's tile, then its logins as a list
+  that can be ordered as stored, by most headroom or by name (kept in
+  `localStorage`). Automation holds the CLI's auto mode and keep-warm
+  settings (below); its tab says "unsaved" while edits wait for Save.
+- **One row per stored login**: a state dot, the name, label and email,
+  the plan and state pills (the plan is TokenGauge's when the credential
+  file does not say, as for Grok; "Kept warm" when keep-warm picks it), one
+  small meter per usage window, how long its access token has left, Use (or
+  "In use" on the one in use, which also has a green edge), and a chevron
+  that opens its details in place: a row per usage window (its title,
+  percentage and reset over a bar, then "Figures from N minutes ago" when
+  TokenGauge carried them from an earlier ask than its snapshot, `usage.ts`
+  `carriedSince`), a Claude login's banked usage-limit resets and when they
+  expire, with a Reset limits button that asks for a second click before it
+  spends one and then holds until TokenGauge reports the new count, how long
+  its access token and its sign-in (refresh token) have left, its
+  keep-warm line, and Refresh, Label, Rename and Remove. Remove asks
   for a second click; Use, Refresh and Remove are disabled on the active one.
   Use asks for a second click too when switching would drop the CLI's live
   login, naming what goes: "Drop alice@example.com unsaved?" for one not
@@ -57,38 +75,45 @@
   filled with the current value and sized to the text so nothing moves: the
   check button beside it or Enter saves, and the same button or Escape
   cancels, asking for a second click ("Discard?") when the value was changed.
-  An open editor, and what was typed in it, survives the cards being
+  An open editor, and what was typed in it, survives the list being
   redrawn after another action.
-- The API proxy card, under Add an account ([proxy.md](proxy.md)): an on/off
-  switch and whether it listens, an OpenAI / Claude switch that shows that
-  protocol's base URL with a copy button, the access key masked with show and
-  copy buttons (a picker when there are several), Manage keys to make and
-  remove keys (a second click removes) and change the port, and the models it
-  routes per CLI with the formats its endpoint speaks. The protocol last picked is
-  remembered.
+- **API proxy** ([proxy.md](proxy.md)): an on/off switch and whether it
+  listens, an OpenAI / Claude switch that shows that protocol's base URL with
+  a copy button, the access key masked with show and copy buttons (a picker
+  when there are several), Manage keys to make and remove keys (a second
+  click removes) and change the port, and the models it routes per CLI with
+  the formats its endpoint speaks. The protocol last picked is remembered.
+- **Status**: whether the refresh timer is enabled, when it last ran, how
+  many credentials it refreshed and, behind a toggle, what it skipped or
+  failed on (from `<store>/.last-refresh.json`); whether TokenGauge's
+  snapshot was found and how old it is; and the store's path.
 
-The theme follows the system until the Auto / Light / Dark switch in the
-header overrides it; the choice is kept in `localStorage` and applied in
-`<head>`, before the page draws.
+The theme follows the system until the Auto / Light / Dark switch overrides
+it. The page has two looks, picked under the theme switch: Sage, green on a
+pale ground with condensed Archivo figures, and Instrument, a navy sidebar
+beside white panels with blue meters, amber buttons and Schibsted Grotesk.
+Both choices are kept in `localStorage` (`remuda-theme`, `remuda-skin`) and
+applied in `<head>`, before the page draws.
 
-When a CLI's live login is not stored, an Import box sits above its cards.
+When a CLI's live login is not stored, an Import box sits above its logins.
 Enter in any of the page's inputs confirms it: the Import name, the pasted
-sign-in code, the Add an account name and the in-place editors.
-Import, and Sign in under "Add an account", ask "Overwrite <name> (<email>)?"
+sign-in code, the Add a login name and the in-place editors.
+Import, and Sign in under Add a login, ask "Overwrite <name> (<email>)?"
 when the name is taken, and replace it with `force` on the second click, as
 `--force` does. Every confirmation holds only for the provider and name it
 named (editing the name asks again), lasts 4 seconds, and ignores a second
 click within 400 ms, so a double-click only arms it.
 "Refresh tokens" refreshes every inactive credential due within the hour.
 
-"Add an account" picks a provider and a name and starts a sign-in: the
+Add a login opens a dialog that picks a CLI by its logo, preselecting the
+page's, and a name, and starts a sign-in: the
 server opens the provider's page in a private window, as `login` does (see
 [sign-in.md](sign-in.md)). When it cannot, or runs with `--no-browser`, the page
 opens a new tab instead. Either way the box can copy the link for pasting into
 a private window by hand, which also serves a page viewed through a tunnel from
 another machine. Then Claude shows a box for the pasted code
-while Codex waits for its callback. Cancel abandons it, and for Codex frees port
-1455 immediately.
+while Codex waits for its callback. Cancel, or closing the dialog, abandons
+it, and for Codex frees port 1455 immediately.
 
 Usage figures come from TokenGauge's snapshot, which remuda reads and never
 writes. A refresh or a switch made from the page asks TokenGauge's daemon to
@@ -117,17 +142,18 @@ guarded, the API it calls and the service are in
 
 ## Auto mode
 
-While auto mode is on, each CLI's card opens with what its last round decided
+While auto mode is on, the Automation tab opens with what its last round decided
 ([auto-mode.md](auto-mode.md)): the rule in force, every login weighed with
 its score and why it was or was not picked, the decision and why, and the last
 switch auto mode made.
 
-Below the logins, the page edits `config.toml`
-([architecture/config.md](../architecture/config.md)): one card per CLI shown,
+The Automation tab edits `config.toml`
+([architecture/config.md](../architecture/config.md)): a card for the CLI,
 with auto mode's switch, the minimum time on a login, the margin and the
 ceiling, each login's own ceiling, the fallback, the
 logins it may pick when no rule is in force, and its rules, each with a
-schedule, its tiers and which logins it keeps for a schedule; and a card of
+schedule, its tiers and which logins it keeps for a schedule, and, in a band
+of its own, the logins kept warm ([keep-warm.md](keep-warm.md)); and a card of
 schedules, whose days and hours are shared by every CLI. A schedule a rule
 uses cannot be removed, and renaming one renames it in every rule.
 
