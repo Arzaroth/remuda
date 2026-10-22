@@ -129,7 +129,13 @@ fn profile_over(kept: Option<Value>, fresh: Value) -> Value {
 /// Copies the live login back into the entry it belongs to. A CLI rotates the
 /// refresh token of the account it is signed into, which leaves the stored
 /// copy dead unless it is brought forward before anything else reads it.
+/// A login put to use with less than this left is refreshed first.
+pub const REFRESH_BEFORE_MS: i64 = 5 * 60 * 1000;
+
+/// Finishes the provider's `remuda run` sessions whose processes all ended
+/// first, so nothing acts on a login whose newest tokens are still in one.
 pub fn sync_live(store: &Store, p: &dyn Provider) -> Result<LiveState> {
+    crate::session::recover(store, &[p]);
     let live = p.live()?;
     heal(store, p, live.as_ref())?;
     let Some(creds) = live else {
@@ -359,7 +365,7 @@ pub fn switch_when(
             target.qualified()
         );
     }
-    let refreshed = expires_in_ms(p, &target).is_some_and(|ms| ms < 5 * 60 * 1000);
+    let refreshed = expires_in_ms(p, &target).is_some_and(|ms| ms < REFRESH_BEFORE_MS);
     if refreshed {
         refresh_saved(store, p, &mut target)?;
     }

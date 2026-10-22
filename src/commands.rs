@@ -59,10 +59,7 @@ pub struct Live<'a> {
 
 /// One CLI's unreadable files do not stop the others from being listed or
 /// refreshed.
-/// Finishes a `remuda run` session that died first, then syncs every live
-/// login back.
 pub fn sync_all<'a>(store: &Store, providers: &[&'a dyn Provider]) -> Result<Vec<Live<'a>>> {
-    session::recover(store, providers);
     Ok(providers
         .iter()
         .map(|p| Live {
@@ -250,6 +247,7 @@ pub fn import(
     if let Some(current) = state.active_name() {
         bail!("the live {} login is already stored as {current}", p.name());
     }
+    refuse_in_use(store, p, name)?;
     let creds = p
         .live()?
         .with_context(|| format!("{} is not signed in", p.name()))?;
@@ -343,6 +341,7 @@ pub fn begin_login(
             p.id()
         );
     }
+    refuse_in_use(store, p, name)?;
     p.begin_login()
 }
 
@@ -390,6 +389,7 @@ pub fn save_login(
 ) -> Result<Entry> {
     let entry = Entry::new(p.id(), name, done.creds, done.identity, now_ms());
     let _lock = store.lock()?;
+    refuse_in_use(store, p, name)?;
     if !force && store.get(p.id(), name)?.is_some() {
         bail!(
             "{} was stored while this login was in progress",
@@ -701,7 +701,9 @@ pub fn rename(
     to: &str,
     out: &mut dyn Write,
 ) -> Result<()> {
+    session::recover(store, &[p]);
     refuse_in_use(store, p, from)?;
+    refuse_in_use(store, p, to)?;
     store.rename(p.id(), from, to)?;
     let message = format!("renamed {0}/{from} to {0}/{to}", p.id());
     logbook::note(
@@ -1802,8 +1804,8 @@ mod tests {
     #[test]
     fn a_login_in_a_run_session_is_neither_refreshed_switched_to_renamed_nor_removed() {
         let e = env(&OFFLINE);
-        e.stored("work", "u-work", 60_000);
-        let _held = session::lease(&e.store, "claude", "work").unwrap();
+        e.stored("work", "u-work", HOUR);
+        let _held = session::start(&e.store, &e.claude, "work").unwrap();
         let mut out = Vec::new();
         refresh(
             &e.store,

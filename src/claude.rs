@@ -535,7 +535,7 @@ impl Provider for Claude {
                 Copied {
                     from: self.config_path.clone(),
                     name: ".claude.json",
-                    login_keys: &["oauthAccount"],
+                    login_keys: &["oauthAccount", "primaryApiKey", "customApiKeyResponses"],
                 },
             ],
             private: &[".credentials.json", ".claude.json"],

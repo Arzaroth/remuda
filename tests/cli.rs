@@ -877,6 +877,7 @@ fn fake_claude(home: &Home) -> String {
         "#!/bin/sh\n\
          printf '%s\\n' \"$CLAUDE_CONFIG_DIR\" > \"$HOME/seen-dir\"\n\
          printf '%s\\n' \"$*\" > \"$HOME/seen-args\"\n\
+         ls -l /proc/$$/fd > \"$HOME/seen-fds\"\n\
          [ -n \"$CLAUDE_CONFIG_DIR\" ] || exit 0\n\
          cp \"$CLAUDE_CONFIG_DIR/.credentials.json\" \"$HOME/seen-creds\"\n\
          sed -i 's/\"r-work\"/\"r-rotated\"/; s/\"a-work\"/\"a-rotated\"/' \"$CLAUDE_CONFIG_DIR/.credentials.json\"\n\
@@ -925,6 +926,11 @@ fn run_starts_the_cli_on_a_login_of_its_own_and_keeps_what_it_rotated() {
         std::fs::read_to_string(home.path("seen-args")).unwrap(),
         "--resume x\n"
     );
+    let fds = std::fs::read_to_string(home.path("seen-fds")).unwrap();
+    assert!(
+        fds.contains(".runs/claude/work/lock"),
+        "the CLI holds the session's lock: {fds}"
+    );
     let seen = read(&home.path("seen-creds"));
     assert_eq!(seen["claudeAiOauth"]["refreshToken"], "r-work");
     assert_eq!(seen["mcpOAuth"]["srv"]["accessToken"], "mcp");
@@ -963,6 +969,26 @@ fn run_starts_the_cli_on_a_login_of_its_own_and_keeps_what_it_rotated() {
         );
     }
     assert!(home.fails(&["run", "glm"]).contains("cannot start"));
+
+    let inside = home
+        .command(&["ls", "--json"])
+        .env("CLAUDE_CONFIG_DIR", home.path("elsewhere"))
+        .env("REMUDA_OUTER_CLAUDE_CONFIG_DIR", "")
+        .output()
+        .unwrap();
+    let listed: Value = serde_json::from_slice(&inside.stdout).unwrap();
+    let active: Vec<&str> = listed["credentials"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["active"] == true)
+        .map(|c| c["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        active,
+        ["perso"],
+        "a remuda inside a session sees the CLI's own files"
+    );
 }
 
 #[test]
@@ -972,6 +998,16 @@ fn a_pinned_directory_starts_its_cli_on_the_pinned_login() {
     home.ok(&["import", "work"]);
     home.sign_in("a-perso", "r-perso", "u-perso");
     home.ok(&["import", "perso"]);
+    home.api
+        .borrow_mut()
+        .mock("GET", "/api/oauth/profile")
+        .match_header("authorization", "Bearer a-rotated")
+        .with_body(
+            json!({"account": {"uuid": "u-work", "email": "u-work@example.com"},
+                   "organization": {"uuid": "o-1", "organization_type": "claude_max"}})
+            .to_string(),
+        )
+        .create();
     let path = fake_claude(&home);
     let repo = home.path("repo");
     let sub = repo.join("src");
@@ -1016,6 +1052,10 @@ fn a_pinned_directory_starts_its_cli_on_the_pinned_login() {
         std::fs::read_to_string(home.path("seen-args")).unwrap(),
         "-p hi\n"
     );
+    assert_eq!(
+        read(&home.path(".local/share/remuda/credentials/claude/work.json"))["claudeAiOauth"]["refreshToken"],
+        "r-rotated"
+    );
     let out = at(&home.path(""), &["claude", "perso"]);
     assert!(
         out.status.success(),
@@ -1027,6 +1067,18 @@ fn a_pinned_directory_starts_its_cli_on_the_pinned_login() {
         "\n"
     );
 
+    std::fs::write(repo.join(".remuda.toml"), "claude = \"perso\"\n").unwrap();
+    let out = at(&sub, &["run", "claude"]);
+    assert!(out.status.success());
+    assert_eq!(
+        std::fs::read_to_string(home.path("seen-dir")).unwrap(),
+        "\n",
+        "a file remuda pin did not write is not read"
+    );
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--allow"));
+    assert!(at(&sub, &["pin", "--allow"]).status.success());
+    let shown = String::from_utf8(at(&sub, &["pin"]).stdout).unwrap();
+    assert!(shown.starts_with("claude: perso ("), "{shown}");
     assert!(at(&repo, &["pin", "--remove", "claude"]).status.success());
     let out = at(&sub, &["run", "claude"]);
     assert!(out.status.success());

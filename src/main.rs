@@ -31,7 +31,9 @@ mod store;
 mod units;
 mod warm;
 
+use std::ffi::OsString;
 use std::io::{self, BufRead};
+use std::os::fd::RawFd;
 
 use anyhow::{Context, Result, bail};
 use clap::{CommandFactory, Parser, Subcommand};
@@ -136,8 +138,8 @@ enum Cmd {
     /// goes to the CLI.
     Run {
         name: String,
-        #[arg(last = true)]
-        args: Vec<String>,
+        #[arg(last = true, value_parser = clap::value_parser!(OsString))]
+        args: Vec<OsString>,
     },
     /// Pin a login for this directory and below in ./.remuda.toml, so
     /// `remuda run <cli>` starts it there; with no NAME, show the pins in force.
@@ -146,6 +148,11 @@ enum Cmd {
         /// Unpin this CLI from ./.remuda.toml instead.
         #[arg(long, value_name = "CLI", conflicts_with = "name")]
         remove: Option<String>,
+        /// Trust the nearest .remuda.toml as it is now: one written by
+        /// anything but `remuda pin`, a clone's for one, is not read until
+        /// allowed.
+        #[arg(long, conflicts_with_all = ["name", "remove"])]
+        allow: bool,
     },
     /// Print shell functions that start `claude` and `codex` through
     /// `remuda run`, for the login pinned where they start:
@@ -154,7 +161,7 @@ enum Cmd {
     /// `remuda claude [NAME] [ARGS...]`, read before clap so the CLI's own
     /// arguments reach it untouched.
     #[command(skip)]
-    Cli(Vec<String>),
+    Cli(Vec<OsString>),
     /// Show what remuda did: switches and who made them, refreshes, auto
     /// mode, keep-warm, the proxy. PROVIDER, NAME or PROVIDER/NAME narrows it.
     Log {
@@ -307,25 +314,30 @@ fn open(no_browser: bool) -> Result<()> {
 const SHIELDED: [libc::c_int; 4] = [libc::SIGINT, libc::SIGQUIT, libc::SIGHUP, libc::SIGTERM];
 
 /// Waits for the CLI with the signals that end a terminal session ignored,
-/// so remuda outlives it and syncs its tokens back; the CLI gets them as
-/// usual.
-fn shielded(cmd: &mut std::process::Command) -> io::Result<std::process::ExitStatus> {
+/// so remuda outlives it and syncs its tokens back. The CLI starts with the
+/// signal handling remuda was given, and with the session's lease, so the
+/// session lasts as long as the CLI does even if remuda is killed.
+fn shielded(cmd: &mut std::process::Command, lease: RawFd) -> io::Result<std::process::ExitStatus> {
     use std::os::unix::process::CommandExt;
-    // SAFETY: signal() is async-signal-safe, and nothing else runs between
-    // fork and exec.
+    // SAFETY: the previous handlers are put back once the CLI exits.
+    let before: Vec<libc::sighandler_t> = SHIELDED
+        .iter()
+        .map(|s| unsafe { libc::signal(*s, libc::SIG_IGN) })
+        .collect();
+    let inherited = before.clone();
+    // SAFETY: signal() and fcntl() are async-signal-safe, and nothing else
+    // runs between fork and exec.
     unsafe {
-        cmd.pre_exec(|| {
-            for s in SHIELDED {
-                libc::signal(s, libc::SIG_DFL);
+        cmd.pre_exec(move || {
+            for (s, h) in SHIELDED.iter().zip(&inherited) {
+                libc::signal(*s, *h);
+            }
+            if libc::fcntl(lease, libc::F_SETFD, 0) == -1 {
+                return Err(io::Error::last_os_error());
             }
             Ok(())
         });
     }
-    // SAFETY: the previous handlers are put back once the CLI exits.
-    let before: Vec<_> = SHIELDED
-        .iter()
-        .map(|s| unsafe { libc::signal(*s, libc::SIG_IGN) })
-        .collect();
     let status = cmd.status();
     for (s, h) in SHIELDED.iter().zip(before) {
         unsafe { libc::signal(*s, h) };
@@ -333,16 +345,23 @@ fn shielded(cmd: &mut std::process::Command) -> io::Result<std::process::ExitSta
     status
 }
 
-fn exit_code(status: std::process::ExitStatus) -> i32 {
+/// Ends remuda as the CLI ended: with its code, or by the signal that killed
+/// it, which a shell tells apart from an exit.
+fn exit_as(status: std::process::ExitStatus) -> ! {
     use std::os::unix::process::ExitStatusExt;
-    status
-        .code()
-        .or_else(|| status.signal().map(|s| 128 + s))
-        .unwrap_or(1)
+    if let Some(signal) = status.signal() {
+        // SAFETY: the default handler is put back so the signal ends remuda.
+        unsafe {
+            libc::signal(signal, libc::SIG_DFL);
+            libc::raise(signal);
+        }
+        std::process::exit(128 + signal);
+    }
+    std::process::exit(status.code().unwrap_or(1));
 }
 
 /// The CLI as it is, in place of remuda: nothing to sync back after.
-fn exec(command: &str, args: &[String]) -> Result<()> {
+fn exec(command: &str, args: &[OsString]) -> Result<()> {
     use std::os::unix::process::CommandExt;
     let err = std::process::Command::new(command).args(args).exec();
     Err(err).with_context(|| format!("failed to start {command}"))
@@ -354,21 +373,19 @@ fn exec(command: &str, args: &[String]) -> Result<()> {
 fn shorthand(
     store: &Store,
     providers: &[&dyn Provider],
-    words: &[String],
-) -> Result<(String, Vec<String>)> {
+    words: &[OsString],
+) -> Result<(String, Vec<OsString>)> {
     let (cli, rest) = words.split_first().context("no command")?;
-    let p = providers
-        .iter()
-        .find(|p| p.id() == cli && p.run_spec().is_some())
-        .with_context(|| format!("unrecognized subcommand '{cli}'; see `remuda --help`"))?;
-    let named = rest.first().filter(|w| {
+    let cli = cli.to_string_lossy().into_owned();
+    let p = commands::find(providers, &cli)?;
+    let named = rest.first().and_then(|w| w.to_str()).filter(|w| {
         !w.starts_with('-')
             && store::validate_name(w).is_ok()
             && store.get(p.id(), w).ok().flatten().is_some()
     });
     let (target, rest) = match named {
         Some(name) => (format!("{cli}/{name}"), &rest[1..]),
-        None => (cli.clone(), rest),
+        None => (cli, rest),
     };
     let args = match rest.split_first() {
         Some((dashes, after)) if dashes == "--" => after.to_vec(),
@@ -382,11 +399,17 @@ fn pin(
     providers: &[&dyn Provider],
     name: Option<&str>,
     remove: Option<&str>,
+    allow: bool,
 ) -> Result<()> {
     let here = std::env::current_dir().context("cannot tell which directory this is")?;
+    if allow {
+        let file = pins::allow_nearest(store, &here)?;
+        println!("pins in {} are allowed", file.display());
+        return Ok(());
+    }
     if let Some(cli) = remove {
         let p = commands::find(providers, cli)?;
-        let file = pins::set(&here, p.id(), None)?;
+        let file = pins::set(store, &here, p.id(), None)?;
         println!("unpinned {} in {}", p.name(), file.display());
         return Ok(());
     }
@@ -394,13 +417,13 @@ fn pin(
         let (p, name) = commands::resolve(store, providers, spec)?;
         p.run_spec()
             .with_context(|| format!("remuda run cannot start {} yet", p.name()))?;
-        let file = pins::set(&here, p.id(), Some(&name))?;
+        let file = pins::set(store, &here, p.id(), Some(&name))?;
         println!("pinned {} to {name} in {}", p.name(), file.display());
         return Ok(());
     }
     let mut any = false;
     for p in providers.iter().filter(|p| p.run_spec().is_some()) {
-        if let Some(pin) = pins::find(&here, p.id())? {
+        if let Some(pin) = pins::find(store, &here, p.id()) {
             println!("{}: {} ({})", p.id(), pin.name, pin.file.display());
             any = true;
         }
@@ -411,11 +434,11 @@ fn pin(
     Ok(())
 }
 
-fn run(store: &Store, providers: &[&dyn Provider], target: &str, args: &[String]) -> Result<()> {
+fn run(store: &Store, providers: &[&dyn Provider], target: &str, args: &[OsString]) -> Result<()> {
     let (p, name) = match providers.iter().find(|p| p.id() == target) {
         Some(p) => {
             let here = std::env::current_dir().unwrap_or_default();
-            (*p, pins::find(&here, p.id())?.map(|pin| pin.name))
+            (*p, pins::find(store, &here, p.id()).map(|pin| pin.name))
         }
         None => {
             let (p, name) = commands::resolve(store, providers, target)?;
@@ -430,7 +453,6 @@ fn run(store: &Store, providers: &[&dyn Provider], target: &str, args: &[String]
     };
     let started = {
         let _lock = store.lock()?;
-        session::recover(store, &[p]);
         let live = ops::sync_live(store, p)?;
         if live.active_name() == Some(name.as_str()) {
             None
@@ -442,36 +464,28 @@ fn run(store: &Store, providers: &[&dyn Provider], target: &str, args: &[String]
         return exec(spec.command, args);
     };
     eprintln!("remuda: {} on {name} for this session", p.name());
+    let outer = paths::outer(spec.var);
+    let outside = std::env::var_os(&outer)
+        .or_else(|| std::env::var_os(spec.var))
+        .unwrap_or_default();
     let status = shielded(
         std::process::Command::new(spec.command)
             .args(args)
-            .env(spec.var, &home),
+            .env(spec.var, &home)
+            .env(&outer, outside),
+        lease.fd(),
     );
-    let finished = store
-        .lock()
-        .and_then(|_lock| session::finish(store, p, &spec, &name));
-    drop(lease);
-    match &finished {
-        Ok(()) => logbook::note(
-            store,
-            logbook::Event::new(logbook::Kind::Run, true, "the session ended")
-                .about(p.id(), Some(&name)),
-        ),
-        Err(e) => eprintln!("warning: {e:#}"),
+    match store.lock() {
+        Ok(_lock) => session::leave(store, p, lease),
+        Err(e) => eprintln!("warning: the session is left for the next command to finish: {e:#}"),
     }
-    let status = status.with_context(|| format!("failed to start {}", spec.command))?;
-    std::process::exit(exit_code(status));
+    exit_as(status.with_context(|| format!("failed to start {}", spec.command))?);
 }
 
-/// The CLIs `remuda <cli> [NAME] [ARGS...]` starts.
-const SHORTHAND: [&str; 2] = ["claude", "codex"];
-
 fn main() -> Result<()> {
-    let argv: Vec<String> = std::env::args_os()
-        .map(|a| a.to_string_lossy().into_owned())
-        .collect();
-    let command = match argv.get(1) {
-        Some(first) if SHORTHAND.contains(&first.as_str()) => Cmd::Cli(argv[1..].to_vec()),
+    let argv: Vec<OsString> = std::env::args_os().collect();
+    let command = match argv.get(1).and_then(|a| a.to_str()) {
+        Some(first) if PROVIDERS.contains(&first) => Cmd::Cli(argv[1..].to_vec()),
         _ => {
             let cli = Cli::parse();
             match cli.command {
@@ -499,6 +513,21 @@ fn main() -> Result<()> {
     let glm = ApiKey::glm();
     let opencode = ApiKey::opencode();
     let providers: [&dyn Provider; 7] = [&claude, &codex, &cursor, &glm, &grok, &kimi, &opencode];
+    if let Cmd::Run { name, args } = &command {
+        return run(&store, &providers, name, args);
+    }
+    if let Cmd::Cli(words) = &command {
+        let (target, args) = shorthand(&store, &providers, words)?;
+        return run(&store, &providers, &target, &args);
+    }
+    if let Cmd::ShellInit { shell } = &command {
+        let commands: Vec<&str> = providers
+            .iter()
+            .filter_map(|p| p.run_spec().map(|s| s.command))
+            .collect();
+        print!("{}", pins::shell_init(shell, &commands)?);
+        return Ok(());
+    }
     let seen = dirs::now(&providers);
     if let Some(doing) = command.needs_store()
         && !store.root().exists()
@@ -603,23 +632,19 @@ fn main() -> Result<()> {
         return commands::login(&store, p, name, *force, prompt, out);
     }
 
-    if let Cmd::Run { name, args } = &command {
-        return run(&store, &providers, name, args);
-    }
-    if let Cmd::Cli(words) = &command {
-        let (target, args) = shorthand(&store, &providers, words)?;
-        return run(&store, &providers, &target, &args);
-    }
-    if let Cmd::ShellInit { shell } = &command {
-        let commands: Vec<&str> = providers
-            .iter()
-            .filter_map(|p| p.run_spec().map(|s| s.command))
-            .collect();
-        print!("{}", pins::shell_init(shell, &commands)?);
-        return Ok(());
-    }
-    if let Cmd::Pin { name, remove } = &command {
-        return pin(&store, &providers, name.as_deref(), remove.as_deref());
+    if let Cmd::Pin {
+        name,
+        remove,
+        allow,
+    } = &command
+    {
+        return pin(
+            &store,
+            &providers,
+            name.as_deref(),
+            remove.as_deref(),
+            *allow,
+        );
     }
 
     let _lock = store.lock()?;
