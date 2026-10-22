@@ -153,7 +153,7 @@ URL. Installed with `--serve`, `remuda-serve.service` keeps one running (or
 While `remuda serve` runs, auto mode keeps each CLI on the most suitable of the
 logins you allow and moves it off one that is full, using the usage figures
 [TokenGauge](https://github.com/Arzaroth/TokenGauge) reports. It is off by
-default; set it up per CLI in the page's Auto mode section, or in
+default; set it up on the Automation tab of each CLI's page, or in
 `~/.config/remuda/config.toml`:
 
 ```toml
@@ -218,7 +218,7 @@ own token and never refreshed by remuda.
 ## The proxy
 
 `remuda serve` can also run an API proxy for any OpenAI or Anthropic client,
-switched on from the page's API proxy page, which also makes its access keys.
+switched on from the API proxy page, which also makes its access keys.
 
 | Protocol | Base URL |
 | --- | --- |
