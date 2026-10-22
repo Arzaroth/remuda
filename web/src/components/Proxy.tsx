@@ -4,7 +4,7 @@ import { createConfirm } from '../confirm';
 import { api } from '../api';
 import { load, store, toast } from '../state';
 import { remember, remembered } from '../storage';
-import { baseUrl, masked, PROTOCOLS, status, type Protocol } from '../proxy';
+import { baseUrl, exports, masked, PROTOCOLS, status, type Protocol } from '../proxy';
 import { Icon } from './Icon';
 
 async function send(path: string, body: unknown): Promise<boolean> {
@@ -136,6 +136,27 @@ export function Proxy() {
               <Icon name="copy" />
             </button>
           </div>
+        )}
+      </Show>
+
+      <Show when={key()}>
+        {(k) => (
+          <>
+            <div class="field-label">
+              <span>Shell</span>
+              <span class="hint">paste before running the client</span>
+            </div>
+            <div class="field env">
+              <pre>{exports(p(), protocol(), shown() ? k().key : masked(k().key))}</pre>
+              <button
+                class="btn icon"
+                title="Copy the exports"
+                onClick={() => copy(exports(p(), protocol(), k().key), 'Exports')}
+              >
+                <Icon name="copy" />
+              </button>
+            </div>
+          </>
         )}
       </Show>
 
