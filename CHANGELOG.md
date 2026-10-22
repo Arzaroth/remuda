@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- remuda keeps a log of what it did: every switch with who made it (the CLI,
+  the page or auto mode) and why, refreshes and the ones that failed, auto
+  mode's decisions, keep-warm pings, banked resets, the proxy turning a login
+  down, and logins stored, renamed or removed. `remuda log` prints it, narrowed
+  to a CLI or a login, and the page has a Log in its sidebar, by day, narrowed
+  by CLI or to failures. A failure that repeats is logged once, so a revoked
+  spare the timer cannot refresh is one line rather than one every half hour.
+
 ## [0.22.0] - 2026-10-22
 
 ### Changed

@@ -103,7 +103,7 @@ A Claude login's banked resets are in its details, and the page spends one
 `remuda serve` grows from one page into a small management app, along the lines
 of CLIProxyAPI's management center. The page already has a sidebar with an
 overview, a page per CLI (its logins and its automation), the API proxy and
-status; still to come are a Logs page and a settings page for what remuda
+status, and a Log; still to come is a settings page for what remuda
 gains on the way: the refresh timer, the hub's bind address and satellites.
 
 The page is already written in Solid under `web/`, which Vite builds into the

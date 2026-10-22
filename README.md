@@ -111,6 +111,7 @@ take `-p <cli>`: `claude` (the default), `codex`, `cursor`, `glm`, `grok`,
 | `remuda rename <name> <new>` | Rename a stored credential |
 | `remuda rm <name>` | Delete a stored credential |
 | `remuda auto` | Say which login auto mode would put each CLI on now, and why |
+| `remuda log [name] [-n N] [--json]` | Show what remuda did: switches and who made them, refreshes, auto mode, keep-warm, the proxy |
 | `remuda serve [--port N] [--no-browser]` | Do all of the above from a page in the browser, and run auto mode |
 | `remuda open [--no-browser]` | Open the page a running `serve` shows |
 | `remuda completions <shell>` | Print a completion script |
@@ -295,6 +296,8 @@ opencode/<name>.json      {"key": ...}
                           oauthAccount block
 .dirs.json                where the last interactive command found each
                           CLI's login, for the refresh timer
+.log.jsonl                what remuda did, one event per line, for
+                          `remuda log` and the page's Log
 ```
 
 Files are 0600 and directories 0700. Other tools read the store: TokenGauge
