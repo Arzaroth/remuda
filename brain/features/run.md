@@ -82,7 +82,9 @@ lock and the session's exclusive lock:
    inside the session) are set aside. Tokens older than the store's are set
    aside too, and both are said in the log. Tokens that cannot be identified
    yet, offline say, are an error, and the directory is kept for the next
-   command to try. A session that ended signed out is said as well, since
+   command to try. Once their access token has expired, they can no longer
+   be asked who they are, so they are refreshed first, as `ops::heal` does,
+   and the renewed tokens go into the directory at once. A session that ended signed out is said as well, since
    its CLI may have spent the store's refresh token first.
 2. **What the CLI made.** Entries in `home` that are not links go into the
    CLI's own directory, copied when it is on another filesystem: ones it did
