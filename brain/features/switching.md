@@ -1,7 +1,7 @@
 # Switching
 
 `remuda use <name> [--discard]` makes a stored credential the one its CLI uses
-(`ops::switch`):
+(`ops::switch_by`, with who asked; auto mode's `ops::switch_when` also says why):
 
 1. Sync the live login back (`ops::sync_live`).
 2. If the target is already active, say so and stop.
