@@ -18,8 +18,7 @@ move to the foot of the Status page. Each CLI is shown by its own logo, in its o
 TokenGauge through selvedge (`icons.ts`), in the sidebar, the page heads, the overview, the proxy and
 Add a login.
 
-- **Overview** has one tile per CLI, edged in the CLI's colour (TokenGauge's:
-  Claude `#de7356`, Codex `#74aa9c`), with a combined meter: one usage window
+- **Overview** has one tile per CLI, headed by its logo, with a combined meter: one usage window
   added up over every stored login TokenGauge has figures for, over a bar
   with a segment per login in its own tone, the soonest of their resets,
   and the login in use. A login with no figures for the window (skipped,
