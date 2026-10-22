@@ -224,7 +224,8 @@ pub fn read(store: &Store) -> Vec<Event> {
 fn read_unlocked(store: &Store) -> Vec<Event> {
     [rotated_path(store), path(store)]
         .iter()
-        .filter_map(|p| fs::read_to_string(p).ok())
+        .filter_map(|p| fs::read(p).ok())
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
         .flat_map(|text| {
             text.lines()
                 .filter_map(|l| serde_json::from_str(l).ok())
@@ -347,6 +348,22 @@ mod tests {
         note(&store, failed("b"));
         let messages: Vec<String> = read(&store).into_iter().map(|e| e.message).collect();
         assert_eq!(messages, ["a", "b"]);
+
+        let mut file = OpenOptions::new().append(true).open(path(&store)).unwrap();
+        file.write_all(
+            "{\"message\": \"caf\u{e9}"
+                .as_bytes()
+                .split_last()
+                .unwrap()
+                .1,
+        )
+        .unwrap();
+        note(&store, failed("c"));
+        assert_eq!(
+            read(&store).len(),
+            3,
+            "a character cut in two spoils its line only"
+        );
     }
 
     #[test]
