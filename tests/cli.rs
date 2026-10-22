@@ -877,8 +877,8 @@ fn fake_claude(home: &Home) -> String {
         "#!/bin/sh\n\
          printf '%s\\n' \"$CLAUDE_CONFIG_DIR\" > \"$HOME/seen-dir\"\n\
          printf '%s\\n' \"$*\" > \"$HOME/seen-args\"\n\
-         ls -l /proc/$$/fd > \"$HOME/seen-fds\"\n\
          [ -n \"$CLAUDE_CONFIG_DIR\" ] || exit 0\n\
+         ls \"$CLAUDE_CONFIG_DIR/..\" > \"$HOME/seen-place\"\n\
          cp \"$CLAUDE_CONFIG_DIR/.credentials.json\" \"$HOME/seen-creds\"\n\
          sed -i 's/\"r-work\"/\"r-rotated\"/; s/\"a-work\"/\"a-rotated\"/' \"$CLAUDE_CONFIG_DIR/.credentials.json\"\n\
          exit 7\n",
@@ -926,10 +926,10 @@ fn run_starts_the_cli_on_a_login_of_its_own_and_keeps_what_it_rotated() {
         std::fs::read_to_string(home.path("seen-args")).unwrap(),
         "--resume x\n"
     );
-    let fds = std::fs::read_to_string(home.path("seen-fds")).unwrap();
+    let place = std::fs::read_to_string(home.path("seen-place")).unwrap();
     assert!(
-        fds.contains(".runs/claude/work/lock"),
-        "the CLI holds the session's lock: {fds}"
+        place.lines().any(|l| l.starts_with("cli-")),
+        "the session notes its CLI's process: {place}"
     );
     let seen = read(&home.path("seen-creds"));
     assert_eq!(seen["claudeAiOauth"]["refreshToken"], "r-work");

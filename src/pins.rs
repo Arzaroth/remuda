@@ -91,9 +91,18 @@ fn read_pin(store: &Store, path: &Path, provider: &str) -> Result<Option<String>
 /// the rest of the file as written, and allows what it then holds.
 pub fn set(store: &Store, dir: &Path, provider: &str, name: Option<&str>) -> Result<PathBuf> {
     let path = dir.join(FILE);
-    let mut doc = if path.exists() {
+    let mut doc = if std::fs::symlink_metadata(&path).is_ok() {
+        if !ours(&path) {
+            bail!("{} is not a file of yours", path.display());
+        }
         let text = std::fs::read_to_string(&path)
             .with_context(|| format!("failed to read {}", path.display()))?;
+        if allowed(store).get(&path.display().to_string()) != Some(&digest(&text)) {
+            bail!(
+                "{} was not written by remuda pin; read it, then `remuda pin --allow` trusts it",
+                path.display()
+            );
+        }
         parse(&path, &text)?
     } else {
         DocumentMut::new()
@@ -115,8 +124,9 @@ pub fn set(store: &Store, dir: &Path, provider: &str, name: Option<&str>) -> Res
     Ok(path)
 }
 
-/// Allows the nearest `.remuda.toml` from `dir` up, as it is now.
-pub fn allow_nearest(store: &Store, dir: &Path) -> Result<PathBuf> {
+/// Allows the nearest `.remuda.toml` from `dir` up, as it is now, and
+/// returns it with what it holds, to be shown.
+pub fn allow_nearest(store: &Store, dir: &Path) -> Result<(PathBuf, String)> {
     let path = dir
         .ancestors()
         .map(|d| d.join(FILE))
@@ -129,7 +139,7 @@ pub fn allow_nearest(store: &Store, dir: &Path) -> Result<PathBuf> {
         .with_context(|| format!("failed to read {}", path.display()))?;
     parse(&path, &text)?;
     allow(store, &path, &text);
-    Ok(path)
+    Ok((path, text))
 }
 
 /// Shell functions that send `claude`, `codex` and the like through
@@ -189,6 +199,10 @@ mod tests {
         std::fs::remove_file(repo.join(FILE)).unwrap();
         std::os::unix::fs::symlink(tmp.path().join(FILE), repo.join(FILE)).unwrap();
         assert!(!ours(&repo.join(FILE)), "a link is not read");
+        assert!(
+            set(&store, &repo, "claude", Some("work")).is_err(),
+            "nor written through"
+        );
     }
 
     #[test]
@@ -196,6 +210,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let store = store(tmp.path());
         std::fs::write(tmp.path().join(FILE), "# mine\ncodex = \"perso\"\n").unwrap();
+        let err = set(&store, tmp.path(), "claude", Some("work")).unwrap_err();
+        assert!(err.to_string().contains("--allow"), "{err}");
+        allow_nearest(&store, tmp.path()).unwrap();
         let path = set(&store, tmp.path(), "claude", Some("work")).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert_eq!(text, "# mine\ncodex = \"perso\"\nclaude = \"work\"\n");

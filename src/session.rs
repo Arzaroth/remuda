@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
-use std::os::fd::{AsRawFd, RawFd};
+use std::io::Write;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
@@ -21,7 +21,7 @@ fn runs(store: &Store) -> PathBuf {
 /// `<store>/.runs/<provider>/<name>/`: the session's `lock`, the CLI's
 /// directory as the session sees it (`home`), and what its copied files held
 /// when it started (`base`).
-fn place(store: &Store, provider: &str, name: &str) -> PathBuf {
+pub fn place(store: &Store, provider: &str, name: &str) -> PathBuf {
     runs(store).join(provider).join(name)
 }
 
@@ -33,17 +33,65 @@ fn base(store: &Store, provider: &str, name: &str) -> PathBuf {
     place(store, provider, name).join("base")
 }
 
-/// A shared lock on the session, which every process of it holds: remuda,
-/// and the CLI it starts, which inherits it. The session ends when the last
-/// of them lets go, however each one ends.
+/// A shared lock on the session, which every remuda running a CLI in it
+/// holds, beside a `cli-<pid>` file naming that CLI's process. The session
+/// lasts while either says it runs: a CLI outlives a remuda that was killed,
+/// and its own children, which may outlive it, hold nothing.
 pub struct Lease {
-    file: File,
+    _file: File,
+    cli: Option<PathBuf>,
 }
 
 impl Lease {
-    pub fn fd(&self) -> RawFd {
-        self.file.as_raw_fd()
+    /// Notes the CLI's process, so the session outlives this remuda.
+    pub fn started(&mut self, place: &Path, pid: u32) {
+        let path = place.join(format!("cli-{}", std::process::id()));
+        if let Some(at) = start_time(pid)
+            && fs::write(&path, format!("{pid} {at}")).is_ok()
+        {
+            self.cli = Some(path);
+        }
     }
+}
+
+impl Drop for Lease {
+    fn drop(&mut self) {
+        if let Some(cli) = &self.cli {
+            let _ = fs::remove_file(cli);
+        }
+    }
+}
+
+/// When a process started, in clock ticks since boot, which tells it apart
+/// from a later one given the same pid.
+fn start_time(pid: u32) -> Option<u64> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    stat.rsplit_once(')')?
+        .1
+        .split_whitespace()
+        .nth(19)?
+        .parse()
+        .ok()
+}
+
+fn clis_alive(place: &Path) -> bool {
+    fs::read_dir(place)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|item| {
+            item.file_name().to_string_lossy().starts_with("cli-")
+                && fs::read_to_string(item.path()).ok().is_some_and(|text| {
+                    let mut parts = text.split_whitespace();
+                    let pid = parts.next().and_then(|p| p.parse().ok());
+                    let at = parts.next().and_then(|a| a.parse().ok());
+                    pid.is_some_and(|pid| at.is_some() && start_time(pid) == at)
+                })
+        })
+}
+
+fn warn(why: &str) {
+    let _ = writeln!(std::io::stderr(), "warning: {why}");
 }
 
 fn open_lock(path: &Path, create: bool) -> Result<Option<File>> {
@@ -80,20 +128,28 @@ pub fn in_use(store: &Store, provider: &str, name: &str) -> bool {
 }
 
 fn running(place: &Path) -> bool {
+    if clis_alive(place) {
+        return true;
+    }
     let Ok(Some(file)) = open_lock(&place.join("lock"), false) else {
         return false;
     };
     matches!(file.try_lock(), Err(fs::TryLockError::WouldBlock))
 }
 
-/// The exclusive lock on a session no process holds any more, for finishing
-/// it.
-fn idle(path: &Path) -> Result<Option<File>> {
-    let Some(file) = open_lock(path, false)? else {
+/// The exclusive lock on a session no process runs in any more, for
+/// finishing it. A directory with no lock, left by a process that kept the
+/// session's directory but not its lease, gets one.
+fn idle(place: &Path) -> Result<Option<File>> {
+    if clis_alive(place) {
+        return Ok(None);
+    }
+    let path = place.join("lock");
+    let Some(file) = open_lock(&path, true)? else {
         return Ok(None);
     };
     match file.try_lock() {
-        Ok(()) if still_at(&file, path) => Ok(Some(file)),
+        Ok(()) if still_at(&file, &path) => Ok(Some(file)),
         Ok(()) | Err(fs::TryLockError::WouldBlock) => Ok(None),
         Err(fs::TryLockError::Error(e)) => {
             Err(e).with_context(|| format!("failed to lock {}", path.display()))
@@ -109,7 +165,10 @@ fn join(path: &Path) -> Result<Lease> {
         file.lock_shared()
             .with_context(|| format!("failed to lock {}", path.display()))?;
         if still_at(&file, path) {
-            return Ok(Lease { file });
+            return Ok(Lease {
+                _file: file,
+                cli: None,
+            });
         }
     }
     bail!("{} keeps being replaced", path.display())
@@ -194,7 +253,10 @@ fn merge(base: &Value, ours: &Value, theirs: &mut Value, skip: &[&str], deep: bo
             return changed;
         };
         let current = map.get(key);
-        let rotated = expires_at(now).is_some_and(|n| expires_at(current).is_none_or(|c| n > c));
+        let rotated = matches!(
+            (expires_at(now), expires_at(current)),
+            (Some(n), Some(c)) if n > c
+        );
         if current == was || rotated {
             match now {
                 Some(v) => map.insert(key.clone(), v.clone()),
@@ -226,16 +288,47 @@ fn merge_back(spec: &RunSpec, home: &Path, base: &Path) -> Result<()> {
     Ok(())
 }
 
-fn move_file(from: &Path, to: &Path) -> Result<()> {
+fn copy_tree(from: &Path, to: &Path) -> Result<()> {
+    let kind = fs::symlink_metadata(from)?.file_type();
+    if kind.is_symlink() {
+        std::os::unix::fs::symlink(fs::read_link(from)?, to)?;
+    } else if kind.is_dir() {
+        fs::create_dir(to)?;
+        for item in fs::read_dir(from)? {
+            let item = item?;
+            copy_tree(&item.path(), &to.join(item.file_name()))?;
+        }
+    } else {
+        fs::copy(from, to)?;
+    }
+    Ok(())
+}
+
+/// A rename, or a copy across filesystems.
+fn move_entry(from: &Path, to: &Path) -> Result<()> {
     if fs::rename(from, to).is_ok() {
         return Ok(());
     }
-    if !fs::symlink_metadata(from)?.is_file() {
-        bail!("cannot move {} to {}", from.display(), to.display());
+    let from_dir = fs::symlink_metadata(from)?.is_dir();
+    if fs::symlink_metadata(to).is_ok_and(|m| from_dir || m.is_dir()) {
+        bail!("{} is in the way", to.display());
     }
-    fs::copy(from, to).with_context(|| format!("failed to copy {}", from.display()))?;
-    fs::remove_file(from)?;
+    copy_tree(from, to)
+        .with_context(|| format!("failed to copy {} to {}", from.display(), to.display()))?;
+    if from_dir {
+        fs::remove_dir_all(from)?;
+    } else {
+        fs::remove_file(from)?;
+    }
     Ok(())
+}
+
+fn free_name(dir: &Path, name: &str) -> PathBuf {
+    let plain = dir.join(format!("{name}.remuda-run"));
+    if fs::symlink_metadata(&plain).is_err() {
+        return plain;
+    }
+    dir.join(format!("{name}.remuda-run-{}", now_ms()))
 }
 
 /// What the CLI made in the session's directory beside the links: entries
@@ -261,14 +354,18 @@ fn move_back(p: &dyn Provider, spec: &RunSpec, home: &Path, base: &Path) -> Resu
         let target = real.join(&name);
         match fs::symlink_metadata(&target) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                move_file(&item.path(), &target)?;
+                move_entry(&item.path(), &target)?;
             }
-            Ok(m) if m.is_file() && m.modified().is_ok_and(|t| t <= started) => {
-                move_file(&item.path(), &target)?;
+            Ok(m)
+                if m.is_file()
+                    && item.file_type()?.is_file()
+                    && m.modified().is_ok_and(|t| t <= started) =>
+            {
+                move_entry(&item.path(), &target)?;
             }
             _ => {
-                let aside = real.join(format!("{}.remuda-run", name.to_string_lossy()));
-                move_file(&item.path(), &aside)?;
+                let aside = free_name(&real, &name.to_string_lossy());
+                move_entry(&item.path(), &aside)?;
                 kept.push(aside);
             }
         }
@@ -377,10 +474,9 @@ fn finish(store: &Store, p: &dyn Provider, spec: &RunSpec, name: &str) -> Result
         }
     }
     let place = place(store, p.id(), name);
-    let _ = fs::remove_file(place.join("lock"));
-    let _ = fs::remove_dir(&place);
+    fs::remove_dir_all(&place).with_context(|| format!("failed to remove {}", place.display()))?;
     for why in &said {
-        eprintln!("warning: {why}");
+        warn(why);
         logbook::note(
             store,
             Event::new(Kind::Run, false, why).about(p.id(), Some(name)),
@@ -404,7 +500,7 @@ pub fn recover(store: &Store, providers: &[&dyn Provider]) {
             let Some(name) = item.file_name().to_str().map(str::to_owned) else {
                 continue;
             };
-            let Ok(Some(_last)) = idle(&item.path().join("lock")) else {
+            let Ok(Some(_last)) = idle(&item.path()) else {
                 continue;
             };
             match finish(store, *p, &spec, &name) {
@@ -417,7 +513,7 @@ pub fn recover(store: &Store, providers: &[&dyn Provider]) {
                         "the session on {}/{name} could not be finished: {e:#}",
                         p.id()
                     );
-                    eprintln!("warning: {why}");
+                    warn(&why);
                     logbook::note_once(
                         store,
                         Event::new(Kind::Run, false, why).about(p.id(), Some(&name)),
@@ -535,6 +631,33 @@ mod tests {
     }
 
     #[test]
+    fn a_cli_that_outlives_its_remuda_keeps_the_session_and_a_lockless_one_is_finished() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let (mut lease, _, home) = start(&e.store, &e.claude, "work").unwrap();
+        let place = place(&e.store, "claude", "work");
+        lease.started(&place, std::process::id());
+        let cli = fs::read_dir(&place)
+            .unwrap()
+            .flatten()
+            .find(|f| f.file_name().to_string_lossy().starts_with("cli-"))
+            .unwrap()
+            .path();
+        let kept = fs::read_to_string(&cli).unwrap();
+        drop(lease);
+        fs::write(&cli, &kept).unwrap();
+        recover(&e.store, &[&e.claude]);
+        assert!(home.exists(), "its CLI still runs");
+        fs::write(&cli, "999999999 1").unwrap();
+        fs::remove_file(place.join("lock")).unwrap();
+        recover(&e.store, &[&e.claude]);
+        assert!(
+            !place.exists(),
+            "a dead CLI and no lock: the session is finished"
+        );
+    }
+
+    #[test]
     fn a_session_links_the_cli_s_files_and_keeps_only_the_login_its_own() {
         let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);
@@ -570,6 +693,8 @@ mod tests {
         assert_eq!(mode & 0o777, 0o700);
 
         fs::write(home.join("todos.json"), "made in the session").unwrap();
+        fs::create_dir_all(home.join("plans/deep")).unwrap();
+        fs::write(home.join("plans/deep/p.md"), "plan").unwrap();
         leave(&e.store, &e.claude, lease);
         assert!(!place(&e.store, "claude", "work").exists());
         assert!(
@@ -579,6 +704,10 @@ mod tests {
         assert_eq!(
             fs::read_to_string(e.tmp.path().join("todos.json")).unwrap(),
             "made in the session"
+        );
+        assert_eq!(
+            fs::read_to_string(e.tmp.path().join("plans/deep/p.md")).unwrap(),
+            "plan"
         );
         assert_eq!(e.live_refresh_token().as_deref(), Some("r-live"));
         assert_eq!(
@@ -684,7 +813,10 @@ mod tests {
         write_json(&config, &real).unwrap();
         let creds = e.tmp.path().join(".credentials.json");
         let mut real_creds = read(&creds);
-        real_creds["mcpOAuth"] = json!({"srv": {"refreshToken": "m1", "expiresAt": 1}});
+        real_creds["mcpOAuth"] = json!({
+            "srv": {"refreshToken": "m1", "expiresAt": 1},
+            "gone": {"refreshToken": "g1", "expiresAt": 1},
+        });
         write_json(&creds, &real_creds).unwrap();
         let (lease, _, home) = start(&e.store, &e.claude, "work").unwrap();
 
@@ -697,6 +829,7 @@ mod tests {
         write_json(&home.join(".claude.json"), &ours).unwrap();
         let mut ours_creds = read(&home.join(".credentials.json"));
         ours_creds["mcpOAuth"]["srv"] = json!({"refreshToken": "m3", "expiresAt": 3});
+        ours_creds["mcpOAuth"]["gone"] = json!({"refreshToken": "g3", "expiresAt": 3});
         write_json(&home.join(".credentials.json"), &ours_creds).unwrap();
         let mut theirs = read(&config);
         theirs["tips"] = json!(5);
@@ -704,6 +837,10 @@ mod tests {
         write_json(&config, &theirs).unwrap();
         let mut theirs_creds = read(&creds);
         theirs_creds["mcpOAuth"]["srv"] = json!({"refreshToken": "m2", "expiresAt": 2});
+        theirs_creds["mcpOAuth"]
+            .as_object_mut()
+            .unwrap()
+            .remove("gone");
         write_json(&creds, &theirs_creds).unwrap();
 
         leave(&e.store, &e.claude, lease);
@@ -723,6 +860,10 @@ mod tests {
         assert_eq!(
             merged_creds["mcpOAuth"]["srv"]["refreshToken"], "m3",
             "the token that expires later is the one a refresh rotated to"
+        );
+        assert!(
+            merged_creds["mcpOAuth"].get("gone").is_none(),
+            "what the CLI removed is not brought back"
         );
     }
 
