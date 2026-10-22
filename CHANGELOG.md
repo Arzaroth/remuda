@@ -5,8 +5,8 @@
 ### Changed
 
 - Each CLI's logo and colour are the ones TokenGauge draws, both now taken
-  from selvedge, and follow the provider's own: Kimi's is its current K with
-  the blue dot, opencode's has the block inside its frame, and Z.ai and
+  from selvedge, and follow the provider's own: Kimi's is its current K, in ink,
+  with the blue dot, opencode's has the block inside its frame, and Z.ai and
   opencode, whose brands are black and white, are drawn in the page's ink
   rather than red and blue.
 
