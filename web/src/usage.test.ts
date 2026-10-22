@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Combined, Credential, Live, State } from './types';
-import { carriedSince, dropping, dropsLive, inUse, overwrite, planFor, resetsAt, shownFor, taken } from './usage';
+import { autoOn, carriedSince, dropping, dropsLive, inUse, overwrite, planFor, resetsAt, shownFor, taken } from './usage';
 
 const cred = (name: string, active = false): Credential => ({
   id: `claude/${name}`,
@@ -124,5 +124,19 @@ describe('carriedSince', () => {
     expect(carriedSince(s, shown(undefined))).toBeNull();
     expect(carriedSince(s, shown('soon'))).toBeNull();
     expect(carriedSince({ usage: null } as unknown as State, shown('2026-10-21T01:23:22Z'))).toBeNull();
+  });
+});
+
+describe('autoOn', () => {
+  const s = {
+    auto: { claude: { enabled: true }, codex: { enabled: false }, grok: 'config.toml: bad rule' },
+  } as unknown as State;
+
+  it('is on only where a round reports it enabled', () => {
+    expect(autoOn(s, 'claude')).toBe(true);
+    expect(autoOn(s, 'codex')).toBe(false);
+    expect(autoOn(s, 'grok')).toBe(false);
+    expect(autoOn(s, 'kimi')).toBe(false);
+    expect(autoOn({} as State, 'claude')).toBe(false);
   });
 });
