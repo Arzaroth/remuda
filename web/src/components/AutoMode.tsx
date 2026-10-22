@@ -267,10 +267,8 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
   const own = () =>
     props.problems.filter(
       (p) =>
-        p.at === `warm.${props.p.id}` ||
-        ((p.at === at() || p.at.startsWith(`${at()}.`)) && !p.at.startsWith(`${at()}.rule[`)),
+        (p.at === at() || p.at.startsWith(`${at()}.`)) && !p.at.startsWith(`${at()}.rule[`),
     );
-  const warm = () => draft.c.warm?.[props.p.id] ?? [];
   const addRule = () =>
     set((x) =>
       (x.rule ??= []).push({ when: Object.keys(draft.c.schedules ?? {})[0] ?? OTHERWISE, order: [[]] }),
@@ -289,6 +287,10 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
           {a().enabled ? 'On' : 'Off'}
         </button>
       </div>
+      <p class="aside">
+        remuda keeps the CLI on the most suitable login you allow, and moves it off one that is maxed. Within a tier, it
+        spends first the headroom a reset is about to wipe.
+      </p>
       <Show when={status()}>{(s) => <Now s={s()} provider={props.p.id} />}</Show>
       <Show when={props.p.id === 'codex'}>
         <p class="aside">A running Codex session cannot take a new login, so auto mode waits for none to be open.</p>
@@ -372,26 +374,6 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
           </For>
         </div>
       </div>
-      <Show when={props.p.warm && loginsOf(props.p.id).length}>
-        <div class="pickable keep-warm">
-          <span class="aside">Keep the 5-hour window open</span>
-          <span class="aside">
-            The moment a picked login's window closes, remuda opens a new one with the smallest request it takes. Works
-            with auto mode off.
-          </span>
-          <div class="chips">
-            <For each={loginsOf(props.p.id)}>
-              {(name) => (
-                <Chip
-                  name={name}
-                  on={warm().includes(name)}
-                  onClick={() => edit((c) => toggleWarm(c, props.p.id, name))}
-                />
-              )}
-            </For>
-          </div>
-        </div>
-      </Show>
       <Show when={loginsOf(props.p.id).length}>
         <div class="pickable">
           <span class="aside">A login's own ceiling for its shortest window (Claude's 5-hour one)</span>
@@ -455,6 +437,33 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
         Add a rule
       </button>
       <Problems list={own()} />
+    </div>
+  );
+}
+
+function KeepWarm(props: { p: Provider; problems: Problem[] }) {
+  const warm = () => draft.c.warm?.[props.p.id] ?? [];
+  return (
+    <div class="auto-card">
+      <div class="auto-card-head">
+        <h3>Keep the 5-hour window open</h3>
+      </div>
+      <p class="aside">
+        The moment a picked login's window closes, remuda opens a new one with the smallest request it takes, whether
+        auto mode is on or off.
+      </p>
+      <div class="chips warm-chips">
+        <For each={loginsOf(props.p.id)}>
+          {(name) => (
+            <Chip
+              name={name}
+              on={warm().includes(name)}
+              onClick={() => edit((c) => toggleWarm(c, props.p.id, name))}
+            />
+          )}
+        </For>
+      </div>
+      <Problems list={props.problems.filter((p) => p.at === `warm.${props.p.id}`)} />
     </div>
   );
 }
@@ -630,18 +639,11 @@ export function AutoMode(props: { providers: Provider[] }) {
 
   return (
     <section class="auto">
-      <div class="auto-head">
-        <h2>Auto mode</h2>
-        <Show when={saved()}>
-          <span class="aside">
-            <code>{saved()!.path}</code>
-          </span>
-        </Show>
-      </div>
-      <p class="aside">
-        remuda keeps each CLI on the most suitable login you allow, and moves it off one that is maxed. Within a tier,
-        it spends first the headroom a reset is about to wipe.
-      </p>
+      <Show when={saved()}>
+        <p class="aside">
+          Saved in <code>{saved()!.path}</code>
+        </p>
+      </Show>
       <Show when={typeof store.s!.auto?.error === 'string'}>
         <div class="note">Auto mode is stopped: {store.s!.auto!.error as string}</div>
       </Show>
@@ -665,7 +667,16 @@ export function AutoMode(props: { providers: Provider[] }) {
       <Show when={saved()}>
         <div class="auto-grid">
           <For each={props.providers}>{(p) => <ProviderCard p={p} problems={problems()} />}</For>
-          <Schedules problems={problems()} />
+          <div class="auto-side">
+            <For each={props.providers}>
+              {(p) => (
+                <Show when={p.warm && loginsOf(p.id).length}>
+                  <KeepWarm p={p} problems={problems()} />
+                </Show>
+              )}
+            </For>
+            <Schedules problems={problems()} />
+          </div>
         </div>
         <Problems list={elsewhere()} />
       </Show>
