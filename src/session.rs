@@ -405,13 +405,34 @@ fn sync_back(
     }
     let refresh = p.refresh_token(&creds);
     let same_line = refresh.is_some() && refresh == p.refresh_token(&entry.creds);
+    let mut creds = creds;
     if !same_line {
-        let id = session.identify(&creds).with_context(|| {
+        let unconfirmed = || {
             format!(
                 "could not confirm whose tokens the session on {}/{name} ended with; the next command tries again",
                 p.id()
             )
-        })?;
+        };
+        let id = match session.identify(&creds) {
+            Ok(id) => id,
+            Err(e) if p.renews() && p.expires_at(&creds).is_some_and(|at| at <= now_ms()) => {
+                let (renewed, id) = renew(store, &entry, session, &creds).context(unconfirmed())?;
+                match id {
+                    Some(id) => {
+                        creds = renewed;
+                        id
+                    }
+                    None => {
+                        let kept = store.set_aside(p.id(), &entry.meta.account_id, &renewed)?;
+                        return Ok(Some(format!(
+                            "the session's tokens had expired and were renewed, but whose they are is unknown ({e:#}); they are kept in {}",
+                            kept.display()
+                        )));
+                    }
+                }
+            }
+            Err(e) => return Err(e).context(unconfirmed()),
+        };
         if id.account_id != entry.meta.account_id {
             let kept = store.set_aside(p.id(), &id.account_id, &creds)?;
             return Ok(Some(format!(
@@ -443,6 +464,34 @@ fn sync_back(
     entry.creds = creds;
     store.save(&entry)?;
     Ok(None)
+}
+
+/// A session ended long enough ago that its access token expired cannot be
+/// asked who it is, so its tokens are renewed first, as `ops::heal` does, and
+/// asked again or named by the refresh. The renewed tokens go into the
+/// session's directory at once, since the refresh spent the ones there.
+fn renew(
+    store: &Store,
+    entry: &Entry,
+    session: &dyn Provider,
+    creds: &Value,
+) -> Result<(Value, Option<crate::provider::Identity>)> {
+    let mut renewed = creds.clone();
+    let answered = session.refresh(&mut renewed)?;
+    let mut kept = entry.clone();
+    kept.creds = renewed.clone();
+    if session.install(&kept, None).is_err() {
+        store.set_aside(&entry.provider, &entry.meta.account_id, &renewed)?;
+    }
+    let id = match session.identify(&renewed) {
+        Ok(id) => Some(id),
+        Err(_) => answered.map(|account_id| crate::provider::Identity {
+            account_id,
+            email: String::new(),
+            oauth_account: None,
+        }),
+    };
+    Ok((renewed, id))
 }
 
 /// Ends a session no process holds any more: its tokens back into the store,
@@ -785,6 +834,33 @@ mod tests {
         recover(&e.store, &[&claude]);
         assert!(!home.exists());
         assert_eq!(e.stored_refresh_token("work").as_deref(), Some("r-unknown"));
+    }
+
+    #[test]
+    fn a_session_whose_access_token_expired_offline_is_renewed_to_be_named() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/v1/oauth/token")
+            .match_body(mockito::Matcher::PartialJson(json!({"refresh_token": "r-session"})))
+            .with_body(
+                json!({"access_token": "a-renewed", "refresh_token": "r-renewed", "expires_in": 28800})
+                    .to_string(),
+            )
+            .create();
+        profile(&mut server, "a-renewed", "u-work");
+        let e = env(&server.url());
+        e.stored("work", "u-work", HOUR);
+        let claude = Claude::at(e.tmp.path(), Api::local(&server.url()));
+        let (lease, _, home) = start(&e.store, &claude, "work").unwrap();
+        let mut creds = read(&home.join(".credentials.json"));
+        creds[OAUTH_KEY]["refreshToken"] = json!("r-session");
+        creds[OAUTH_KEY]["accessToken"] = json!("a-session");
+        creds[OAUTH_KEY]["expiresAt"] = json!(now_ms() - HOUR);
+        write_json(&home.join(".credentials.json"), &creds).unwrap();
+
+        leave(&e.store, &claude, lease);
+        assert!(!home.exists());
+        assert_eq!(e.stored_refresh_token("work").as_deref(), Some("r-renewed"));
     }
 
     #[test]
