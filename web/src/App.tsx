@@ -1,21 +1,22 @@
 import { createEffect, createSignal, Match, Show, Switch } from 'solid-js';
-import { store } from './state';
+import { act, store } from './state';
 import { go, href, route } from './route';
 import type { Provider } from './types';
-import { inUse } from './usage';
+import { autoOn, inUse } from './usage';
 import { AddAccount } from './components/AddAccount';
-import { AutoMode } from './components/AutoMode';
+import { AutoMode, dirty } from './components/AutoMode';
 import { Logins } from './components/Group';
 import { Health } from './components/Health';
 import { Proxy } from './components/Proxy';
 import { ProviderIcon } from './components/ProviderIcon';
 import { Sidebar } from './components/Sidebar';
 import { Strip, Tile } from './components/Strip';
+import { SkinSwitch } from './components/SkinSwitch';
+import { ThemeSwitch } from './components/ThemeSwitch';
 import { Toast } from './components/Toast';
 
 function AutoBadge(props: { p: Provider }) {
-  const a = () => store.s!.auto?.[props.p.id];
-  const on = () => !!a() && typeof a() === 'object' && (a() as { enabled: boolean }).enabled;
+  const on = () => autoOn(store.s!, props.p.id);
   return (
     <a class="auto-badge" classList={{ on: on() }} href={href({ page: 'cli', id: props.p.id, tab: 'automation' })}>
       {on() ? 'Auto mode on' : 'Auto mode off'}
@@ -41,18 +42,23 @@ function CliPage(props: { p: Provider; tab: 'logins' | 'automation' }) {
         </div>
         <AutoBadge p={props.p} />
       </header>
-      <div class="page-tabs" role="tablist" aria-label={props.p.name}>
-        <a role="tab" aria-selected={props.tab === 'logins'} href={href({ page: 'cli', id: props.p.id, tab: 'logins' })}>
+      <nav class="page-tabs" aria-label={props.p.name}>
+        <a
+          aria-current={props.tab === 'logins' ? 'page' : undefined}
+          href={href({ page: 'cli', id: props.p.id, tab: 'logins' })}
+        >
           Logins
         </a>
         <a
-          role="tab"
-          aria-selected={props.tab === 'automation'}
+          aria-current={props.tab === 'automation' ? 'page' : undefined}
           href={href({ page: 'cli', id: props.p.id, tab: 'automation' })}
         >
           Automation
+          <Show when={dirty()}>
+            <span class="unsaved">unsaved</span>
+          </Show>
         </a>
-      </div>
+      </nav>
       <Switch>
         <Match when={props.tab === 'logins'}>
           <Tile p={props.p} bare />
@@ -80,6 +86,7 @@ export function App() {
     const r = route();
     setAdding(r.page === 'cli' ? r.id : providers()[0]?.id);
     dialog.showModal();
+    dialog.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')?.focus();
   };
   createEffect(() => {
     const r = route();
@@ -113,6 +120,17 @@ export function App() {
                       </div>
                     </header>
                     <Health state={store.s!} />
+                    <div class="phone-only">
+                      <button
+                        class="btn"
+                        title="Refresh the logins not in use whose tokens expire within the hour"
+                        onClick={() => act('/api/refresh', {})}
+                      >
+                        Refresh tokens
+                      </button>
+                      <ThemeSwitch />
+                      <SkinSwitch />
+                    </div>
                   </div>
                 </Match>
                 <Match when={true}>
@@ -131,7 +149,7 @@ export function App() {
           </Show>
         </main>
       </div>
-      <dialog ref={dialog} class="sheet" onClose={() => setAdding(undefined)}>
+      <dialog ref={dialog} class="sheet" aria-labelledby="add-title" onClose={() => setAdding(undefined)}>
         <button class="sheet-close" aria-label="Close" onClick={() => dialog.close()}>
           <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
             <path d="M4 4l8 8M12 4l-8 8" />

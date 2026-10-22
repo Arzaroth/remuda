@@ -1,8 +1,7 @@
 import { brand } from '../brand';
 import { ICONS } from '../icons';
 
-/** A CLI's logo, in its colour. Decorative unless `label` names it. */
-export function ProviderIcon(props: { provider: string; size?: number; label?: string; plain?: boolean }) {
+export function ProviderIcon(props: { provider: string; size?: number }) {
   const icon = () => ICONS[props.provider];
   return (
     <svg
@@ -11,10 +10,8 @@ export function ProviderIcon(props: { provider: string; size?: number; label?: s
       width={props.size ?? 18}
       height={props.size ?? 18}
       fill="currentColor"
-      role={props.label ? 'img' : undefined}
-      aria-label={props.label}
-      aria-hidden={props.label ? undefined : 'true'}
-      style={props.plain ? undefined : { color: brand(props.provider) }}
+      aria-hidden="true"
+      style={{ color: brand(props.provider) }}
       innerHTML={icon()?.inner ?? '<circle cx="12" cy="12" r="8"/>'}
     />
   );

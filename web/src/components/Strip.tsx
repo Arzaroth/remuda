@@ -8,7 +8,7 @@ import type { Provider } from '../types';
 import { inUse, providerUsage, resetsAt } from '../usage';
 import { Meter } from './Meter';
 import { ProviderIcon } from './ProviderIcon';
-import { go } from '../route';
+import { href } from '../route';
 
 const [picks, setPicks] = createStore<Record<string, string>>(remembered('remuda-tiles') || {});
 const [modes, setModes] = createStore<Record<string, 'weighted' | 'absolute'>>(remembered('remuda-weighting') || {});
@@ -24,11 +24,14 @@ export function Strip() {
   );
 }
 
-/** The window a CLI's tile shows, as the sidebar sums it up. */
-export function lead(id: string) {
+const windows = (id: string) => {
   const s = store.s!;
   const weighted = (s.shown?.[id]?.weighable ?? false) && modes[id] !== 'absolute';
-  const all = s.shown?.[id]?.[weighted ? 'weighted' : 'absolute'] ?? [];
+  return s.shown?.[id]?.[weighted ? 'weighted' : 'absolute'] ?? [];
+};
+
+export function lead(id: string) {
+  const all = windows(id);
   if (!all.length) return null;
   return all.find((w) => w.title === picks[id]) || all.reduce((a, b) => (b.pooled > a.pooled ? b : a));
 }
@@ -45,10 +48,8 @@ export function Tile(props: { p: Provider; link?: boolean; bare?: boolean }) {
     setModes(props.p.id, mode);
     remember('remuda-weighting', { ...modes });
   };
-  const combined = createMemo(() => s().shown?.[props.p.id]?.[weighted() ? 'weighted' : 'absolute'] ?? []);
-  const shown = () =>
-    combined().find((w) => w.title === picks[props.p.id]) ||
-    combined().reduce((a, b) => (b.pooled > a.pooled ? b : a));
+  const combined = createMemo(() => windows(props.p.id));
+  const shown = () => lead(props.p.id)!;
   const others = () => combined().filter((w) => w !== shown());
   const pick = (title: string) => {
     setPicks(props.p.id, title);
@@ -61,7 +62,7 @@ export function Tile(props: { p: Provider; link?: boolean; bare?: boolean }) {
           <ProviderIcon provider={props.p.id} size={30} />
           <div>
             <Show when={props.link} fallback={<b>{props.p.name}</b>}>
-              <a class="tile-link" href={`#/cli/${props.p.id}`} onClick={(e) => (e.preventDefault(), go({ page: 'cli', id: props.p.id, tab: 'logins' }))}>
+              <a class="tile-link" href={href({ page: 'cli', id: props.p.id, tab: 'logins' })}>
                 {props.p.name}
               </a>
             </Show>

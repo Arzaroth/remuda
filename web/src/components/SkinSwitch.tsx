@@ -1,4 +1,5 @@
-import { createSignal, For } from 'solid-js';
+import { createSignal } from 'solid-js';
+import { Choice } from './Choice';
 
 type Skin = 'sage' | 'instrument';
 
@@ -11,19 +12,15 @@ export function SkinSwitch() {
     } catch {}
     setSkin(k);
   };
-  const names: [Skin, string][] = [
-    ['sage', 'Sage'],
-    ['instrument', 'Instrument'],
-  ];
   return (
-    <div class="theme" role="group" aria-label="Look">
-      <For each={names}>
-        {([k, name]) => (
-          <button aria-pressed={skin() === k} onClick={() => pick(k)}>
-            {name}
-          </button>
-        )}
-      </For>
-    </div>
+    <Choice
+      label="Look"
+      value={skin()}
+      onPick={pick}
+      options={[
+        ['sage', 'Sage'],
+        ['instrument', 'Instrument'],
+      ]}
+    />
   );
 }

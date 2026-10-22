@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, on, Show } from 'solid-js';
+import { createEffect, createSignal, For, on, onCleanup, Show } from 'solid-js';
 import { api } from '../api';
 import { createConfirm } from '../confirm';
 import { load, store, toast } from '../state';
@@ -16,6 +16,20 @@ export function AddAccount(props: { provider?: string }) {
   const confirm = createConfirm();
   let openLogin: string | null = null;
   let codeInput: HTMLInputElement | undefined;
+  let picker: HTMLDivElement | undefined;
+  onCleanup(() => {
+    if (openLogin) api('/api/login/cancel', { id: openLogin }).catch(() => {});
+    openLogin = null;
+  });
+  const step = (ev: KeyboardEvent) => {
+    const ids = store.s!.providers.map((p) => p.id);
+    const at = ids.indexOf(provider());
+    const by = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[ev.key];
+    if (!by || at < 0) return;
+    ev.preventDefault();
+    setProvider(ids[(at + by + ids.length) % ids.length]);
+    picker?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();
+  };
 
   const done = async (l: Login, code?: string) => {
     try {
@@ -69,16 +83,17 @@ export function AddAccount(props: { provider?: string }) {
 
   return (
     <section class="add">
-      <h2>Add a login</h2>
+      <h2 id="add-title">Add a login</h2>
       <p>Pick the CLI, name the login, and sign in with that account in your browser. remuda stores it under the name.</p>
       <form onSubmit={submit}>
-        <div class="pick-cli" role="radiogroup" aria-label="CLI">
+        <div class="pick-cli" role="radiogroup" aria-label="CLI" ref={picker} onKeyDown={step}>
           <For each={store.s!.providers}>
             {(p) => (
               <button
                 type="button"
                 role="radio"
                 aria-checked={provider() === p.id}
+                tabIndex={provider() === p.id ? 0 : -1}
                 onClick={() => setProvider(p.id)}
               >
                 <ProviderIcon provider={p.id} size={22} />
