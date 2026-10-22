@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- A CLI's Automation tab shows auto mode's switch once: the header's "Auto mode
+  on/off" badge is on the Logins tab only, and the card no longer repeats the
+  CLI's name.
+
 ## [0.21.0] - 2026-10-22
 
 ### Changed

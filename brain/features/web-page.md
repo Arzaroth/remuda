@@ -47,7 +47,8 @@ Add a login.
   into a login remuda has not stored stays, to import it. With no CLI in use
   at all, every one is shown.
 - **A CLI's page** opens with its logo, the login in use and how many are
-  stored, and an "Auto mode on/off" badge that leads to its Automation tab.
+  stored, and, on the Logins tab, an "Auto mode on/off" badge that leads to
+  its Automation tab.
   It has two tabs. Logins shows the CLI's tile, then its logins as a list
   that can be ordered as stored, by most headroom or by name (kept in
   `localStorage`). Automation holds the CLI's auto mode and keep-warm
@@ -148,8 +149,8 @@ its score and why it was or was not picked, the decision and why, and the last
 switch auto mode made.
 
 The Automation tab edits `config.toml`
-([architecture/config.md](../architecture/config.md)): a card for the CLI,
-with auto mode's switch, the minimum time on a login, the margin and the
+([architecture/config.md](../architecture/config.md)): a card with auto
+mode's switch, the minimum time on a login, the margin and the
 ceiling, each login's own ceiling, the fallback, the
 logins it may pick when no rule is in force, and its rules, each with a
 schedule, its tiers and which logins it keeps for a schedule, and, in a band
