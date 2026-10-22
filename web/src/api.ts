@@ -1,5 +1,7 @@
+import { tokenIn } from './hash';
+
 export const token = (() => {
-  const fromHash = location.hash.startsWith('#/') ? '' : location.hash.slice(1);
+  const fromHash = tokenIn(location.hash);
   try {
     if (fromHash) sessionStorage.setItem('remuda-token', fromHash);
     return fromHash || sessionStorage.getItem('remuda-token') || '';
@@ -7,7 +9,7 @@ export const token = (() => {
     return fromHash;
   }
 })();
-if (location.hash && !location.hash.startsWith('#/')) history.replaceState(null, '', location.pathname);
+if (tokenIn(location.hash)) history.replaceState(null, '', location.pathname);
 
 export async function api<T = any>(path: string, body?: unknown): Promise<T> {
   const init: RequestInit & { headers: Record<string, string> } = { headers: { 'X-Remuda-Token': token } };

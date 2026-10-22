@@ -10,11 +10,18 @@ import { Icon } from './Icon';
 import { Meter } from './Meter';
 
 type Order = 'store' | 'headroom' | 'name';
-const [order, setOrder] = createSignal<Order>((remembered('remuda-order') as Order) || 'store');
+const orders: Order[] = ['store', 'headroom', 'name'];
+const kept = remembered<Order>('remuda-order');
+const [order, setOrder] = createSignal<Order>(kept && orders.includes(kept) ? kept : 'store');
+
+const figures = (c: Credential) => {
+  const u = shownFor(store.s!, c);
+  return u && !u.error && !u.missing && !u.passive ? u.windows : [];
+};
 
 const headroom = (c: Credential) => {
-  const w = shownFor(store.s!, c)?.windows ?? [];
-  return w.length ? Math.min(...w.map((x) => 100 - x.usedPercent)) : -1;
+  const w = figures(c);
+  return w.length ? Math.min(...w.map((x) => 100 - x.usedPercent)) : -Infinity;
 };
 
 export function Logins(props: { p: Provider }) {
@@ -22,7 +29,7 @@ export function Logins(props: { p: Provider }) {
   const creds = () => {
     const all = s().credentials.filter((c) => c.provider === props.p.id);
     if (order() === 'name') return [...all].sort((a, b) => a.name.localeCompare(b.name));
-    if (order() === 'headroom') return [...all].sort((a, b) => headroom(b) - headroom(a));
+    if (order() === 'headroom') return [...all].sort((a, b) => headroom(b) - headroom(a) || 0);
     return all;
   };
   const live = () => s().live.find((l) => l.provider === props.p.id);
@@ -143,11 +150,9 @@ function Windows(props: { c: Credential }) {
 }
 
 function Compact(props: { c: Credential }) {
-  const u = () => shownFor(store.s!, props.c);
-  const shown = () => (u() && !u()!.error && !u()!.missing && !u()!.passive ? u()!.windows : []);
   return (
     <div class="compact">
-      <For each={shown()} fallback={<span class="aside">no figures</span>}>
+      <For each={figures(props.c)} fallback={<span class="aside">no figures</span>}>
         {(w) => (
           <div class="cw" title={`${w.title}: ${w.usedPercent}%${w.resetsAt ? `, resets ${until(Date.parse(w.resetsAt), now())}` : ''}`}>
             <span class="cw-title">{w.title}</span>

@@ -1,4 +1,5 @@
-import { createSignal, For } from 'solid-js';
+import { createSignal } from 'solid-js';
+import { Choice } from './Choice';
 
 type Theme = 'auto' | 'light' | 'dark';
 
@@ -12,20 +13,16 @@ export function ThemeSwitch() {
     } catch {}
     setTheme(t);
   };
-  const names: [Theme, string][] = [
-    ['auto', 'Auto'],
-    ['light', 'Light'],
-    ['dark', 'Dark'],
-  ];
   return (
-    <div class="theme" role="group" aria-label="Theme">
-      <For each={names}>
-        {([t, name]) => (
-          <button aria-pressed={theme() === t} onClick={() => pick(t)}>
-            {name}
-          </button>
-        )}
-      </For>
-    </div>
+    <Choice
+      label="Theme"
+      value={theme()}
+      onPick={pick}
+      options={[
+        ['auto', 'Auto'],
+        ['light', 'Light'],
+        ['dark', 'Dark'],
+      ]}
+    />
   );
 }

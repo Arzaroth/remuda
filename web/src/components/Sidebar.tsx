@@ -2,7 +2,7 @@ import { For, Show } from 'solid-js';
 import { act, store } from '../state';
 import { href, route, type Route } from '../route';
 import type { Provider } from '../types';
-import { inUse } from '../usage';
+import { autoOn, inUse } from '../usage';
 import { usedTone } from '../format';
 import { healthTone } from './Health';
 import { Meter } from './Meter';
@@ -21,10 +21,7 @@ function CliLink(props: { p: Provider }) {
   const active = () => s().credentials.find((c) => c.provider === props.p.id && c.active);
   const live = () => s().live.find((l) => l.provider === props.p.id);
   const w = () => lead(props.p.id);
-  const auto = () => {
-    const a = s().auto?.[props.p.id];
-    return !!a && typeof a === 'object' && a.enabled !== false;
-  };
+  const auto = () => autoOn(s(), props.p.id);
   const r: Route = { page: 'cli', id: props.p.id, tab: 'logins' };
   return (
     <a class="nav-cli" href={href(r)} aria-current={here(r) ? 'page' : undefined}>
@@ -40,7 +37,7 @@ function CliLink(props: { p: Provider }) {
         </span>
         <span class="nav-sub">
           {active()?.name ?? (live()?.state === 'signed_out' ? 'signed out' : 'no stored login in use')}
-          <Show when={w()}>{(x) => <b>{x().used}%</b>}</Show>
+          <Show when={w()}>{(x) => <b>{Math.round((x().used / x().of) * 100)}%</b>}</Show>
         </span>
         <Show when={w()}>{(x) => <Meter fraction={x().used / x().of} tone={usedTone((x().used / x().of) * 100)} />}</Show>
       </span>
@@ -53,12 +50,12 @@ export function Sidebar(props: { onAdd: () => void }) {
   const tone = () => healthTone(s());
   return (
     <nav class="side" aria-label="remuda">
-      <a class="side-brand" href="#/">
+      <a class="side-brand" href={href({ page: 'overview' })}>
         <img src="/favicon.svg" alt="" width="30" height="30" />
         <span>remuda</span>
       </a>
       <div class="nav-group">
-        <a class="nav-item" href="#/" aria-current={here({ page: 'overview' }) ? 'page' : undefined}>
+        <a class="nav-item" href={href({ page: 'overview' })} aria-current={here({ page: 'overview' }) ? 'page' : undefined}>
           <svg viewBox="0 0 20 20" aria-hidden="true">
             <path d="M3 3h6v6H3zM11 3h6v6h-6zM3 11h6v6H3zM11 11h6v6h-6z" />
           </svg>
@@ -70,20 +67,22 @@ export function Sidebar(props: { onAdd: () => void }) {
       </div>
       <div class="nav-group">
         <Show when={s().proxy}>
-          <a class="nav-item" href="#/proxy" aria-current={here({ page: 'proxy' }) ? 'page' : undefined}>
+          <a class="nav-item" href={href({ page: 'proxy' })} aria-current={here({ page: 'proxy' }) ? 'page' : undefined}>
             <svg viewBox="0 0 20 20" aria-hidden="true">
               <path d="M3 7h12l-3-3M17 13H5l3 3" />
             </svg>
             API proxy
-            <span class="nav-dot" classList={{ good: !!s().proxy?.enabled }} title={s().proxy?.enabled ? 'On' : 'Off'} />
+            <span class="nav-dot" classList={{ good: !!s().proxy?.enabled }} />
+            <span class="sr">{s().proxy?.enabled ? 'on' : 'off'}</span>
           </a>
         </Show>
-        <a class="nav-item" href="#/status" aria-current={here({ page: 'status' }) ? 'page' : undefined}>
+        <a class="nav-item" href={href({ page: 'status' })} aria-current={here({ page: 'status' }) ? 'page' : undefined}>
           <svg viewBox="0 0 20 20" aria-hidden="true">
             <path d="M2 10h4l2-5 4 10 2-5h4" />
           </svg>
           Status
           <span class={`nav-dot ${tone() || 'good'}`} />
+          <span class="sr">{{ '': 'all good', warn: 'needs a look', bad: 'has problems' }[tone()]}</span>
         </a>
       </div>
       <div class="side-foot">

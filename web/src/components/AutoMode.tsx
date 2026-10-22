@@ -34,7 +34,7 @@ const [conflict, setConflict] = createSignal(false);
 const [loadError, setLoadError] = createSignal<string | null>(null);
 
 const text = (c: Config) => canonical(c);
-const dirty = () => !!saved() && text(draft.c) !== text(saved()!.config);
+export const dirty = () => !!saved() && text(draft.c) !== text(saved()!.config);
 const edit = (fn: (c: Config) => void) => setDraft('c', produce(fn));
 
 function take(l: Loaded) {

@@ -64,3 +64,8 @@ export function overwrite(creds: Credential[], provider: string, name: string): 
 
 export const taken = (creds: Credential[], provider: string, name: string) =>
   creds.some((c) => c.provider === provider && c.name === name);
+
+export function autoOn(s: State, provider: string): boolean {
+  const a = s.auto?.[provider];
+  return typeof a === 'object' && a.enabled;
+}

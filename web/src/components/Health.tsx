@@ -3,7 +3,6 @@ import { ago, MIN, plural } from '../format';
 import { now } from '../state';
 import type { State } from '../types';
 
-/** The worst of what the status page reports, for the sidebar's dot. */
 export function healthTone(s: State): '' | 'warn' | 'bad' {
   const h = s.health;
   if (h.timer !== 'enabled') return 'warn';
@@ -17,10 +16,7 @@ export function Health(props: { state: State }) {
   const h = () => props.state.health;
   const run = () => h().lastRefresh;
   const count = () => run()?.problems?.length || 0;
-  const tone = () => {
-    const r = run();
-    return !r || now() - r.at > 75 * MIN ? 'warn' : r.problems.length ? 'bad' : 'good';
-  };
+  const tone = () => healthTone(props.state) || 'good';
   return (
     <div class="health">
       <div class="health-line">
