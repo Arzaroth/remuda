@@ -325,6 +325,29 @@ until something about that login goes right: the refresh timer runs every half
 hour, and a revoked spare would otherwise fill the log with one line per run
 ([features/log.md](features/log.md)).
 
+## A run session links the CLI's directory and copies only the login's files
+
+`remuda run` points the CLI at a directory of its own rather than switching,
+so every other session keeps its login. Symlinking every entry keeps history,
+projects and settings shared. The files that hold the login are copied
+instead: Claude Code's `.claude.json` carries `oauthAccount` as well as
+projects and MCP servers, and a link would let the session write another
+account into the file every other session reads. The copies are merged back
+key by key when the session ends, the login's keys excepted, so what the
+session changed is not lost. The CLI's own copy wins where both changed. A
+lease, the `flock` the session holds, marks the login in use rather than a
+pid file, since the kernel drops it however the process dies. A directory
+left with no lease held is a session that died, finished by the next command
+([features/run.md](features/run.md)).
+
+## A pin is read only from a file the user owns
+
+A `.remuda.toml` chooses which of the user's logins spends in a directory, and
+a cloned repository could carry one. As git does with `safe.directory`, a file
+another user owns is ignored. An unpinned `remuda run claude` `exec`s the CLI
+without touching the store, so shell functions that route every `claude`
+through remuda cost nothing where nothing is pinned.
+
 ## Packages are made from the release archive
 
 The `.deb`, the `.rpm` and `remuda-bin` repackage the per-architecture archive

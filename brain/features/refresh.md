@@ -8,7 +8,8 @@ anything reading the store (TokenGauge) needs the inactive ones kept fresh.
 credential whose access token expires within `MIN` minutes (default 60), or
 has no known expiry. `--force` refreshes regardless; a name narrows it to one.
 The active credential is always skipped: the CLI owns it (a named active one
-says so). An API key (GLM, opencode Go) never expires and is never refreshed. A CLI whose live login cannot be read is skipped whole, since which of
+says so). So is a login a `remuda run` session holds, whose CLI owns it in
+turn ([run.md](run.md)). An API key (GLM, opencode Go) never expires and is never refreshed. A CLI whose live login cannot be read is skipped whole, since which of
 its credentials is active is unknown. A refresh that answers for a different
 account than the sidecar's is refused and not saved, and the tokens it rotated
 are kept in a `.set-aside-...` file named in the error. A refused refresh token

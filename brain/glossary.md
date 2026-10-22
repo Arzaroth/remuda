@@ -59,6 +59,12 @@ Codex's with a callback.
 
 **Qualified name**: `provider/name`, e.g. `codex/work`.
 
+**Run session**: a CLI `remuda run` started on a stored login in a directory
+of its own, which holds that login in use until it exits. Not the CLI's own
+sessions, which auto mode waits out for Codex.
+
+**Pin**: a login `.remuda.toml` names for a CLI in a directory and below.
+
 ## Sources
 
 - [src/provider.rs](../src/provider.rs)

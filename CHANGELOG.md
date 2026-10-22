@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- `remuda run <name>` starts Claude Code or Codex on a stored login for that
+  session only, without switching the one every other terminal uses
+  (`remuda claude work` for short). The session shares your history, projects,
+  settings and MCP servers, the tokens its CLI refreshes go back to the store
+  when it exits, and while it runs that login is not refreshed, switched to,
+  removed or pinged. `ls` and the page say which logins are in a session.
+- Pins: `remuda pin claude/work` writes `.remuda.toml` in a repository, and
+  with `eval "$(remuda shell-init zsh)"` every `claude` or `codex` started
+  there runs on the pinned login. Elsewhere they run as before.
+
 ## [0.23.0] - 2026-10-22
 
 ### Added

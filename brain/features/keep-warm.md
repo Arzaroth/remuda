@@ -36,7 +36,8 @@ open until its reset, or why not) and pings nothing.
   until then.
 
 A login with no figures, an error in its figures, or no 5-hour window is not
-pinged, and the page says why.
+pinged, and the page says why. Neither is one a `remuda run` session holds
+([run.md](run.md)): its tokens are the session's to refresh.
 
 ## The ping
 

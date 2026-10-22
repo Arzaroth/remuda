@@ -13,4 +13,5 @@
 | The local page | [web-page.md](web-page.md) | `serve`, `open`, the service |
 | The proxy | [proxy.md](proxy.md) | `serve`, the page's API proxy card |
 | The log | [log.md](log.md) | `log`, the page's Log |
+| Running without switching, and pins | [run.md](run.md) | `run`, `pin`, `shell-init`, `remuda claude <name>` |
 | Completions and self-update | [completions-and-update.md](completions-and-update.md) | `completions`, `--update`, `--check-update` |
