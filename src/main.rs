@@ -24,6 +24,7 @@ mod proxy;
 mod runs;
 mod serve;
 mod served;
+mod session;
 mod shown;
 mod store;
 mod units;
@@ -31,7 +32,7 @@ mod warm;
 
 use std::io::{self, BufRead};
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use clap::{CommandFactory, Parser, Subcommand};
 
 use crate::apikey::ApiKey;
@@ -128,6 +129,14 @@ enum Cmd {
     Remove { name: String },
     /// Say which login auto mode puts each CLI on now, and why, without switching.
     Auto,
+    /// Start a CLI on a stored login without switching the one every other
+    /// session uses: NAME, PROVIDER/NAME, or a provider alone for the login it
+    /// uses now. Anything after `--` goes to the CLI.
+    Run {
+        name: String,
+        #[arg(last = true)]
+        args: Vec<String>,
+    },
     /// Show what remuda did: switches and who made them, refreshes, auto
     /// mode, keep-warm, the proxy. PROVIDER, NAME or PROVIDER/NAME narrows it.
     Log {
@@ -174,6 +183,7 @@ impl Cmd {
             Cmd::Remove { .. } => Some("removing"),
             Cmd::Auto => Some("checking auto mode"),
             Cmd::Log { .. } => Some("reading the log"),
+            Cmd::Run { .. } => None,
             Cmd::Serve { .. } => Some("serving"),
             Cmd::Import { .. }
             | Cmd::Login { .. }
@@ -273,6 +283,99 @@ fn open(no_browser: bool) -> Result<()> {
         println!("opened {shown}");
     }
     Ok(())
+}
+
+const SHIELDED: [libc::c_int; 4] = [libc::SIGINT, libc::SIGQUIT, libc::SIGHUP, libc::SIGTERM];
+
+/// Waits for the CLI with the signals that end a terminal session ignored,
+/// so remuda outlives it and syncs its tokens back; the CLI gets them as
+/// usual.
+fn shielded(cmd: &mut std::process::Command) -> io::Result<std::process::ExitStatus> {
+    use std::os::unix::process::CommandExt;
+    // SAFETY: signal() is async-signal-safe, and nothing else runs between
+    // fork and exec.
+    unsafe {
+        cmd.pre_exec(|| {
+            for s in SHIELDED {
+                libc::signal(s, libc::SIG_DFL);
+            }
+            Ok(())
+        });
+    }
+    // SAFETY: the previous handlers are put back once the CLI exits.
+    let before: Vec<_> = SHIELDED
+        .iter()
+        .map(|s| unsafe { libc::signal(*s, libc::SIG_IGN) })
+        .collect();
+    let status = cmd.status();
+    for (s, h) in SHIELDED.iter().zip(before) {
+        unsafe { libc::signal(*s, h) };
+    }
+    status
+}
+
+fn exit_code(status: std::process::ExitStatus) -> i32 {
+    use std::os::unix::process::ExitStatusExt;
+    status
+        .code()
+        .or_else(|| status.signal().map(|s| 128 + s))
+        .unwrap_or(1)
+}
+
+/// The CLI as it is, in place of remuda: nothing to sync back after.
+fn exec(command: &str, args: &[String]) -> Result<()> {
+    use std::os::unix::process::CommandExt;
+    let err = std::process::Command::new(command).args(args).exec();
+    Err(err).with_context(|| format!("failed to start {command}"))
+}
+
+fn run(store: &Store, providers: &[&dyn Provider], target: &str, args: &[String]) -> Result<()> {
+    let (p, name) = match providers.iter().find(|p| p.id() == target) {
+        Some(p) => (*p, None),
+        None => {
+            let (p, name) = commands::resolve(store, providers, target)?;
+            (p, Some(name))
+        }
+    };
+    let spec = p
+        .run_spec()
+        .with_context(|| format!("remuda run cannot start {} yet", p.name()))?;
+    let Some(name) = name else {
+        return exec(spec.command, args);
+    };
+    let started = {
+        let _lock = store.lock()?;
+        session::recover(store, &[p]);
+        let live = ops::sync_live(store, p)?;
+        if live.active_name() == Some(name.as_str()) {
+            None
+        } else {
+            Some(session::start(store, p, &name)?)
+        }
+    };
+    let Some((lease, spec, home)) = started else {
+        return exec(spec.command, args);
+    };
+    eprintln!("remuda: {} on {name} for this session", p.name());
+    let status = shielded(
+        std::process::Command::new(spec.command)
+            .args(args)
+            .env(spec.var, &home),
+    );
+    let finished = store
+        .lock()
+        .and_then(|_lock| session::finish(store, p, &spec, &name));
+    drop(lease);
+    match &finished {
+        Ok(()) => logbook::note(
+            store,
+            logbook::Event::new(logbook::Kind::Run, true, "the session ended")
+                .about(p.id(), Some(&name)),
+        ),
+        Err(e) => eprintln!("warning: {e:#}"),
+    }
+    let status = status.with_context(|| format!("failed to start {}", spec.command))?;
+    std::process::exit(exit_code(status));
 }
 
 fn main() -> Result<()> {
@@ -403,6 +506,10 @@ fn main() -> Result<()> {
         return commands::login(&store, p, name, *force, prompt, out);
     }
 
+    if let Cmd::Run { name, args } = &command {
+        return run(&store, &providers, name, args);
+    }
+
     let _lock = store.lock()?;
     match command {
         Cmd::Use { name, discard } => {
@@ -514,6 +621,7 @@ fn main() -> Result<()> {
             commands::rename(&store, &paths::config_file(), p, &name, &new_name, out)
         }
         Cmd::Login { .. }
+        | Cmd::Run { .. }
         | Cmd::Serve { .. }
         | Cmd::Open { .. }
         | Cmd::Completions { .. }

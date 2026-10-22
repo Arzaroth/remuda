@@ -9,7 +9,7 @@ use crate::fsx::{Changed, now_ms, read_json, update_json};
 use crate::oauth;
 use crate::paths;
 use crate::pkce;
-use crate::provider::{Format, Identity, Login, PendingLogin, Provider, Upstream};
+use crate::provider::{Copied, Format, Identity, Login, PendingLogin, Provider, RunSpec, Upstream};
 use crate::store::Entry;
 
 // Mirrors Claude Code 2.1.282's OAuth client.
@@ -392,7 +392,6 @@ impl Claude {
         })
     }
 
-    #[cfg(test)]
     pub fn at(dir: &std::path::Path, api: Api) -> Self {
         Claude {
             creds_path: dir.join(".credentials.json"),
@@ -521,6 +520,30 @@ impl Provider for Claude {
             });
         }
         written
+    }
+
+    fn run_spec(&self) -> Option<RunSpec> {
+        Some(RunSpec {
+            command: "claude",
+            var: "CLAUDE_CONFIG_DIR",
+            copied: vec![
+                Copied {
+                    from: self.creds_path.clone(),
+                    name: ".credentials.json",
+                    login_keys: &[OAUTH_KEY],
+                },
+                Copied {
+                    from: self.config_path.clone(),
+                    name: ".claude.json",
+                    login_keys: &["oauthAccount"],
+                },
+            ],
+            private: &[".credentials.json", ".claude.json"],
+        })
+    }
+
+    fn relocated(&self, dir: &std::path::Path) -> Option<Box<dyn Provider>> {
+        Some(Box::new(Claude::at(dir, self.api.clone())))
     }
 
     fn refresh(&self, creds: &mut Value) -> Result<Option<String>> {

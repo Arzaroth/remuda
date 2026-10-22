@@ -862,3 +862,102 @@ fn use_and_a_refresh_that_refreshed_ask_tokengauge_to_fetch_now() {
     home.ok(&["refresh", "perso", "--force"]);
     assert_eq!(commands.try_recv().unwrap(), "{\"cmd\":\"refresh\"}\n");
 }
+
+/// A `claude` that notes what it was started with, then rotates its tokens
+/// as a refresh would.
+fn fake_claude(home: &Home) -> String {
+    let bin = home.path("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let script = bin.join("claude");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\n\
+         printf '%s\\n' \"$CLAUDE_CONFIG_DIR\" > \"$HOME/seen-dir\"\n\
+         printf '%s\\n' \"$*\" > \"$HOME/seen-args\"\n\
+         [ -n \"$CLAUDE_CONFIG_DIR\" ] || exit 0\n\
+         cp \"$CLAUDE_CONFIG_DIR/.credentials.json\" \"$HOME/seen-creds\"\n\
+         sed -i 's/\"r-work\"/\"r-rotated\"/; s/\"a-work\"/\"a-rotated\"/' \"$CLAUDE_CONFIG_DIR/.credentials.json\"\n\
+         exit 7\n",
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    format!("{}:/usr/bin:/bin", bin.display())
+}
+
+#[test]
+fn run_starts_the_cli_on_a_login_of_its_own_and_keeps_what_it_rotated() {
+    let home = Home::new();
+    home.sign_in("a-work", "r-work", "u-work");
+    home.ok(&["import", "work"]);
+    home.sign_in("a-perso", "r-perso", "u-perso");
+    home.ok(&["import", "perso"]);
+    home.api
+        .borrow_mut()
+        .mock("GET", "/api/oauth/profile")
+        .match_header("authorization", "Bearer a-rotated")
+        .with_body(
+            json!({"account": {"uuid": "u-work", "email": "u-work@example.com"},
+                   "organization": {"uuid": "o-1", "organization_type": "claude_max"}})
+            .to_string(),
+        )
+        .create();
+    let path = fake_claude(&home);
+    let store = home.path(".local/share/remuda/credentials");
+
+    let out = home
+        .command(&["run", "work", "--", "--resume", "x"])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(7),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let dir = std::fs::read_to_string(home.path("seen-dir")).unwrap();
+    assert!(dir.trim_end().ends_with(".runs/claude/work/home"), "{dir}");
+    assert_eq!(
+        std::fs::read_to_string(home.path("seen-args")).unwrap(),
+        "--resume x\n"
+    );
+    let seen = read(&home.path("seen-creds"));
+    assert_eq!(seen["claudeAiOauth"]["refreshToken"], "r-work");
+    assert_eq!(seen["mcpOAuth"]["srv"]["accessToken"], "mcp");
+    assert_eq!(
+        read(&home.creds())["claudeAiOauth"]["refreshToken"],
+        "r-perso",
+        "the CLI's own login is left alone"
+    );
+    assert_eq!(
+        read(&store.join("claude/work.json"))["claudeAiOauth"]["refreshToken"],
+        "r-rotated"
+    );
+    assert!(!store.join(".runs/claude/work").exists());
+    let log = home.ok(&["log", "work"]);
+    assert!(
+        log.contains("started a session") && log.contains("the session ended"),
+        "{log}"
+    );
+
+    for target in ["perso", "claude"] {
+        std::fs::remove_file(home.path("seen-dir")).unwrap();
+        let out = home
+            .command(&["run", target])
+            .env("PATH", &path)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(
+            std::fs::read_to_string(home.path("seen-dir")).unwrap(),
+            "\n",
+            "{target} runs the CLI as it is"
+        );
+    }
+    assert!(home.fails(&["run", "glm"]).contains("cannot start"));
+}

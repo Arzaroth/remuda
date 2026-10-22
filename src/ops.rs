@@ -353,6 +353,12 @@ pub fn switch_when(
             target.qualified()
         );
     }
+    if crate::session::in_use(store, p.id(), name) {
+        bail!(
+            "{} is in a `remuda run` session, whose tokens would then be in two places; end it first",
+            target.qualified()
+        );
+    }
     let refreshed = expires_in_ms(p, &target).is_some_and(|ms| ms < 5 * 60 * 1000);
     if refreshed {
         refresh_saved(store, p, &mut target)?;
