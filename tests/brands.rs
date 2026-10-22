@@ -10,10 +10,42 @@ fn view_box(svg: &str) -> &str {
     &svg[at..at + svg[at..].find('"').unwrap()]
 }
 
+const ROOT_ONLY: &[&str] = &[
+    "width",
+    "height",
+    "viewBox",
+    "xmlns",
+    "xmlns:xlink",
+    "version",
+];
+
 fn inner(svg: &str) -> String {
     let open = svg.find("<svg").expect("a mark is an svg");
-    let body = &svg[open + svg[open..].find('>').unwrap() + 1..svg.rfind("</svg>").unwrap()];
-    body.lines().map(str::trim).collect()
+    let tag_end = open + svg[open..].find('>').unwrap();
+    let body: String = svg[tag_end + 1..svg.rfind("</svg>").unwrap()]
+        .lines()
+        .map(str::trim)
+        .collect();
+    let kept: Vec<&str> = attributes(&svg[open + 4..tag_end])
+        .into_iter()
+        .filter(|a| !ROOT_ONLY.contains(&a.split('=').next().unwrap()))
+        .collect();
+    if kept.is_empty() {
+        body
+    } else {
+        format!("<g {}>{body}</g>", kept.join(" "))
+    }
+}
+
+fn attributes(tag: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut rest = tag.trim();
+    while let Some(eq) = rest.find("=\"") {
+        let close = eq + 2 + rest[eq + 2..].find('"').unwrap();
+        out.push(&rest[..=close]);
+        rest = rest[close + 1..].trim_start();
+    }
+    out
 }
 
 fn expected() -> String {
