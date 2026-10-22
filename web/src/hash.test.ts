@@ -8,6 +8,7 @@ describe('routes', () => {
       { page: 'cli', id: 'claude', tab: 'logins' },
       { page: 'cli', id: 'codex', tab: 'automation' },
       { page: 'proxy' },
+      { page: 'log' },
       { page: 'status' },
     ];
     for (const r of all) expect(parse(href(r))).toEqual(r);

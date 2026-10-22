@@ -111,6 +111,16 @@ export type WarmStatus =
   | { state: 'open'; resetsAt: number; lastPing?: number }
   | { state: 'waiting'; why: string; lastPing?: number };
 
+export type LogEvent = {
+  at: number;
+  kind: 'switch' | 'auto' | 'refresh' | 'warm' | 'reset' | 'proxy' | 'store';
+  provider?: string;
+  name?: string;
+  by?: 'cli' | 'page' | 'auto';
+  ok: boolean;
+  message: string;
+};
+
 export type State = {
   store: string;
   providers: Provider[];
