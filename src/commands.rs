@@ -1432,6 +1432,45 @@ mod tests {
     }
 
     #[test]
+    fn signing_a_login_in_again_keeps_its_label_for_the_same_account_only() {
+        let again = |uuid: &str| {
+            let (server, _) = login_server(uuid);
+            let e = env(&server.url());
+            e.stored("work", "u-work", HOUR);
+            label(
+                &e.store,
+                &e.claude,
+                "work",
+                Some("day job"),
+                &mut Vec::new(),
+            )
+            .unwrap();
+            let opened = std::cell::RefCell::new(String::new());
+            let open = |url: &str| {
+                *opened.borrow_mut() = url.to_owned();
+                false
+            };
+            let mut read_code = || Ok(format!("the-code#{}", state_of(&opened.borrow())));
+            login(
+                &e.store,
+                &e.claude,
+                "work",
+                true,
+                Prompt {
+                    open: &open,
+                    read_code: &mut read_code,
+                },
+                &mut Vec::new(),
+            )
+            .unwrap();
+            assert_eq!(e.stored_refresh_token("work").as_deref(), Some("r-login"));
+            e.store.get("claude", "work").unwrap().unwrap().meta.label
+        };
+        assert_eq!(again("u-work").as_deref(), Some("day job"));
+        assert_eq!(again("u-other"), None);
+    }
+
+    #[test]
     fn remove_keeps_the_active_credential() {
         let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);
