@@ -18,6 +18,7 @@ export function AddAccount(props: { provider?: string; again?: string }) {
   const [code, setCode] = createSignal('');
   const confirm = createConfirm();
   let openLogin: string | null = null;
+  let beginning = false;
   let codeInput: HTMLInputElement | undefined;
   let picker: HTMLDivElement | undefined;
   onCleanup(() => {
@@ -64,12 +65,16 @@ export function AddAccount(props: { provider?: string; again?: string }) {
     const force = taken(creds, p, n);
     if (force && !props.again && !confirm.ask(overwrite(creds, p, n), `${p}/${n}`)) return;
     confirm.disarm();
-    if (openLogin) await api('/api/login/cancel', { id: openLogin }).catch(() => {});
+    if (beginning) return;
+    beginning = true;
     let begun: Login;
     try {
+      if (openLogin) await api('/api/login/cancel', { id: openLogin }).catch(() => {});
       begun = { ...(await api('/api/login', { provider: p, name: n, force })), name: n };
     } catch (e) {
       return toast((e as Error).message, true);
+    } finally {
+      beginning = false;
     }
     openLogin = begun.id;
     if (!begun.opened) window.open(begun.url, '_blank', 'noopener');
