@@ -64,8 +64,12 @@ Add a login.
   expire, with a Reset limits button that asks for a second click before it
   spends one and then holds until TokenGauge reports the new count, how long
   its access token and its sign-in (refresh token) have left, its
-  keep-warm line, and Refresh, Label, Rename and Remove. Remove asks
-  for a second click; Use, Refresh and Remove are disabled on the active one.
+  keep-warm line, and Refresh, Sign in again, Label, Rename and Remove.
+  Sign in again opens the Add a login dialog set to that login, with no CLI
+  or name to pick and no overwrite to confirm, and closes it once stored; it
+  stands out when the sign-in has run out. Remove asks
+  for a second click; Use, Refresh and Remove are disabled on the active one,
+  and Sign in again too, since the CLI signs its own login in.
   Use asks for a second click too when switching would drop the CLI's live
   login, naming what goes: "Drop alice@example.com unsaved?" for one not
   stored, "Drop the API key?", or "Lose work's newest tokens?" for one that

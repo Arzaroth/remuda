@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- A login's card on the page has a Sign in again button, for a login whose
+  refresh token was rejected or whose sign-in ran out. It signs the same name
+  in again in the browser, and the login keeps its label, as
+  `remuda login <name> --force` now does when the account is the same.
+
 ## [0.25.0] - 2026-10-23
 
 ### Added
