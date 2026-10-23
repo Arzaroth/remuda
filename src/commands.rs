@@ -387,14 +387,18 @@ pub fn save_login(
     force: bool,
     done: crate::provider::Login,
 ) -> Result<Entry> {
-    let entry = Entry::new(p.id(), name, done.creds, done.identity, now_ms());
+    let mut entry = Entry::new(p.id(), name, done.creds, done.identity, now_ms());
     let _lock = store.lock()?;
     refuse_in_use(store, p, name)?;
-    if !force && store.get(p.id(), name)?.is_some() {
+    let replaced = store.get(p.id(), name)?;
+    if !force && replaced.is_some() {
         bail!(
             "{} was stored while this login was in progress",
             entry.qualified()
         );
+    }
+    if let Some(old) = replaced.filter(|old| old.meta.account_id == entry.meta.account_id) {
+        entry.meta.label = old.meta.label;
     }
     ensure_new_account(store, &entry)?;
     store.save(&entry)?;
