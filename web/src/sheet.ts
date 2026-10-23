@@ -1,6 +1,6 @@
 import { createSignal } from 'solid-js';
 
-export type Sheet = { provider?: string };
+export type Sheet = { provider?: string; again?: string };
 
 const [sheet, setSheet] = createSignal<Sheet | undefined>();
 

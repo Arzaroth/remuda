@@ -1,6 +1,7 @@
 import { createSignal, For, Match, onMount, Show, Switch } from 'solid-js';
 import { createConfirm } from '../confirm';
 import { ago, date, DAY, HOUR, plural, span, until, usedTone } from '../format';
+import { openSheet } from '../sheet';
 import { act, now, store } from '../state';
 import type { Credential, Live, Provider, Window } from '../types';
 import { carriedSince, dropping, dropsLive, overwrite, planFor, shownFor, taken } from '../usage';
@@ -344,6 +345,7 @@ function Row(props: { c: Credential; live: Live | undefined }) {
 
   const [expanded, setExpanded] = createSignal(false);
   const warm = () => store.s!.warm?.[spec()];
+  const signedOut = () => c().refreshTokenExpiresAt != null && c().refreshTokenExpiresAt! <= now();
   const tokenLeft = () => (c().expiresAt == null ? null : c().expiresAt! - now());
 
   return (
@@ -449,6 +451,20 @@ function Row(props: { c: Credential; live: Live | undefined }) {
                 onClick={() => act('/api/refresh', { name: spec(), force: true })}
               >
                 <Icon name="refresh" /> Refresh
+              </button>
+              <button
+                class={signedOut() ? 'btn go' : 'btn'}
+                disabled={c().active || c().running}
+                title={
+                  c().active
+                    ? 'Sign in again through the CLI itself, then import it'
+                    : c().running
+                      ? 'End its `remuda run` session first'
+                      : 'Sign this login in again in the browser'
+                }
+                onClick={() => openSheet({ provider: c().provider, again: c().name })}
+              >
+                <Icon name="signin" /> Sign in again
               </button>
               {iconButton('label', 'Label', unverified())}
               {iconButton('rename', 'Rename', false)}

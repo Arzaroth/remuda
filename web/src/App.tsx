@@ -93,7 +93,7 @@ export function App() {
     const s = sheet();
     if (s && !dialog.open) {
       dialog.showModal();
-      dialog.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')?.focus();
+      dialog.querySelector<HTMLElement>(s.again ? '.btn.go' : '[role="radio"][aria-checked="true"]')?.focus();
     }
     if (!s && dialog.open) dialog.close();
   });
@@ -167,7 +167,7 @@ export function App() {
             <path d="M4 4l8 8M12 4l-8 8" />
           </svg>
         </button>
-        <Show when={store.s && sheet()}>{(s) => <AddAccount provider={s().provider} />}</Show>
+        <Show when={store.s && sheet()}>{(s) => <AddAccount provider={s().provider} again={s().again} />}</Show>
       </dialog>
       <Toast />
     </>

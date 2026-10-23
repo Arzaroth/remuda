@@ -2,15 +2,18 @@ import { createEffect, createSignal, For, on, onCleanup, Show } from 'solid-js';
 import { api } from '../api';
 import { createConfirm } from '../confirm';
 import { load, store, toast } from '../state';
+import { closeSheet } from '../sheet';
 import { overwrite, taken } from '../usage';
 import { ProviderIcon } from './ProviderIcon';
 
 type Login = { id: string; url: string; needsCode: boolean; asksFor: string; opened: boolean; name: string };
 
-export function AddAccount(props: { provider?: string }) {
+export function AddAccount(props: { provider?: string; again?: string }) {
   const [provider, setProvider] = createSignal(props.provider ?? store.s!.providers[0]?.id ?? '');
   createEffect(on(() => props.provider, (p) => p && setProvider(p), { defer: true }));
-  const [name, setName] = createSignal('');
+  const [name, setName] = createSignal(props.again ?? '');
+  const again = () =>
+    props.again ? store.s!.credentials.find((c) => c.provider === provider() && c.name === props.again) : undefined;
   const [login, setLogin] = createSignal<Login | null>(null);
   const [code, setCode] = createSignal('');
   const confirm = createConfirm();
@@ -37,7 +40,8 @@ export function AddAccount(props: { provider?: string }) {
       toast(r.message);
       if (openLogin === l.id) {
         setLogin(null);
-        setName('');
+        setName(props.again ?? '');
+        if (props.again) closeSheet();
       }
     } catch (e) {
       if (openLogin === l.id) toast((e as Error).message, true);
@@ -58,7 +62,7 @@ export function AddAccount(props: { provider?: string }) {
     const n = name().trim();
     const creds = store.s!.credentials;
     const force = taken(creds, p, n);
-    if (force && !confirm.ask(overwrite(creds, p, n), `${p}/${n}`)) return;
+    if (force && !props.again && !confirm.ask(overwrite(creds, p, n), `${p}/${n}`)) return;
     confirm.disarm();
     if (openLogin) await api('/api/login/cancel', { id: openLogin }).catch(() => {});
     let begun: Login;
@@ -83,35 +87,53 @@ export function AddAccount(props: { provider?: string }) {
 
   return (
     <section class="add">
-      <h2 id="add-title">Add a login</h2>
-      <p>Pick the CLI, name the login, and sign in with that account in your browser. remuda stores it under the name.</p>
-      <form onSubmit={submit}>
-        <div class="pick-cli" role="radiogroup" aria-label="CLI" ref={picker} onKeyDown={step}>
-          <For each={store.s!.providers}>
-            {(p) => (
-              <button
-                type="button"
-                role="radio"
-                aria-checked={provider() === p.id}
-                tabIndex={provider() === p.id ? 0 : -1}
-                onClick={() => setProvider(p.id)}
-              >
-                <ProviderIcon provider={p.id} size={22} />
-                {p.name}
-              </button>
-            )}
-          </For>
-        </div>
-        <input
-          placeholder="Name, e.g. work"
-          required
-          pattern="[A-Za-z0-9_][A-Za-z0-9._\-]*"
-          aria-label="Name"
-          value={name()}
-          onInput={(e) => setName(e.currentTarget.value)}
-        />
+      <Show
+        when={props.again}
+        fallback={
+          <>
+            <h2 id="add-title">Add a login</h2>
+            <p>
+              Pick the CLI, name the login, and sign in with that account in your browser. remuda stores it under the
+              name.
+            </p>
+          </>
+        }
+      >
+        <h2 id="add-title">Sign {props.again} in again</h2>
+        <p>
+          Sign in with {again()?.email || 'its account'} in your browser. remuda replaces the tokens of{' '}
+          {`${provider()}/${props.again}`} and keeps its name, label, auto mode and keep-warm.
+        </p>
+      </Show>
+      <form onSubmit={submit} classList={{ again: !!props.again }}>
+        <Show when={!props.again}>
+          <div class="pick-cli" role="radiogroup" aria-label="CLI" ref={picker} onKeyDown={step}>
+            <For each={store.s!.providers}>
+              {(p) => (
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={provider() === p.id}
+                  tabIndex={provider() === p.id ? 0 : -1}
+                  onClick={() => setProvider(p.id)}
+                >
+                  <ProviderIcon provider={p.id} size={22} />
+                  {p.name}
+                </button>
+              )}
+            </For>
+          </div>
+          <input
+            placeholder="Name, e.g. work"
+            required
+            pattern="[A-Za-z0-9_][A-Za-z0-9._\-]*"
+            aria-label="Name"
+            value={name()}
+            onInput={(e) => setName(e.currentTarget.value)}
+          />
+        </Show>
         <button class="btn go" data-armed={confirm.text() ? '1' : undefined} type="submit">
-          {confirm.text() ?? 'Sign in'}
+          {confirm.text() ?? (props.again ? 'Sign in again' : 'Sign in')}
         </button>
       </form>
       <Show when={login()}>
