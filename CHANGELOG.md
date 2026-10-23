@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-10-23
+
 ### Added
 
 - A login's card on the page has a Sign in again button, for a login whose
