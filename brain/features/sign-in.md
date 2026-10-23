@@ -4,6 +4,9 @@
 without touching the CLI's live login. It checks the name first
 (`commands::begin_login`), prints the provider's authorize URL and opens it
 through a private redirect file, never as a command-line argument.
+`--force` signs a stored login in again under its name, for one whose refresh
+token was rejected or whose sign-in ran out; when the new tokens are the same
+account's, its label is kept (`commands::save_login`).
 
 It opens in a private window of the default browser (`browser::open_private`),
 because signing in as another account in the browser's normal profile replaces
