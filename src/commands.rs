@@ -1464,7 +1464,9 @@ mod tests {
             )
             .unwrap();
             assert_eq!(e.stored_refresh_token("work").as_deref(), Some("r-login"));
-            e.store.get("claude", "work").unwrap().unwrap().meta.label
+            let stored = e.store.get("claude", "work").unwrap().unwrap();
+            assert_eq!(stored.meta.account_id, uuid);
+            stored.meta.label
         };
         assert_eq!(again("u-work").as_deref(), Some("day job"));
         assert_eq!(again("u-other"), None);
