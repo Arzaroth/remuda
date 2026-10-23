@@ -107,7 +107,8 @@ export function AddAccount(props: { provider?: string; again?: string }) {
         <h2 id="add-title">Sign {props.again} in again</h2>
         <p>
           Sign in with {again()?.email || 'its account'} in your browser. remuda replaces the tokens of{' '}
-          {`${provider()}/${props.again}`} and keeps its name, label, auto mode and keep-warm.
+          {`${provider()}/${props.again}`} and keeps its name, auto mode and keep-warm, and its label when the account is
+          the same.
         </p>
       </Show>
       <form onSubmit={submit} classList={{ again: !!props.again }}>
