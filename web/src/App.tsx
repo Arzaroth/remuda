@@ -1,9 +1,10 @@
-import { createEffect, createSignal, Match, Show, Switch } from 'solid-js';
+import { createEffect, Match, Show, Switch } from 'solid-js';
 import { act, store } from './state';
 import { go, href, route } from './route';
 import type { Provider } from './types';
 import { autoOn, inUse } from './usage';
 import { AddAccount } from './components/AddAccount';
+import { closeSheet, openSheet, sheet } from './sheet';
 import { AutoMode, dirty } from './components/AutoMode';
 import { Logins } from './components/Group';
 import { Health } from './components/Health';
@@ -77,7 +78,6 @@ function CliPage(props: { p: Provider; tab: 'logins' | 'automation' }) {
 
 export function App() {
   let dialog!: HTMLDialogElement;
-  const [adding, setAdding] = createSignal<string | undefined>();
   const providers = () => (store.s ? inUse(store.s) : []);
   const cli = () => {
     const r = route();
@@ -87,10 +87,16 @@ export function App() {
   };
   const openAdd = () => {
     const r = route();
-    setAdding(r.page === 'cli' ? r.id : providers()[0]?.id);
-    dialog.showModal();
-    dialog.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')?.focus();
+    openSheet({ provider: r.page === 'cli' ? r.id : providers()[0]?.id });
   };
+  createEffect(() => {
+    const s = sheet();
+    if (s && !dialog.open) {
+      dialog.showModal();
+      dialog.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')?.focus();
+    }
+    if (!s && dialog.open) dialog.close();
+  });
   createEffect(() => {
     const r = route();
     if (r.page === 'cli' && store.s && !store.s.providers.some((p) => p.id === r.id)) go({ page: 'overview' });
@@ -155,15 +161,13 @@ export function App() {
           </Show>
         </main>
       </div>
-      <dialog ref={dialog} class="sheet" aria-labelledby="add-title" onClose={() => setAdding(undefined)}>
+      <dialog ref={dialog} class="sheet" aria-labelledby="add-title" onClose={closeSheet}>
         <button class="sheet-close" aria-label="Close" onClick={() => dialog.close()}>
           <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
             <path d="M4 4l8 8M12 4l-8 8" />
           </svg>
         </button>
-        <Show when={store.s && adding() !== undefined}>
-          <AddAccount provider={adding()} />
-        </Show>
+        <Show when={store.s && sheet()}>{(s) => <AddAccount provider={s().provider} />}</Show>
       </dialog>
       <Toast />
     </>
