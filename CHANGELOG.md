@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-23
+
 ### Added
 
 - The API proxy page has a Shell field with the two `export` lines a client
