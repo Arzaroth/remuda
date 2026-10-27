@@ -64,9 +64,10 @@ each switch, each failed switch (once per error), and each change of decision
    others and is spent first. Inside its schedule a reservation does nothing.
 3. **Tiers.** The first tier holding a usable login wins. A login is usable
    when it has figures and none of its account's windows is full. A window is
-   full at the CLI's `ceiling` (default 100%), or, for the shortest of the
-   login's windows when it has several (Claude's 5-hour one), at the login's
-   own `ceilings` entry, lower or higher than the CLI's: switching
+   full at the CLI's `ceiling` (default 100%), or at the login's own entry,
+   lower or higher than the CLI's: its `ceilings` one for the shortest of
+   its windows when it has several (Claude's 5-hour one), its
+   `long_ceilings` one for the others (Claude's weekly one): switching
    before the wall leaves room for TokenGauge's figures lagging behind real
    use. A
    model's or feature's own limit (TokenGauge's extra windows, such as Claude's
@@ -88,9 +89,10 @@ each switch, each failed switch (once per error), and each change of decision
    - Same tier: switch only when the best pick scores `margin` (default 25%)
      more.
    - No usable login at all: if the active login is full too, or none is
-     signed in, go to the `fallback` login, unless it is at 100% on a window,
-     has no figures or is kept for a schedule now; otherwise stay, and switch
-     once one resets.
+     signed in, go to the `fallback` login, unless it is at 100% on a window
+     (with `fallback_when_maxed` it goes all the same, to spare the login
+     it leaves), has no figures or is kept for a schedule now; otherwise
+     stay, and switch once one resets.
    - Nothing signed in: switch to the best pick.
 
 remuda cannot tell a session in the middle of a request, so a switch does not

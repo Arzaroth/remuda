@@ -24,7 +24,9 @@ margin  = 0.25      # default
 logins  = ["work", "perso"]   # the one tier used when no rule is in force
 ceiling = 97        # a window is full at this %; default 100
 ceilings = { work = 93 }      # per login, for the shortest of several windows
+long_ceilings = { perso = 94 } # per login, for its other windows
 fallback = "perso"  # where to go when every login, the active one too, is full
+fallback_when_maxed = true    # even when the fallback is maxed; default false
 
 [[auto.claude.rule]]
 when    = "workday"           # a schedule, or "otherwise"

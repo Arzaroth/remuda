@@ -157,7 +157,8 @@ switch auto mode made.
 The Automation tab edits `config.toml`
 ([architecture/config.md](../architecture/config.md)): a card with auto
 mode's switch, the minimum time on a login, the margin and the
-ceiling, each login's own ceiling, the fallback, the
+ceiling, each login's own ceilings (for its shortest window and for the
+others), the fallback and whether to take it even when maxed, the
 logins it may pick when no rule is in force, and its rules, each with a
 schedule, its tiers and which logins it keeps for a schedule; a card of the
 logins kept warm ([keep-warm.md](keep-warm.md)), apart from auto mode since it
