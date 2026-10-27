@@ -449,6 +449,21 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
             </Show>
           </select>
         </label>
+        <Show when={a().fallback}>
+          <label class="check">
+            <input
+              type="checkbox"
+              checked={!!a().fallback_when_maxed}
+              onChange={(e) =>
+                set((x) => {
+                  if (e.currentTarget.checked) x.fallback_when_maxed = true;
+                  else delete x.fallback_when_maxed;
+                })
+              }
+            />
+            even when {a().fallback} is maxed
+          </label>
+        </Show>
       </Show>
       <For each={a().rule ?? []}>
         {(_, i) => <RuleCard provider={props.p.id} i={i()} count={a().rule!.length} problems={props.problems} />}
