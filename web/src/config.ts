@@ -9,7 +9,9 @@ export type Auto = {
   rule?: Rule[];
   ceiling?: number;
   ceilings?: Record<string, number>;
+  long_ceilings?: Record<string, number>;
   fallback?: string;
+  fallback_when_maxed?: boolean;
 };
 
 /** A percentage typed into a field: whole, 1 to 100, or none. */
@@ -36,7 +38,7 @@ export const DAYS: [Day, string][] = [
   ['sun', 'Sun'],
 ];
 
-const OPTIONAL_TABLES = new Set(['reserve', 'schedules', 'auto', 'ceilings', 'warm']);
+const OPTIONAL_TABLES = new Set(['reserve', 'schedules', 'auto', 'ceilings', 'long_ceilings', 'warm']);
 const unset = (k: string, v: unknown): boolean =>
   v === undefined ||
   v === false ||

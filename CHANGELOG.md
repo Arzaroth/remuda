@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- Auto mode's `long_ceilings` gives a login its own ceiling for its windows
+  other than the shortest (Claude's weekly one), or for its only window, as
+  `ceilings` does for the 5-hour one: `long_ceilings = { perso = 94 }` leaves perso at 94% of its week
+  while the other logins run to the CLI's ceiling.
+- `fallback_when_maxed = true` goes to the fallback when every login is full
+  even if the fallback is maxed itself, so the login being left is spared.
+  Both are on the Automation tab.
+
 ### Changed
 
 - The page's countdowns name a second unit: a window resets "in 1 day and

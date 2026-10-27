@@ -204,9 +204,15 @@ pub struct Auto {
     /// Login name to the percentage its shortest window counts as full at.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub ceilings: BTreeMap<String, u64>,
+    /// Login name to the percentage its other windows count as full at.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub long_ceilings: BTreeMap<String, u64>,
     /// The login to go to when every login it may pick is full.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback: Option<String>,
+    /// Go to the fallback even when one of its windows is maxed.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub fallback_when_maxed: bool,
 }
 
 impl Default for Auto {
@@ -219,7 +225,9 @@ impl Default for Auto {
             rules: Vec::new(),
             ceiling: default_ceiling(),
             ceilings: BTreeMap::new(),
+            long_ceilings: BTreeMap::new(),
             fallback: None,
+            fallback_when_maxed: false,
         }
     }
 }
@@ -235,8 +243,10 @@ impl Auto {
             rule.reserve.remove(name);
         }
         self.ceilings.remove(name);
+        self.long_ceilings.remove(name);
         if self.fallback.as_deref() == Some(name) {
             self.fallback = None;
+            self.fallback_when_maxed = false;
         }
     }
 
@@ -255,6 +265,9 @@ impl Auto {
         }
         if let Some(c) = self.ceilings.remove(from) {
             self.ceilings.insert(to.to_owned(), c);
+        }
+        if let Some(c) = self.long_ceilings.remove(from) {
+            self.long_ceilings.insert(to.to_owned(), c);
         }
         if let Some(f) = self.fallback.as_mut() {
             swap(f);
@@ -336,8 +349,13 @@ impl Config {
                     "a ceiling is a percentage, 1 to 100".into(),
                 );
             }
-            for (name, c) in &auto.ceilings {
-                let cat = format!("{at}.ceilings.{name}");
+            let logins = auto
+                .ceilings
+                .iter()
+                .map(|e| ("ceilings", e))
+                .chain(auto.long_ceilings.iter().map(|e| ("long_ceilings", e)));
+            for (key, (name, c)) in logins {
+                let cat = format!("{at}.{key}.{name}");
                 if let Some(m) = unknown(name) {
                     flag(&cat, m);
                 }
@@ -473,8 +491,18 @@ impl Config {
                     }
                     t["ceilings"] = toml_edit::value(ceilings);
                 }
+                if !a.long_ceilings.is_empty() {
+                    let mut ceilings = InlineTable::new();
+                    for (login, c) in &a.long_ceilings {
+                        ceilings.insert(login, (*c as i64).into());
+                    }
+                    t["long_ceilings"] = toml_edit::value(ceilings);
+                }
                 if let Some(f) = &a.fallback {
                     t["fallback"] = toml_edit::value(f.as_str());
+                }
+                if a.fallback_when_maxed {
+                    t["fallback_when_maxed"] = toml_edit::value(true);
                 }
                 if !a.rules.is_empty() {
                     let mut rules = ArrayOfTables::new();
@@ -807,6 +835,7 @@ fn keep_defaults(old: &DocumentMut, new: &mut DocumentMut) {
         };
         let defaults = [
             ("enabled", toml_edit::value(false)),
+            ("fallback_when_maxed", toml_edit::value(false)),
             ("dwell", toml_edit::value(String::from(default_dwell()))),
             ("margin", toml_edit::value(default_margin())),
             ("ceiling", toml_edit::value(default_ceiling() as i64)),
@@ -1173,7 +1202,7 @@ order = [["perso"]]
 
     #[test]
     fn keys_written_at_their_default_stay_with_their_comments() {
-        let text = "[auto.claude]\nenabled = false\ndwell = \"30m\" # default\nmargin = 0.25 # default\nlogins = [\"work\"]\n";
+        let text = "[auto.claude]\nenabled = false\ndwell = \"30m\" # default\nmargin = 0.25 # default\nlogins = [\"work\"]\nfallback_when_maxed = false # not yet\n";
         let mut c: Config = toml_edit::de::from_str(text).unwrap();
         assert_eq!(written(text, &c), text);
         c.auto
@@ -1246,6 +1275,42 @@ order = [["perso"]]
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
             "[auto.claude]\nceiling = 97\n"
+        );
+    }
+
+    #[test]
+    fn long_ceilings_and_fallback_when_maxed_are_read_written_checked_and_kept_in_step() {
+        let text = "[auto.claude]\nlong_ceilings = { work = 94 }\nfallback = \"perso\"\nfallback_when_maxed = true\n";
+        let c: Config = toml_edit::de::from_str(text).unwrap();
+        let a = &c.auto["claude"];
+        assert_eq!((a.long_ceilings["work"], a.fallback_when_maxed), (94, true));
+        assert_eq!(c.check(&stored), []);
+        assert_eq!(written(text, &c), text);
+
+        let bad: Config =
+            toml_edit::de::from_str("[auto.claude]\nlong_ceilings = { ghost = 0 }\n").unwrap();
+        let problems: Vec<String> = bad.check(&stored).iter().map(ToString::to_string).collect();
+        assert_eq!(
+            problems,
+            [
+                "auto.claude.long_ceilings.ghost: no stored login claude/ghost",
+                "auto.claude.long_ceilings.ghost: a ceiling is a percentage, 1 to 100",
+            ]
+        );
+
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(&path, text).unwrap();
+        rename_login(&path, "claude", "work", "job").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "[auto.claude]\nlong_ceilings = { job = 94 }\nfallback = \"perso\"\nfallback_when_maxed = true\n"
+        );
+        forget_login(&path, "claude", "job").unwrap();
+        forget_login(&path, "claude", "perso").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "[auto.claude]\nfallback_when_maxed = false\n"
         );
     }
 
