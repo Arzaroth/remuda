@@ -67,7 +67,8 @@ each switch, each failed switch (once per error), and each change of decision
    full at the CLI's `ceiling` (default 100%), or at the login's own entry,
    lower or higher than the CLI's: its `ceilings` one for the shortest of
    its windows when it has several (Claude's 5-hour one), its
-   `long_ceilings` one for the others (Claude's weekly one): switching
+   `long_ceilings` one for the others (Claude's weekly one) and for a
+   login's only window: switching
    before the wall leaves room for TokenGauge's figures lagging behind real
    use. A
    model's or feature's own limit (TokenGauge's extra windows, such as Claude's
