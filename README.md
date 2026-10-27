@@ -222,6 +222,22 @@ when  = "otherwise"
 order = [["IDC"], ["Axeo"], ["perso"]]
 ```
 
+To spend one login only up to a point, give it a ceiling of its own for its
+other windows (the week, for Claude), and send the CLI back elsewhere once
+it gets there, even onto a login that is maxed:
+
+```toml
+[auto.claude]
+enabled             = true
+long_ceilings       = { perso = 94 }  # perso's week is full at 94%
+fallback            = "Axeo"
+fallback_when_maxed = true            # go to Axeo even when it is maxed
+
+[[auto.claude.rule]]
+when  = "otherwise"
+order = [["Axeo"], ["perso"]]
+```
+
 Within a tier, the login with the most headroom to lose at its next reset goes
 first. Unless the login in use is full, a switch waits at least 30 minutes
 after the last one (`dwell`), and one between logins of the same tier needs a
