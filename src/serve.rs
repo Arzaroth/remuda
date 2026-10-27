@@ -24,7 +24,7 @@ use crate::shown;
 use crate::store::Store;
 use crate::warm;
 
-const PAGE: &str = include_str!("serve.html");
+const PAGE: &str = include_str!(concat!(env!("OUT_DIR"), "/serve.html"));
 const ICON: &str = include_str!("../assets/remuda.svg");
 
 /// `login` is taken out while its `finish` runs; `cancel` stays behind so a
