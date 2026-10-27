@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The page's countdowns name a second unit: a window resets "in 1 day and
+  10 hours" or "in 1 hour and 25 minutes" rather than "in 1 day" or "in 1
+  hour".
+
 ## [0.26.0] - 2026-10-23
 
 ### Added
