@@ -835,6 +835,7 @@ fn keep_defaults(old: &DocumentMut, new: &mut DocumentMut) {
         };
         let defaults = [
             ("enabled", toml_edit::value(false)),
+            ("fallback_when_maxed", toml_edit::value(false)),
             ("dwell", toml_edit::value(String::from(default_dwell()))),
             ("margin", toml_edit::value(default_margin())),
             ("ceiling", toml_edit::value(default_ceiling() as i64)),
@@ -1307,7 +1308,10 @@ order = [["perso"]]
         );
         forget_login(&path, "claude", "job").unwrap();
         forget_login(&path, "claude", "perso").unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "[auto.claude]\n");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "[auto.claude]\nfallback_when_maxed = false\n"
+        );
     }
 
     #[test]
