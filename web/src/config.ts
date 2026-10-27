@@ -9,6 +9,7 @@ export type Auto = {
   rule?: Rule[];
   ceiling?: number;
   ceilings?: Record<string, number>;
+  long_ceilings?: Record<string, number>;
   fallback?: string;
 };
 
@@ -36,7 +37,7 @@ export const DAYS: [Day, string][] = [
   ['sun', 'Sun'],
 ];
 
-const OPTIONAL_TABLES = new Set(['reserve', 'schedules', 'auto', 'ceilings', 'warm']);
+const OPTIONAL_TABLES = new Set(['reserve', 'schedules', 'auto', 'ceilings', 'long_ceilings', 'warm']);
 const unset = (k: string, v: unknown): boolean =>
   v === undefined ||
   v === false ||

@@ -256,7 +256,7 @@ function Now(props: { s: AutoStatus; provider: string }) {
   );
 }
 
-function LoginCeilings(props: { p: Provider; table: 'ceilings'; title: string }) {
+function LoginCeilings(props: { p: Provider; table: 'ceilings' | 'long_ceilings'; title: string; label: string }) {
   const a = () => draft.c.auto?.[props.p.id] ?? {};
   const set = (fn: (a: ReturnType<typeof auto>) => void) => edit((c) => fn(auto(c, props.p.id)));
   return (
@@ -272,7 +272,7 @@ function LoginCeilings(props: { p: Provider; table: 'ceilings'; title: string })
                   type="number"
                   min="1"
                   max="100"
-                  aria-label={`${name} is full at`}
+                  aria-label={`${name}${props.label}`}
                   placeholder={String(a().ceiling ?? 100)}
                   value={a()[props.table]?.[name] ?? ''}
                   onChange={(e) => {
@@ -421,6 +421,13 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
           p={props.p}
           table="ceilings"
           title="A login's own ceiling for its shortest window (Claude's 5-hour one)"
+          label=" is full at"
+        />
+        <LoginCeilings
+          p={props.p}
+          table="long_ceilings"
+          title="A login's own ceiling for its other windows (Claude's weekly one)"
+          label="'s other windows are full at"
         />
         <label class="kept">
           <span class="aside">When every login it may pick is full</span>
