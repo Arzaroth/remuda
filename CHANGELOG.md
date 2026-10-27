@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-10-27
+
 ### Added
 
 - Auto mode's `long_ceilings` gives a login its own ceiling for its windows
