@@ -13,7 +13,7 @@ arch=('x86_64' 'aarch64')
 url="https://github.com/Arzaroth/remuda"
 license=('MIT OR WTFPL')
 depends=('gcc-libs' 'glibc')
-makedepends=('cargo')
+makedepends=('cargo' 'nodejs' 'pnpm')
 conflicts=('remuda-bin')
 options=('!lto' '!debug')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
@@ -23,6 +23,7 @@ prepare() {
   cd "$pkgname-$pkgver"
   export RUSTUP_TOOLCHAIN=stable
   cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+  pnpm --dir web install --frozen-lockfile
 }
 
 build() {

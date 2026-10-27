@@ -10,8 +10,6 @@ const remuda = {
 export default defineConfig({
   plugins: [solid(), viteSingleFile()],
   build: {
-    outDir: '../src',
-    emptyOutDir: false,
     modulePreload: { polyfill: false },
     rollupOptions: { input: 'serve.html' },
   },

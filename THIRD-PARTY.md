@@ -1,6 +1,6 @@
 # Third-party material
 
-The page (`web/`, built into `src/serve.html` and so into the binary) inlines
+The page (`web/`, built into the binary) inlines
 material that is not remuda's.
 
 ## Provider marks
