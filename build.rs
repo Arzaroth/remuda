@@ -8,6 +8,7 @@ fn main() {
         "web/serve.html",
         "web/package.json",
         "web/pnpm-lock.yaml",
+        "web/node_modules/.pnpm/lock.yaml",
         "web/vite.config.ts",
         "web/tsconfig.json",
     ] {
