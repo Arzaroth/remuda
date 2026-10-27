@@ -204,14 +204,16 @@ TailGauge share, pinned by tag. remuda has no desktop frontends, so selvedge
 replaces the binary alone, and the new binary then updates the systemd units
 it carries, since the old one cannot know them.
 
-## The page is built from `web/`, and the build is committed
+## The page is built from `web/` by `cargo`
 
 The page outgrew one hand-written file, so it is a Solid and TypeScript app
-under `web/`, built by Vite into the single `src/serve.html` that `serve.rs`
-compiles in. The built file is committed rather than built by `cargo`, so
-building or releasing remuda needs no Node. The price is a generated file to
-keep in step: CI rebuilds it and fails when it differs, and it is never edited
-by hand. Solid was picked over Svelte because codegauge's page already uses
+under `web/`, built by Vite into the single `serve.html` that `serve.rs`
+compiles in. `build.rs` runs that build, so building remuda from source needs
+Node and pnpm. The built file used to be committed to spare that, but every
+page change then carried a minified bundle through review. Fetching the page
+at install or run time was ruled out: a page separate from the binary can
+drift from the API it calls, and it would need its own signature check.
+Solid was picked over Svelte because codegauge's page already uses
 it, with the same Vite setup.
 
 ## Only debug builds take a test endpoint
