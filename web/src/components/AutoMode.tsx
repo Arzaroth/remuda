@@ -256,6 +256,47 @@ function Now(props: { s: AutoStatus; provider: string }) {
   );
 }
 
+function LoginCeilings(props: { p: Provider; table: 'ceilings'; title: string }) {
+  const a = () => draft.c.auto?.[props.p.id] ?? {};
+  const set = (fn: (a: ReturnType<typeof auto>) => void) => edit((c) => fn(auto(c, props.p.id)));
+  return (
+    <div class="pickable">
+      <span class="aside">{props.title}</span>
+      <div class="ceilings">
+        <For each={loginsOf(props.p.id)}>
+          {(name) => (
+            <label class="kept">
+              <span class="spec">{name}</span>
+              <span class="unit">
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  aria-label={`${name} is full at`}
+                  placeholder={String(a().ceiling ?? 100)}
+                  value={a()[props.table]?.[name] ?? ''}
+                  onChange={(e) => {
+                    const c = percent(e.currentTarget.value);
+                    e.currentTarget.value = c === null ? '' : String(c);
+                    set((x) => {
+                      if (c !== null) (x[props.table] ??= {})[name] = c;
+                      else if (x[props.table]) {
+                        delete x[props.table]![name];
+                        if (!Object.keys(x[props.table]!).length) delete x[props.table];
+                      }
+                    });
+                  }}
+                />
+                %
+              </span>
+            </label>
+          )}
+        </For>
+      </div>
+    </div>
+  );
+}
+
 function ProviderCard(props: { p: Provider; problems: Problem[] }) {
   const status = () => {
     const s = store.s!.auto?.[props.p.id];
@@ -376,40 +417,11 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
         </div>
       </div>
       <Show when={loginsOf(props.p.id).length}>
-        <div class="pickable">
-          <span class="aside">A login's own ceiling for its shortest window (Claude's 5-hour one)</span>
-          <div class="ceilings">
-            <For each={loginsOf(props.p.id)}>
-              {(name) => (
-                <label class="kept">
-                  <span class="spec">{name}</span>
-                  <span class="unit">
-                    <input
-                      type="number"
-                      min="1"
-                      max="100"
-                      aria-label={`${name} is full at`}
-                      placeholder={String(a().ceiling ?? 100)}
-                      value={a().ceilings?.[name] ?? ''}
-                      onChange={(e) => {
-                        const c = percent(e.currentTarget.value);
-                        e.currentTarget.value = c === null ? '' : String(c);
-                        set((x) => {
-                          if (c !== null) (x.ceilings ??= {})[name] = c;
-                          else if (x.ceilings) {
-                            delete x.ceilings[name];
-                            if (!Object.keys(x.ceilings).length) delete x.ceilings;
-                          }
-                        });
-                      }}
-                    />
-                    %
-                  </span>
-                </label>
-              )}
-            </For>
-          </div>
-        </div>
+        <LoginCeilings
+          p={props.p}
+          table="ceilings"
+          title="A login's own ceiling for its shortest window (Claude's 5-hour one)"
+        />
         <label class="kept">
           <span class="aside">When every login it may pick is full</span>
           <select
