@@ -18,6 +18,8 @@ on:
       - 'systemd/**'
       - 'Cargo.toml'
       - 'build.rs'
+      - 'web/package.json'
+      - 'web/pnpm-lock.yaml'
       - 'Cargo.lock'
   workflow_dispatch:
     inputs:
