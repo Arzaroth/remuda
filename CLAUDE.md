@@ -54,8 +54,8 @@ computes for the live key too. Changing any of them changes that ADR too.
   becomes the GitHub release notes.
 - Before finishing: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`,
   `cargo test`. After a change under `web/` (the page's source), also
-  `pnpm test` and `pnpm build` there: `src/serve.html` is the built page,
-  committed, and CI fails when it is stale. CI also shellchecks `scripts/install.sh`,
+  `pnpm test` and `pnpm build` there. `build.rs` builds the page into the
+  binary, so compiling needs `pnpm install` in `web/` first. CI also shellchecks `scripts/install.sh`,
   `scripts/release.sh` and the packaging scripts.
 - `scripts/coverage.sh` ranks files by uncovered lines; `main.rs`'s process
   surface stays uncovered on purpose.
