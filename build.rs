@@ -9,6 +9,7 @@ fn main() {
         "web/package.json",
         "web/pnpm-lock.yaml",
         "web/vite.config.ts",
+        "web/tsconfig.json",
     ] {
         println!("cargo::rerun-if-changed={input}");
     }
@@ -17,11 +18,17 @@ fn main() {
         panic!("the page is built from web/, which needs `pnpm install` there first");
     }
     let out = env::var("OUT_DIR").expect("cargo sets OUT_DIR");
-    let built = Command::new("pnpm")
-        .args(["exec", "vite", "build", "--emptyOutDir", "--outDir", &out])
+    let built = Command::new("node")
+        .args([
+            "node_modules/vite/bin/vite.js",
+            "build",
+            "--emptyOutDir",
+            "--outDir",
+            &out,
+        ])
         .current_dir("web")
         .output()
-        .unwrap_or_else(|e| panic!("could not run pnpm to build the page: {e}"));
+        .unwrap_or_else(|e| panic!("could not run node to build the page: {e}"));
     if !built.status.success() {
         panic!(
             "building the page failed:\n{}{}",

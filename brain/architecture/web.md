@@ -189,7 +189,9 @@ The page is written in Solid and TypeScript under `web/`, and Vite with
 scripts and styles inlined, which `serve.rs` compiles in (`include_str!`).
 `build.rs` runs that build into Cargo's `OUT_DIR` whenever a file under `web/`
 changes, so compiling remuda needs Node, pnpm and a `pnpm install` in `web/`,
-and stops with that advice when `web/node_modules` is missing. Nothing built
+and stops with that advice when `web/node_modules` is missing. It runs Vite
+with `node`, not `pnpm`: a `pnpm` other than the one `package.json` pins
+would download the pinned one, which an offline build cannot. Nothing built
 is committed. `pnpm dev` serves the source with hot reload and
 passes `/api` to a running `remuda serve` on `$REMUDA_PORT` (7429 by
 default), dropping the `Origin` it would refuse; open
