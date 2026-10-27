@@ -210,6 +210,9 @@ pub struct Auto {
     /// The login to go to when every login it may pick is full.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback: Option<String>,
+    /// Go to the fallback even when one of its windows is maxed.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub fallback_when_maxed: bool,
 }
 
 impl Default for Auto {
@@ -224,6 +227,7 @@ impl Default for Auto {
             ceilings: BTreeMap::new(),
             long_ceilings: BTreeMap::new(),
             fallback: None,
+            fallback_when_maxed: false,
         }
     }
 }
@@ -242,6 +246,7 @@ impl Auto {
         self.long_ceilings.remove(name);
         if self.fallback.as_deref() == Some(name) {
             self.fallback = None;
+            self.fallback_when_maxed = false;
         }
     }
 
@@ -495,6 +500,9 @@ impl Config {
                 }
                 if let Some(f) = &a.fallback {
                     t["fallback"] = toml_edit::value(f.as_str());
+                }
+                if a.fallback_when_maxed {
+                    t["fallback_when_maxed"] = toml_edit::value(true);
                 }
                 if !a.rules.is_empty() {
                     let mut rules = ArrayOfTables::new();

@@ -321,7 +321,9 @@ pub fn decide(input: &Input) -> Decision {
         .as_deref()
         .filter(|f| !logins.iter().any(|s| s.name == *f && s.tier.is_none()))
         .filter(|f| match figures.get(*f) {
-            Some(Figures::Known(w)) if !w.is_empty() => counted(w).all(|w| w.used < 100),
+            Some(Figures::Known(w)) if !w.is_empty() => {
+                input.auto.fallback_when_maxed || counted(w).all(|w| w.used < 100)
+            }
             _ => false,
         });
     let fallback = fallback.filter(|_| input.active.is_none() || active_full.is_some());
@@ -344,8 +346,8 @@ fn full_note(w: &Window, cap: u64) -> String {
 
 /// `active_full` says why the active login is full, wherever it sits;
 /// `fallback` is the login to go to when every other is too, given only when
-/// the active one is full or there is none, and the fallback has room and is
-/// not kept for a schedule.
+/// the active one is full or there is none, and the fallback has room (or
+/// `fallback_when_maxed`) and is not kept for a schedule.
 fn act(
     input: &Input,
     logins: &[Seen],
