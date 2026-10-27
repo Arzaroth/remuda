@@ -11,8 +11,17 @@ describe('span', () => {
 
   it('says which side of now a time is', () => {
     expect(until(2 * HOUR, 0)).toBe('in 2 hours');
-    expect(until(0, 2 * HOUR)).toBe('2 hours ago');
+    expect(until(0, 2 * HOUR + 5 * MIN)).toBe('2 hours ago');
     expect(ago(0, 5 * MIN)).toBe('5 minutes ago');
+  });
+});
+
+describe('until', () => {
+  it('counts down in the two largest units', () => {
+    expect(until(DAY + 10 * HOUR + 59 * MIN, 0)).toBe('in 1 day and 10 hours');
+    expect(until(HOUR + 25 * MIN + 30e3, 0)).toBe('in 1 hour and 25 minutes');
+    expect(until(3 * DAY + 30 * MIN, 0)).toBe('in 3 days');
+    expect(until(45 * MIN, 0)).toBe('in 45 minutes');
   });
 });
 
