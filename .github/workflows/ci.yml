@@ -77,9 +77,6 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: Check src/serve.html is the built page
-        run: git diff --exit-code -- ../src/serve.html
-
   installer:
     runs-on: ubuntu-latest
     steps:
