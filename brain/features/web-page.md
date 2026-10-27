@@ -176,7 +176,7 @@ refused.
 
 ## Sources
 
-- [web/src/](../../web/src/), built into [src/serve.html](../../src/serve.html);
+- [web/src/](../../web/src/), built by [build.rs](../../build.rs);
   the settings in [AutoMode.tsx](../../web/src/components/AutoMode.tsx) and
   [config.ts](../../web/src/config.ts)
 - [src/serve.rs](../../src/serve.rs)

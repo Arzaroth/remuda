@@ -185,11 +185,12 @@ takes both locations as `Places`, so tests point them at a temporary
 directory.
 
 The page is written in Solid and TypeScript under `web/`, and Vite with
-`vite-plugin-singlefile` builds it into `src/serve.html`: one self-contained
-file, scripts and styles inlined, which `serve.rs` compiles in
-(`include_str!`). The built file is committed, so building remuda needs no
-Node; after a change under `web/`, `pnpm build` there regenerates it, and CI
-fails when the two differ. `pnpm dev` serves the source with hot reload and
+`vite-plugin-singlefile` builds it into one self-contained `serve.html`,
+scripts and styles inlined, which `serve.rs` compiles in (`include_str!`).
+`build.rs` runs that build into Cargo's `OUT_DIR` whenever a file under `web/`
+changes, so compiling remuda needs Node, pnpm and a `pnpm install` in `web/`,
+and stops with that advice when `web/node_modules` is missing. Nothing built
+is committed. `pnpm dev` serves the source with hot reload and
 passes `/api` to a running `remuda serve` on `$REMUDA_PORT` (7429 by
 default), dropping the `Origin` it would refuse; open
 `http://localhost:5173/serve.html#<token>`. The page makes no external
@@ -224,6 +225,6 @@ the focus.
 - [src/serve.rs](../../src/serve.rs)
 - [src/served.rs](../../src/served.rs)
 - [src/http.rs](../../src/http.rs)
-- [web/](../../web/), built into [src/serve.html](../../src/serve.html)
+- [web/](../../web/), built by [build.rs](../../build.rs)
 - [src/main.rs](../../src/main.rs) `Serve`, `open`
 - [systemd/remuda-serve.service](../../systemd/remuda-serve.service)

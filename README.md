@@ -385,13 +385,13 @@ scripts/coverage.sh      # line coverage via cargo-llvm-cov, worst files first
 scripts/coverage.sh --html
 ```
 
-The `serve` page is a Solid app under `web/`, built into `src/serve.html`,
-which is committed so a Rust build needs no Node. After changing `web/`:
+The `serve` page is a Solid app under `web/`, which `cargo` builds into the
+binary, so install its dependencies before the first build:
 
 ```sh
 cd web && pnpm install
 pnpm test                # Vitest
-pnpm build               # rewrites src/serve.html; commit it with the change
+pnpm build               # type-checks and builds the page into web/dist
 pnpm dev                 # live reload against a running `remuda serve`
 ```
 

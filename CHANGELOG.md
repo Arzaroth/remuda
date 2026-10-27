@@ -17,6 +17,10 @@
 - The page's countdowns name a second unit: a window resets "in 1 day and
   10 hours" or "in 1 hour and 25 minutes" rather than "in 1 day" or "in 1
   hour".
+- Building remuda from source needs Node and pnpm, and `pnpm install` in
+  `web/`: `cargo` builds the page, which is no longer kept built in the
+  repository. The Arch `remuda` package lists `nodejs` and `pnpm` as build
+  dependencies. Release archives and packages are unchanged.
 
 ## [0.26.0] - 2026-10-23
 
