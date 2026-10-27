@@ -1278,6 +1278,39 @@ order = [["perso"]]
     }
 
     #[test]
+    fn long_ceilings_and_fallback_when_maxed_are_read_written_checked_and_kept_in_step() {
+        let text = "[auto.claude]\nlong_ceilings = { work = 94 }\nfallback = \"perso\"\nfallback_when_maxed = true\n";
+        let c: Config = toml_edit::de::from_str(text).unwrap();
+        let a = &c.auto["claude"];
+        assert_eq!((a.long_ceilings["work"], a.fallback_when_maxed), (94, true));
+        assert_eq!(c.check(&stored), []);
+        assert_eq!(written(text, &c), text);
+
+        let bad: Config =
+            toml_edit::de::from_str("[auto.claude]\nlong_ceilings = { ghost = 0 }\n").unwrap();
+        let problems: Vec<String> = bad.check(&stored).iter().map(ToString::to_string).collect();
+        assert_eq!(
+            problems,
+            [
+                "auto.claude.long_ceilings.ghost: no stored login claude/ghost",
+                "auto.claude.long_ceilings.ghost: a ceiling is a percentage, 1 to 100",
+            ]
+        );
+
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(&path, text).unwrap();
+        rename_login(&path, "claude", "work", "job").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "[auto.claude]\nlong_ceilings = { job = 94 }\nfallback = \"perso\"\nfallback_when_maxed = true\n"
+        );
+        forget_login(&path, "claude", "job").unwrap();
+        forget_login(&path, "claude", "perso").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "[auto.claude]\n");
+    }
+
+    #[test]
     fn warm_logins_are_read_written_checked_and_kept_in_step() {
         let text = "# kept\n[warm]\nclaude = [\"work\", \"perso\"] # both\n";
         let c: Config = toml_edit::de::from_str(text).unwrap();

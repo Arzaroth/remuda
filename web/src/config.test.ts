@@ -63,6 +63,10 @@ describe('canonical', () => {
     expect(canonical({ auto: { claude: { ceilings: {} } } })).toBe(canonical({ auto: { claude: {} } }));
   });
 
+  it('takes a long ceilings table emptied on the page for none', () => {
+    expect(canonical({ auto: { claude: { long_ceilings: {} } } })).toBe(canonical({ auto: { claude: {} } }));
+  });
+
   it('keeps an every-day, all-day schedule, which the server keeps', () => {
     expect(canonical({ schedules: { always: {} } })).not.toBe(canonical({}));
     expect(canonical({ schedules: {} })).toBe(canonical({}));
