@@ -92,16 +92,19 @@ fn longest(windows: &[Window]) -> Option<&Window> {
 }
 
 /// The percentage `w`, one of `name`'s windows, counts as full at: the
-/// login's own ceiling for the shortest of several windows (Claude's 5-hour
-/// one), the CLI's for the rest and for a login with one window.
+/// login's `ceilings` entry for the shortest of several windows (Claude's
+/// 5-hour one), its `long_ceilings` entry for the rest and for a login with
+/// one window, else the CLI's.
 fn cap(auto: &Auto, name: &str, windows: &[Window], w: &Window) -> u64 {
     let shortest = (counted(windows).count() > 1)
         .then(|| counted(windows).min_by_key(|x| x.minutes.unwrap_or(u64::MAX)))
         .flatten();
-    match auto.ceilings.get(name) {
-        Some(c) if shortest.is_some_and(|s| std::ptr::eq(s, w)) => *c,
-        _ => auto.ceiling,
-    }
+    let own = if shortest.is_some_and(|s| std::ptr::eq(s, w)) {
+        &auto.ceilings
+    } else {
+        &auto.long_ceilings
+    };
+    own.get(name).copied().unwrap_or(auto.ceiling)
 }
 
 /// The first of the login's windows at or over its ceiling, with that ceiling.
@@ -318,7 +321,9 @@ pub fn decide(input: &Input) -> Decision {
         .as_deref()
         .filter(|f| !logins.iter().any(|s| s.name == *f && s.tier.is_none()))
         .filter(|f| match figures.get(*f) {
-            Some(Figures::Known(w)) if !w.is_empty() => counted(w).all(|w| w.used < 100),
+            Some(Figures::Known(w)) if !w.is_empty() => {
+                input.auto.fallback_when_maxed || counted(w).all(|w| w.used < 100)
+            }
             _ => false,
         });
     let fallback = fallback.filter(|_| input.active.is_none() || active_full.is_some());
@@ -341,8 +346,8 @@ fn full_note(w: &Window, cap: u64) -> String {
 
 /// `active_full` says why the active login is full, wherever it sits;
 /// `fallback` is the login to go to when every other is too, given only when
-/// the active one is full or there is none, and the fallback has room and is
-/// not kept for a schedule.
+/// the active one is full or there is none, and the fallback has room (or
+/// `fallback_when_maxed`) and is not kept for a schedule.
 fn act(
     input: &Input,
     logins: &[Seen],
@@ -1578,6 +1583,121 @@ order = [["IDC"], ["Axeo"], ["perso"]]
             Action::Stay {
                 why: "every login it may pick is full or has no figures".into()
             }
+        );
+    }
+
+    /// Axeo first, then perso until its week is at 94%, then back to Axeo
+    /// even when Axeo is maxed.
+    fn spare_perso() -> Config {
+        toml_edit::de::from_str(
+            r#"
+[auto.claude]
+enabled             = true
+long_ceilings       = { perso = 94 }
+fallback            = "Axeo"
+fallback_when_maxed = true
+
+[[auto.claude.rule]]
+when  = "otherwise"
+order = [["Axeo"], ["perso"]]
+"#,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_login_s_long_ceiling_holds_its_other_windows_and_no_one_else_s() {
+        let c = spare_perso();
+        let now = at("10:00");
+        let d = run(
+            &c,
+            &now,
+            Some("perso"),
+            Some(0),
+            &[
+                ("Axeo", login(&now, (100, 2), (40, 100))),
+                ("perso", login(&now, (99, 2), (94, 100))),
+            ],
+        );
+        let perso = d.logins.iter().find(|s| s.name == "perso").unwrap();
+        assert!(!perso.usable, "perso's week is full at 94%");
+        let d = run(
+            &c,
+            &now,
+            Some("Axeo"),
+            Some(0),
+            &[
+                ("Axeo", login(&now, (10, 2), (99, 100))),
+                ("perso", login(&now, (99, 2), (40, 100))),
+            ],
+        );
+        assert!(
+            matches!(&d.action, Action::Stay { why } if why == "Axeo is the best pick"),
+            "Axeo's week keeps the CLI's 100%, perso's 5 hours too: {:?}",
+            d.action
+        );
+    }
+
+    #[test]
+    fn a_login_with_one_window_takes_its_long_ceiling() {
+        let mut c = balancer();
+        c.auto
+            .get_mut("claude")
+            .unwrap()
+            .long_ceilings
+            .insert("IDC".into(), 90);
+        let now = at("10:00");
+        let d = run(
+            &c,
+            &now,
+            Some("IDC"),
+            Some(0),
+            &[
+                (
+                    "IDC",
+                    Figures::Known(vec![Window {
+                        title: "Weekly".into(),
+                        minutes: Some(10080),
+                        used: 90,
+                        resets_at: None,
+                        extra: false,
+                    }]),
+                ),
+                ("Axeo", login(&now, (10, 2), (40, 100))),
+            ],
+        );
+        assert_eq!(switch_to(&d), Some("Axeo"));
+    }
+
+    #[test]
+    fn fallback_when_maxed_goes_to_a_maxed_fallback() {
+        let mut c = spare_perso();
+        let now = at("10:00");
+        let f = [
+            ("Axeo", login(&now, (100, 2), (40, 100))),
+            ("perso", login(&now, (20, 2), (94, 100))),
+        ];
+        assert_eq!(
+            run(&c, &now, Some("perso"), Some(0), &f).action,
+            Action::Switch {
+                to: "Axeo".into(),
+                why: "every login it may pick is full or has no figures; Axeo is the fallback"
+                    .into()
+            }
+        );
+        assert_eq!(
+            run(&c, &now, Some("Axeo"), Some(0), &f).action,
+            Action::Stay {
+                why: "every login it may pick is full or has no figures; staying on Axeo, the fallback".into()
+            }
+        );
+        c.auto.get_mut("claude").unwrap().fallback_when_maxed = false;
+        assert_eq!(
+            run(&c, &now, Some("perso"), Some(0), &f).action,
+            Action::Stay {
+                why: "every login it may pick is full or has no figures".into()
+            },
+            "without it a maxed fallback is not taken"
         );
     }
 

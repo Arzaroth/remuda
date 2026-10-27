@@ -256,6 +256,47 @@ function Now(props: { s: AutoStatus; provider: string }) {
   );
 }
 
+function LoginCeilings(props: { p: Provider; table: 'ceilings' | 'long_ceilings'; title: string; label: string }) {
+  const a = () => draft.c.auto?.[props.p.id] ?? {};
+  const set = (fn: (a: ReturnType<typeof auto>) => void) => edit((c) => fn(auto(c, props.p.id)));
+  return (
+    <div class="pickable">
+      <span class="aside">{props.title}</span>
+      <div class="ceilings">
+        <For each={loginsOf(props.p.id)}>
+          {(name) => (
+            <label class="kept">
+              <span class="spec">{name}</span>
+              <span class="unit">
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  aria-label={`${name}${props.label}`}
+                  placeholder={String(a().ceiling ?? 100)}
+                  value={a()[props.table]?.[name] ?? ''}
+                  onChange={(e) => {
+                    const c = percent(e.currentTarget.value);
+                    e.currentTarget.value = c === null ? '' : String(c);
+                    set((x) => {
+                      if (c !== null) (x[props.table] ??= {})[name] = c;
+                      else if (x[props.table]) {
+                        delete x[props.table]![name];
+                        if (!Object.keys(x[props.table]!).length) delete x[props.table];
+                      }
+                    });
+                  }}
+                />
+                %
+              </span>
+            </label>
+          )}
+        </For>
+      </div>
+    </div>
+  );
+}
+
 function ProviderCard(props: { p: Provider; problems: Problem[] }) {
   const status = () => {
     const s = store.s!.auto?.[props.p.id];
@@ -376,40 +417,18 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
         </div>
       </div>
       <Show when={loginsOf(props.p.id).length}>
-        <div class="pickable">
-          <span class="aside">A login's own ceiling for its shortest window (Claude's 5-hour one)</span>
-          <div class="ceilings">
-            <For each={loginsOf(props.p.id)}>
-              {(name) => (
-                <label class="kept">
-                  <span class="spec">{name}</span>
-                  <span class="unit">
-                    <input
-                      type="number"
-                      min="1"
-                      max="100"
-                      aria-label={`${name} is full at`}
-                      placeholder={String(a().ceiling ?? 100)}
-                      value={a().ceilings?.[name] ?? ''}
-                      onChange={(e) => {
-                        const c = percent(e.currentTarget.value);
-                        e.currentTarget.value = c === null ? '' : String(c);
-                        set((x) => {
-                          if (c !== null) (x.ceilings ??= {})[name] = c;
-                          else if (x.ceilings) {
-                            delete x.ceilings[name];
-                            if (!Object.keys(x.ceilings).length) delete x.ceilings;
-                          }
-                        });
-                      }}
-                    />
-                    %
-                  </span>
-                </label>
-              )}
-            </For>
-          </div>
-        </div>
+        <LoginCeilings
+          p={props.p}
+          table="ceilings"
+          title="A login's own ceiling for the shortest of its windows (Claude's 5-hour one)"
+          label=" is full at"
+        />
+        <LoginCeilings
+          p={props.p}
+          table="long_ceilings"
+          title="A login's own ceiling for its other windows, or its only one (Claude's weekly one)"
+          label="'s other or only window is full at"
+        />
         <label class="kept">
           <span class="aside">When every login it may pick is full</span>
           <select
@@ -419,7 +438,10 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
               const f = e.currentTarget.value;
               set((x) => {
                 if (f) x.fallback = f;
-                else delete x.fallback;
+                else {
+                  delete x.fallback;
+                  delete x.fallback_when_maxed;
+                }
               });
             }}
           >
@@ -430,6 +452,21 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
             </Show>
           </select>
         </label>
+        <Show when={a().fallback}>
+          <label class="check">
+            <input
+              type="checkbox"
+              checked={!!a().fallback_when_maxed}
+              onChange={(e) =>
+                set((x) => {
+                  if (e.currentTarget.checked) x.fallback_when_maxed = true;
+                  else delete x.fallback_when_maxed;
+                })
+              }
+            />
+            even when {a().fallback} is maxed
+          </label>
+        </Show>
       </Show>
       <For each={a().rule ?? []}>
         {(_, i) => <RuleCard provider={props.p.id} i={i()} count={a().rule!.length} problems={props.problems} />}
