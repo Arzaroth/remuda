@@ -438,7 +438,10 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
               const f = e.currentTarget.value;
               set((x) => {
                 if (f) x.fallback = f;
-                else delete x.fallback;
+                else {
+                  delete x.fallback;
+                  delete x.fallback_when_maxed;
+                }
               });
             }}
           >
