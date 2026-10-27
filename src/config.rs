@@ -204,6 +204,9 @@ pub struct Auto {
     /// Login name to the percentage its shortest window counts as full at.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub ceilings: BTreeMap<String, u64>,
+    /// Login name to the percentage its other windows count as full at.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub long_ceilings: BTreeMap<String, u64>,
     /// The login to go to when every login it may pick is full.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback: Option<String>,
@@ -219,6 +222,7 @@ impl Default for Auto {
             rules: Vec::new(),
             ceiling: default_ceiling(),
             ceilings: BTreeMap::new(),
+            long_ceilings: BTreeMap::new(),
             fallback: None,
         }
     }
@@ -235,6 +239,7 @@ impl Auto {
             rule.reserve.remove(name);
         }
         self.ceilings.remove(name);
+        self.long_ceilings.remove(name);
         if self.fallback.as_deref() == Some(name) {
             self.fallback = None;
         }
@@ -255,6 +260,9 @@ impl Auto {
         }
         if let Some(c) = self.ceilings.remove(from) {
             self.ceilings.insert(to.to_owned(), c);
+        }
+        if let Some(c) = self.long_ceilings.remove(from) {
+            self.long_ceilings.insert(to.to_owned(), c);
         }
         if let Some(f) = self.fallback.as_mut() {
             swap(f);
@@ -336,8 +344,13 @@ impl Config {
                     "a ceiling is a percentage, 1 to 100".into(),
                 );
             }
-            for (name, c) in &auto.ceilings {
-                let cat = format!("{at}.ceilings.{name}");
+            let logins = auto
+                .ceilings
+                .iter()
+                .map(|e| ("ceilings", e))
+                .chain(auto.long_ceilings.iter().map(|e| ("long_ceilings", e)));
+            for (key, (name, c)) in logins {
+                let cat = format!("{at}.{key}.{name}");
                 if let Some(m) = unknown(name) {
                     flag(&cat, m);
                 }
@@ -472,6 +485,13 @@ impl Config {
                         ceilings.insert(login, (*c as i64).into());
                     }
                     t["ceilings"] = toml_edit::value(ceilings);
+                }
+                if !a.long_ceilings.is_empty() {
+                    let mut ceilings = InlineTable::new();
+                    for (login, c) in &a.long_ceilings {
+                        ceilings.insert(login, (*c as i64).into());
+                    }
+                    t["long_ceilings"] = toml_edit::value(ceilings);
                 }
                 if let Some(f) = &a.fallback {
                     t["fallback"] = toml_edit::value(f.as_str());

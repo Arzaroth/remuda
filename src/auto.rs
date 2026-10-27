@@ -92,16 +92,19 @@ fn longest(windows: &[Window]) -> Option<&Window> {
 }
 
 /// The percentage `w`, one of `name`'s windows, counts as full at: the
-/// login's own ceiling for the shortest of several windows (Claude's 5-hour
-/// one), the CLI's for the rest and for a login with one window.
+/// login's `ceilings` entry for the shortest of several windows (Claude's
+/// 5-hour one), its `long_ceilings` entry for the rest and for a login with
+/// one window, else the CLI's.
 fn cap(auto: &Auto, name: &str, windows: &[Window], w: &Window) -> u64 {
     let shortest = (counted(windows).count() > 1)
         .then(|| counted(windows).min_by_key(|x| x.minutes.unwrap_or(u64::MAX)))
         .flatten();
-    match auto.ceilings.get(name) {
-        Some(c) if shortest.is_some_and(|s| std::ptr::eq(s, w)) => *c,
-        _ => auto.ceiling,
-    }
+    let own = if shortest.is_some_and(|s| std::ptr::eq(s, w)) {
+        &auto.ceilings
+    } else {
+        &auto.long_ceilings
+    };
+    own.get(name).copied().unwrap_or(auto.ceiling)
 }
 
 /// The first of the login's windows at or over its ceiling, with that ceiling.
