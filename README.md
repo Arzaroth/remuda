@@ -380,16 +380,15 @@ the smallest request the provider takes, but it is not you typing.
 
 ```sh
 mise install             # the pinned Rust (with llvm-tools), cargo-llvm-cov, shellcheck, Node, pnpm
+(cd web && pnpm install) # the page's dependencies, which cargo builds into the binary
 cargo test               # unit tests, plus tests/cli.rs driving the built binary
 scripts/coverage.sh      # line coverage via cargo-llvm-cov, worst files first
 scripts/coverage.sh --html
 ```
 
-The `serve` page is a Solid app under `web/`, which `cargo` builds into the
-binary, so install its dependencies before the first build:
+The `serve` page is a Solid app under `web/`. In `web/`:
 
 ```sh
-cd web && pnpm install
 pnpm test                # Vitest
 pnpm build               # type-checks and builds the page into web/dist
 pnpm dev                 # live reload against a running `remuda serve`
