@@ -11,6 +11,7 @@ export type Auto = {
   ceilings?: Record<string, number>;
   long_ceilings?: Record<string, number>;
   fallback?: string;
+  fallback_when_maxed?: boolean;
 };
 
 /** A percentage typed into a field: whole, 1 to 100, or none. */
