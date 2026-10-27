@@ -11,7 +11,7 @@ describe('span', () => {
 
   it('says which side of now a time is', () => {
     expect(until(2 * HOUR, 0)).toBe('in 2 hours');
-    expect(until(0, 2 * HOUR + 5 * MIN)).toBe('2 hours and 5 minutes ago');
+    expect(until(0, 2 * HOUR + 5 * MIN)).toBe('2 hours ago');
     expect(ago(0, 5 * MIN)).toBe('5 minutes ago');
   });
 });
