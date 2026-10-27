@@ -420,14 +420,14 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
         <LoginCeilings
           p={props.p}
           table="ceilings"
-          title="A login's own ceiling for its shortest window (Claude's 5-hour one)"
+          title="A login's own ceiling for the shortest of its windows (Claude's 5-hour one)"
           label=" is full at"
         />
         <LoginCeilings
           p={props.p}
           table="long_ceilings"
-          title="A login's own ceiling for its other windows (Claude's weekly one)"
-          label="'s other windows are full at"
+          title="A login's own ceiling for its other windows, or its only one (Claude's weekly one)"
+          label="'s other or only window is full at"
         />
         <label class="kept">
           <span class="aside">When every login it may pick is full</span>
