@@ -1202,7 +1202,7 @@ order = [["perso"]]
 
     #[test]
     fn keys_written_at_their_default_stay_with_their_comments() {
-        let text = "[auto.claude]\nenabled = false\ndwell = \"30m\" # default\nmargin = 0.25 # default\nlogins = [\"work\"]\n";
+        let text = "[auto.claude]\nenabled = false\ndwell = \"30m\" # default\nmargin = 0.25 # default\nlogins = [\"work\"]\nfallback_when_maxed = false # not yet\n";
         let mut c: Config = toml_edit::de::from_str(text).unwrap();
         assert_eq!(written(text, &c), text);
         c.auto
