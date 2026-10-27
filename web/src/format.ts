@@ -10,8 +10,16 @@ export function span(ms: number): string {
   return `${n} ${unit}${n === 1 ? '' : 's'}`;
 }
 
+export function precise(ms: number): string {
+  const a = Math.abs(ms);
+  if (a < HOUR) return span(a);
+  const [big, small] = a < DAY ? [HOUR, MIN] : [DAY, HOUR];
+  const rest = Math.floor((a % big) / small);
+  return rest ? `${span(a)} and ${span(rest * small)}` : span(a);
+}
+
 export const until = (ms: number, now = Date.now()) =>
-  ms < now ? `${span(ms - now)} ago` : `in ${span(ms - now)}`;
+  ms < now ? `${precise(ms - now)} ago` : `in ${precise(ms - now)}`;
 export const ago = (ms: number, now = Date.now()) => `${span(now - ms)} ago`;
 export const date = (ms: number) =>
   new Date(ms).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
