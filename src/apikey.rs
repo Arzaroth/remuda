@@ -175,6 +175,9 @@ impl Provider for ApiKey {
     }
 
     fn live_file(&self) -> Option<PathBuf> {
+        if self.env_key().is_some() {
+            return None;
+        }
         self.file.as_ref().map(|f| f.path.clone())
     }
 
