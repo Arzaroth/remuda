@@ -110,11 +110,15 @@ impl File {
 }
 
 impl Settings {
-    /// Compares every key in full, so the time taken says nothing about how
-    /// much of a guess was right.
-    pub fn accepts(&self, presented: &str) -> bool {
-        self.keys.iter().fold(false, |found, k| {
-            found | same(k.key.as_bytes(), presented.as_bytes())
+    /// The key `presented` is. Compares every key in full, so the time taken
+    /// says nothing about how much of a guess was right, or which key it was.
+    pub fn matching(&self, presented: &str) -> Option<&Key> {
+        self.keys.iter().fold(None, |found, k| {
+            if same(k.key.as_bytes(), presented.as_bytes()) {
+                Some(k)
+            } else {
+                found
+            }
         })
     }
 }
@@ -153,9 +157,9 @@ mod tests {
         assert!(f.add_key("  ").is_err());
         assert_eq!(f.read().unwrap().keys, vec![key.clone()]);
         let s = f.read().unwrap();
-        assert!(s.accepts(&key.key));
-        assert!(!s.accepts("rmd-nope"));
-        assert!(!s.accepts(""));
+        assert_eq!(s.matching(&key.key).map(|k| &k.id), Some(&key.id));
+        assert!(s.matching("rmd-nope").is_none());
+        assert!(s.matching("").is_none());
         f.remove_key(&key.id).unwrap();
         assert!(f.read().unwrap().keys.is_empty());
         assert!(f.remove_key(&key.id).is_err());

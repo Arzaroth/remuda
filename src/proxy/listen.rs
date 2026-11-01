@@ -154,7 +154,7 @@ fn answer(backend: &dyn Backend, mut stream: TcpStream) {
     };
     let format = format_of(&head.path);
     let accepted = match backend.settings() {
-        Ok(s) => presented(&head).is_some_and(|k| s.accepts(k)),
+        Ok(s) => presented(&head).is_some_and(|k| s.matching(k).is_some()),
         Err(_) => false,
     };
     if !accepted {
