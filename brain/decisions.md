@@ -368,6 +368,20 @@ over with a warning rather than failing, since the shell functions route
 every `claude` through remuda. An unpinned run `exec`s the CLI before
 touching the store, so routing costs nothing where nothing is pinned.
 
+## Spend is attributed from what remuda saw, never inferred
+
+TokenGauge prices the transcripts, which name no login, and remuda is the one
+that installs logins. So remuda writes down, as it happens, which login each
+CLI's files hold and which Claude session a `remuda run` spent, and TokenGauge
+reads that ledger (`selvedge::usage::ledger`). Nothing is reconstructed from
+the switch log after the fact: it misses `remuda run` sessions running beside
+the live login, and logins changed outside remuda. Spend from before the
+ledger is unattributed. The ledger's format lives in selvedge rather than in
+either repository, so its writer and its reader cannot drift. A Claude Code
+hook would have told remuda each session's id too, but it would mean writing
+into Claude Code's settings; `sessions/<pid>.json`, which Claude Code already
+writes, says the same for the one process remuda started.
+
 ## Packages are made from the release archive
 
 The `.deb`, the `.rpm` and `remuda-bin` repackage the per-architecture archive
@@ -382,6 +396,7 @@ needs `remuda ls` run first from the user's shell (see
 ## Sources
 
 - [src/ops.rs](../src/ops.rs)
+- [src/attribution.rs](../src/attribution.rs)
 - [src/claude.rs](../src/claude.rs)
 - [src/browser.rs](../src/browser.rs)
 - [src/codex.rs](../src/codex.rs)
