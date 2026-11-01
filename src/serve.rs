@@ -879,6 +879,25 @@ impl proxy::Backend for App {
         };
         logbook::note(&self.store, event.about(provider, None));
     }
+
+    fn whose(&self, p: &dyn Provider, creds: &Value) -> Option<(String, String)> {
+        let refresh = p.refresh_token(creds);
+        let access = p.access_token(creds);
+        self.store
+            .list(p.id())
+            .ok()?
+            .into_iter()
+            .filter(|e| e.verified)
+            .find(|e| {
+                (refresh.is_some() && p.refresh_token(&e.creds) == refresh)
+                    || (access.is_some() && p.access_token(&e.creds) == access)
+            })
+            .map(|e| (e.meta.account_id, e.name))
+    }
+
+    fn record(&self, request: selvedge::usage::requests::Request) {
+        let _ = selvedge::usage::requests::append(self.store.root(), &request);
+    }
 }
 
 #[cfg(test)]

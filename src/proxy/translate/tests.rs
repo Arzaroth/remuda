@@ -31,6 +31,7 @@ fn run(from: Format, to: Format, stream: bool, upstream: &str) -> (u16, String) 
             status = s;
             Ok(())
         },
+        &mut Seen::default(),
     )
     .unwrap();
     (status, String::from_utf8(out).unwrap())
@@ -405,6 +406,7 @@ fn a_tool_name_shortened_on_the_way_out_comes_back_whole() {
         upstream.as_bytes(),
         &mut out,
         |_, _, _, _| Ok(()),
+        &mut Seen::default(),
     )
     .unwrap();
     let v: Value = serde_json::from_slice(&out).unwrap();

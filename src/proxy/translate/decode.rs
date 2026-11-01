@@ -79,6 +79,38 @@ impl<R: BufRead> Iterator for Decoder<R> {
     }
 }
 
+/// The id and usage of one whole answer body, as `from` spells them.
+pub fn whole(from: Format, body: &Value) -> (String, Usage) {
+    let usage = match from {
+        Format::Messages => {
+            let cache_read = count(body, "/usage/cache_read_input_tokens");
+            let cache_write = count(body, "/usage/cache_creation_input_tokens");
+            Usage {
+                input: count(body, "/usage/input_tokens") + cache_read + cache_write,
+                output: count(body, "/usage/output_tokens"),
+                cache_read,
+                cache_write,
+                reasoning: 0,
+            }
+        }
+        Format::Chat => Usage {
+            input: count(body, "/usage/prompt_tokens"),
+            output: count(body, "/usage/completion_tokens"),
+            cache_read: count(body, "/usage/prompt_tokens_details/cached_tokens"),
+            cache_write: 0,
+            reasoning: count(body, "/usage/completion_tokens_details/reasoning_tokens"),
+        },
+        Format::Responses => Usage {
+            input: count(body, "/usage/input_tokens"),
+            output: count(body, "/usage/output_tokens"),
+            cache_read: count(body, "/usage/input_tokens_details/cached_tokens"),
+            cache_write: 0,
+            reasoning: count(body, "/usage/output_tokens_details/reasoning_tokens"),
+        },
+    };
+    (text(body, "/id"), usage)
+}
+
 fn text(v: &Value, pointer: &str) -> String {
     v.pointer(pointer)
         .and_then(Value::as_str)
