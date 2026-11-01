@@ -73,7 +73,8 @@ line for each new session id to `<store>/.attribution.jsonl`. A `/clear`
 moves the CLI to a new id, which gets its own line. TokenGauge gives a
 session a `run` line names to that run's login, whatever the CLI's files held
 meanwhile ([switching.md](switching.md#whose-spend-it-is)). Codex needs none:
-its transcripts carry the account they ran on (`creator_account_id`).
+its transcripts carry the seat they ran on (`creator_user_id` and
+`creator_account_id` in `session_meta`, joined by `__` the stored `accountId`).
 
 ## When it ends
 
