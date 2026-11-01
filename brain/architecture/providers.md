@@ -35,9 +35,11 @@ refresh token into "sign this credential in again".
 - Identity: `oauthAccount.accountUuid` in `.claude.json`, which is a different
   file from the tokens and can lag them, hence `identify` calls the profile
   endpoint.
-- Plan: the Max plan `rateLimitTier` names (`selvedge::plans::max_plan`: `_5x`
-  is "max", `_20x` "ultra"), else `subscriptionType` plus the tier's `Nx`
-  suffix, else `subscriptionType` alone.
+- Plan: on a `max` subscription, the plan `rateLimitTier` names
+  (`selvedge::plans::max_plan`: `_5x` is "max", `_20x` "ultra"). A Team
+  login is its seat ("team premium"), never its tier's multiplier. Anything
+  else is `subscriptionType` plus the tier's `Nx` suffix ("enterprise 5x"),
+  or `subscriptionType` alone.
 - OAuth (from Claude Code 2.1.282): client id `9d1c250a-e61b-44d9-88ed-5944d1962f5e`,
   authorize at `claude.com/cai/oauth/authorize`, token at
   `platform.claude.com/v1/oauth/token` (JSON body), profile at
