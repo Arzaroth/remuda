@@ -98,3 +98,54 @@ fn format_name(format: Format) -> &'static str {
 fn millis(d: Duration) -> u64 {
     u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::proxy::translate::Usage;
+
+    fn trace() -> Trace {
+        let mut t = Trace::new(1, Instant::now(), Some("k".into()), Format::Chat);
+        t.provider = Some("codex");
+        t.status = 200;
+        t
+    }
+
+    #[test]
+    fn a_request_no_provider_took_is_not_logged() {
+        let mut t = trace();
+        t.provider = None;
+        assert!(t.request(Some(404)).is_none());
+    }
+
+    #[test]
+    fn how_a_request_ended() {
+        assert_eq!(trace().request(None).unwrap().outcome, Outcome::Ok);
+        assert_eq!(trace().request(Some(503)).unwrap().status, 503);
+        let mut failed = trace();
+        failed.seen.failed = true;
+        assert_eq!(failed.request(None).unwrap().outcome, Outcome::Failed);
+        let mut gone = trace();
+        gone.canceled = true;
+        gone.status = 500;
+        assert_eq!(gone.request(None).unwrap().outcome, Outcome::Canceled);
+    }
+
+    #[test]
+    fn input_is_logged_fresh_beside_what_the_cache_read_and_wrote() {
+        let mut t = trace();
+        t.seen.usage = Some(Usage {
+            input: 100,
+            output: 9,
+            cache_read: 60,
+            cache_write: 15,
+            reasoning: 4,
+        });
+        let r = t.request(None).unwrap();
+        assert_eq!(
+            (r.tokens.input, r.tokens.cache_read, r.tokens.cache_write_5m),
+            (25, 60, 15)
+        );
+        assert_eq!((r.tokens.output, r.reasoning), (9, 4));
+    }
+}
