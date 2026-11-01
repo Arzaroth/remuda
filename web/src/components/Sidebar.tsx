@@ -102,8 +102,10 @@ export function Sidebar(props: { onAdd: () => void }) {
         >
           Refresh tokens
         </button>
-        <ThemeSwitch />
-        <SkinSwitch />
+        <div class="switches">
+          <ThemeSwitch />
+          <SkinSwitch />
+        </div>
       </div>
     </nav>
   );

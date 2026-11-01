@@ -140,8 +140,10 @@ export function App() {
                       >
                         Refresh tokens
                       </button>
-                      <ThemeSwitch />
-                      <SkinSwitch />
+                      <div class="switches">
+                        <ThemeSwitch />
+                        <SkinSwitch />
+                      </div>
                     </div>
                   </div>
                 </Match>

@@ -7,6 +7,8 @@
 - Claude's Max 5x and Max 20x are listed as `max` and `ultra`, their new
   names, in `ls`, `ls --json` and on the page. The page's weighted total takes
   its weights from TokenGauge, which now counts an Ultra as 10 Pros, not 20.
+- The page's Auto, Light and Dark theme choices are icons, so they share one
+  line with the Sage and Instrument look.
 
 ## [0.27.0] - 2026-10-27
 
