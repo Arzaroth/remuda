@@ -1848,8 +1848,8 @@ dependencies = [
 
 [[package]]
 name = "selvedge"
-version = "0.10.0"
-source = "git+https://github.com/Arzaroth/selvedge?tag=v0.10.0#f44b7ca9ba0232c9077f8ff0761b31aa9a158ecd"
+version = "0.11.0"
+source = "git+https://github.com/Arzaroth/selvedge?tag=v0.11.0#ef6130110ca4c3c1efd80141794bc2626b88854e"
 dependencies = [
  "anyhow",
  "http",
@@ -2107,7 +2107,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
