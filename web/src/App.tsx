@@ -16,6 +16,7 @@ import { Strip, Tile } from './components/Strip';
 import { SkinSwitch } from './components/SkinSwitch';
 import { ThemeSwitch } from './components/ThemeSwitch';
 import { Toast } from './components/Toast';
+import { Usage } from './components/Usage';
 
 function AutoBadge(props: { p: Provider }) {
   const on = () => autoOn(store.s!, props.p.id);
@@ -85,6 +86,10 @@ export function App() {
     const p = store.s.providers.find((x) => x.id === r.id);
     return p ? { p, tab: r.tab } : null;
   };
+  const usage = () => {
+    const r = route();
+    return r.page === 'usage' ? r : null;
+  };
   const openAdd = () => {
     const r = route();
     openSheet({ provider: r.page === 'cli' ? r.id : providers()[0]?.id });
@@ -115,6 +120,7 @@ export function App() {
             <Show when={store.s}>
               <Switch>
                 <Match when={cli()}>{(c) => <CliPage p={c().p} tab={c().tab} />}</Match>
+                <Match when={usage()}>{(r) => <Usage tab={r().tab} />}</Match>
                 <Match when={route().page === 'proxy' && store.s!.proxy}>
                   <div class="page">
                     <Proxy />

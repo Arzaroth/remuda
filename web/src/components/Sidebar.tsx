@@ -66,6 +66,12 @@ export function Sidebar(props: { onAdd: () => void }) {
         <For each={inUse(s())}>{(p) => <CliLink p={p} />}</For>
       </div>
       <div class="nav-group">
+        <a class="nav-item" href={href({ page: 'usage', tab: 'spend' })} aria-current={here({ page: 'usage', tab: 'spend' }) ? 'page' : undefined}>
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M3 17V9M8 17V4M13 17v-6M18 17V7" />
+          </svg>
+          Usage
+        </a>
         <Show when={s().proxy}>
           <a class="nav-item" href={href({ page: 'proxy' })} aria-current={here({ page: 'proxy' }) ? 'page' : undefined}>
             <svg viewBox="0 0 20 20" aria-hidden="true">
