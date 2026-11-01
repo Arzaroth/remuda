@@ -122,6 +122,11 @@ pub trait Provider: Send + Sync {
     /// `outgoing` (store shape); otherwise fails with [`crate::fsx::Changed`]
     /// and writes nothing. `None` replaces whatever is there.
     fn install(&self, entry: &Entry, outgoing: Option<&Value>) -> Result<()>;
+    /// The file the live login is read from. Its mtime dates a login that
+    /// changed outside remuda, which remuda only notices later.
+    fn live_file(&self) -> Option<std::path::PathBuf> {
+        None
+    }
     /// A lock other tools that rewrite the live login take too, held across a
     /// switch's last read and its write.
     fn lock_live(&self) -> Result<Option<std::fs::File>> {

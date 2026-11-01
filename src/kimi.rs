@@ -156,6 +156,10 @@ impl Provider for Kimi {
         self.home.clone()
     }
 
+    fn live_file(&self) -> Option<PathBuf> {
+        Some(self.creds_path())
+    }
+
     fn access_token<'a>(&self, creds: &'a Value) -> Option<&'a str> {
         text(creds, "access_token")
     }

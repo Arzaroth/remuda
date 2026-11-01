@@ -421,6 +421,10 @@ impl Provider for Claude {
             .unwrap_or_default()
     }
 
+    fn live_file(&self) -> Option<PathBuf> {
+        Some(self.creds_path.clone())
+    }
+
     fn access_token<'a>(&self, creds: &'a Value) -> Option<&'a str> {
         Self::oauth(creds)?.get("accessToken")?.as_str()
     }
