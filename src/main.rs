@@ -1,4 +1,5 @@
 mod apikey;
+mod attribution;
 mod auto;
 mod browser;
 mod claude;

@@ -174,6 +174,10 @@ impl Provider for ApiKey {
             .unwrap_or_default()
     }
 
+    fn live_file(&self) -> Option<PathBuf> {
+        self.file.as_ref().map(|f| f.path.clone())
+    }
+
     fn access_token<'a>(&self, creds: &'a Value) -> Option<&'a str> {
         key_of(creds)
     }
