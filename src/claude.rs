@@ -444,7 +444,10 @@ impl Provider for Claude {
             return "-".to_owned();
         };
         let tier = get("rateLimitTier").filter(|_| !is_team(sub));
-        if let Some(plan) = tier.and_then(max_plan) {
+        if let Some(plan) = tier
+            .filter(|_| sub.eq_ignore_ascii_case("max"))
+            .and_then(max_plan)
+        {
             return plan.name().to_lowercase();
         }
         match tier.and_then(tier_multiplier) {

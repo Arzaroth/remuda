@@ -1554,6 +1554,13 @@ mod tests {
             "ultra",
             "a login that left Team keeps no seat its profile last reported"
         );
+        max.creds[OAUTH_KEY]["subscriptionType"] = json!("enterprise");
+        max.creds[OAUTH_KEY]["rateLimitTier"] = json!("default_claude_max_5x");
+        assert_eq!(
+            plan_shown(&e.claude, &max),
+            "enterprise 5x",
+            "only a Max subscription is renamed after its tier"
+        );
 
         let mut team = max;
         team.creds[OAUTH_KEY]["subscriptionType"] = json!("team");
