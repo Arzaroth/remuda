@@ -94,8 +94,11 @@ pub struct RunWatch {
     thread: Option<thread::JoinHandle<()>>,
 }
 
-const FIRST_LOOK: Duration = Duration::from_secs(1);
-const RUN_POLL: Duration = Duration::from_secs(5);
+/// Claude Code removes its session file on exit, so a session is seen only
+/// while it runs: often enough that a short `-p` run or a quick `/clear` is
+/// not missed, and the file is a few hundred bytes.
+const FIRST_LOOK: Duration = Duration::from_millis(250);
+const RUN_POLL: Duration = Duration::from_secs(1);
 
 impl RunWatch {
     pub fn start(
