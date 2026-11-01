@@ -5,6 +5,8 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use selvedge::proc::start_time;
+
 use crate::fsx;
 
 /// What a running `serve` tells other programs: no token, so anything of the
@@ -15,19 +17,6 @@ pub struct Status {
     pub started: u64,
     pub port: u16,
     pub version: String,
-}
-
-/// When the process started, in clock ticks since boot (field 22 of
-/// `/proc/<pid>/stat`): with the pid, it names one process even after the pid
-/// is reused.
-fn started(pid: &str) -> Option<u64> {
-    let stat = std::fs::read_to_string(Path::new("/proc").join(pid).join("stat")).ok()?;
-    stat.rsplit_once(')')?
-        .1
-        .split_whitespace()
-        .nth(19)?
-        .parse()
-        .ok()
 }
 
 fn status_path(dir: &Path) -> PathBuf {
@@ -43,7 +32,7 @@ pub fn announce(dir: &Path, port: u16, url: &str) -> Result<()> {
     fsx::write_private(&url_path(dir), &format!("{url}\n"))?;
     let status = Status {
         pid: std::process::id(),
-        started: started("self").context("cannot read this process's start time")?,
+        started: start_time(std::process::id()).context("cannot read this process's start time")?,
         port,
         version: env!("CARGO_PKG_VERSION").to_owned(),
     };
@@ -54,7 +43,7 @@ pub fn announce(dir: &Path, port: u16, url: &str) -> Result<()> {
 /// so only the same process, its port still answering, counts.
 pub fn running(dir: &Path) -> Option<String> {
     let status: Status = fsx::read_record(&status_path(dir))?;
-    if started(&status.pid.to_string()) != Some(status.started) {
+    if start_time(status.pid) != Some(status.started) {
         return None;
     }
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, status.port));
@@ -112,7 +101,7 @@ mod tests {
             status,
             serde_json::json!({
                 "pid": std::process::id(),
-                "started": started("self").unwrap(),
+                "started": start_time(std::process::id()).unwrap(),
                 "port": port,
                 "version": env!("CARGO_PKG_VERSION"),
             })
@@ -138,7 +127,7 @@ mod tests {
 
         let (_listener, port) = listening();
         announce(tmp.path(), port, &format!("http://127.0.0.1:{port}/#t")).unwrap();
-        let me = started("self").unwrap();
+        let me = start_time(std::process::id()).unwrap();
         let record = |pid, started| {
             let status = Status {
                 pid,
@@ -158,19 +147,6 @@ mod tests {
         assert_eq!(running(tmp.path()), None);
         record(std::process::id(), me);
         assert!(running(tmp.path()).is_some());
-    }
-
-    #[test]
-    fn a_start_time_is_the_twenty_second_stat_field() {
-        let stat = std::fs::read_to_string("/proc/self/stat").unwrap();
-        let fields: Vec<&str> = stat
-            .rsplit_once(')')
-            .unwrap()
-            .1
-            .split_whitespace()
-            .collect();
-        assert_eq!(started("self"), fields[19].parse().ok());
-        assert_eq!(started("no-such-pid"), None);
     }
 
     #[test]
