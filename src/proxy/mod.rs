@@ -1,4 +1,5 @@
 mod forward;
+mod journal;
 mod listen;
 mod ping;
 pub mod route;
@@ -20,6 +21,12 @@ pub trait Backend: Send + Sync {
     /// Told on each request whether the provider's active login could be
     /// spent, and why not.
     fn spent(&self, _provider: &str, _refused: Option<&str>) {}
+    /// The stored login whose tokens `creds` are, as its account id and name.
+    fn whose(&self, _p: &dyn Provider, _creds: &serde_json::Value) -> Option<(String, String)> {
+        None
+    }
+    /// Told of each request once it is over.
+    fn record(&self, _request: selvedge::usage::requests::Request) {}
 }
 
 /// Whether the listener runs, and on which port; started, moved and stopped

@@ -148,16 +148,18 @@ fn presented(head: &Head) -> Option<&str> {
 }
 
 fn answer(backend: &dyn Backend, mut stream: TcpStream) {
+    let started = Instant::now();
+    let at = crate::fsx::now_ms();
     let Some(head) = read_head(&mut stream, Instant::now() + HEAD_WITHIN) else {
         refuse(stream, 400, None, "bad request");
         return;
     };
     let format = format_of(&head.path);
-    let accepted = match backend.settings() {
-        Ok(s) => presented(&head).is_some_and(|k| s.matching(k).is_some()),
-        Err(_) => false,
+    let key = match backend.settings() {
+        Ok(s) => presented(&head).and_then(|k| s.matching(k).map(|k| k.id.clone())),
+        Err(_) => None,
     };
-    if !accepted {
+    let Some(key) = key else {
         refuse(
             stream,
             401,
@@ -165,7 +167,7 @@ fn answer(backend: &dyn Backend, mut stream: TcpStream) {
             "send a remuda proxy key as a bearer token or x-api-key; the remuda page makes one",
         );
         return;
-    }
+    };
     if stream.set_write_timeout(Some(WRITE_STALL)).is_err() {
         return;
     }
@@ -204,6 +206,9 @@ fn answer(backend: &dyn Backend, mut stream: TcpStream) {
                 count_tokens: path.ends_with("/count_tokens"),
                 head: &head,
                 body,
+                at,
+                started,
+                key: Some(key),
             };
             if let Err(e) = forward::forward(backend, call, &mut stream) {
                 refuse(stream, e.status, Some(format), &e.message);
