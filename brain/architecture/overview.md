@@ -24,6 +24,7 @@ running.
 | `oauth.rs` | The HTTP client and token requests both providers share |
 | `dirs.rs` | The directories interactive commands used, for the scheduled refresh to check |
 | `runs.rs` | The last scheduled refresh's record, for the page |
+| `attribution.rs` | The ledger lines that say which login each CLI spent, for TokenGauge |
 | `gauge.rs` | Reads TokenGauge's usage snapshot for the page |
 | `fsx.rs` | Atomic 0600 writes, compare-and-swap JSON edits, the file lock, timestamps |
 | `auto.rs` | Auto mode's decision: schedules, tiers, reservations, the score |

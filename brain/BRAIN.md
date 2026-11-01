@@ -31,6 +31,7 @@ shared.
 | Why did auto mode switch, or not? | [features/auto-mode.md](features/auto-mode.md) |
 | Why was a login pinged, or not? | [features/keep-warm.md](features/keep-warm.md) |
 | Who switched this CLI, when, and why? | [features/log.md](features/log.md) |
+| Which login spent a request, for TokenGauge? | [features/switching.md](features/switching.md#whose-spend-it-is) |
 | How do I start a CLI on a login without switching, or pin one per repo? | [features/run.md](features/run.md) |
 | What does TokenGauge rely on? | [architecture/store.md](architecture/store.md) |
 | How is Claude Code different from Codex? | [architecture/providers.md](architecture/providers.md) |

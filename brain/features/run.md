@@ -61,6 +61,20 @@ with the CLI's code (128 and the signal for a crash). A `remuda run` that
 `exec`s the CLI as it is, from inside a session, gives it back its own
 directory.
 
+## Whose spend it is
+
+The CLI's transcripts land in the shared directory with everyone else's, at
+the same times, so the live login is the wrong one to attribute them to.
+While the CLI runs, `attribution::RunWatch` reads which session it is in from
+Claude Code's `sessions/<pid>.json` (a second after it starts, then every 5
+seconds, and once more when it exits), checks the file's `procStart` against
+the CLI's start time so a recycled pid is not taken for it, and writes a `run`
+line for each new session id to `<store>/.attribution.jsonl`. A `/clear`
+moves the CLI to a new id, which gets its own line. TokenGauge gives a
+session a `run` line names to that run's login, whatever the CLI's files held
+meanwhile ([switching.md](switching.md#whose-spend-it-is)). Codex needs none:
+its transcripts carry the account they ran on (`creator_account_id`).
+
 ## When it ends
 
 Every remuda running a CLI in the session holds its shared lock, and notes
@@ -174,3 +188,4 @@ beyond the allowlist, which it reads only when a `.remuda.toml` is found.
 - [src/ops.rs](../../src/ops.rs) `sync_live`, `REFRESH_BEFORE_MS`
 - [src/auto.rs](../../src/auto.rs) `running`
 - [src/auto.rs](../../src/auto.rs) `Context::in_use`
+- [src/attribution.rs](../../src/attribution.rs) `RunWatch`, [src/claude.rs](../../src/claude.rs) `session_of`
