@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
-use selvedge::plans::{Seat, team_seat, tier_multiplier};
+use selvedge::plans::{Seat, max_plan, team_seat, tier_multiplier};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
@@ -443,9 +443,13 @@ impl Provider for Claude {
         let Some(sub) = get("subscriptionType") else {
             return "-".to_owned();
         };
-        match get("rateLimitTier").and_then(tier_multiplier) {
-            Some(n) if !is_team(sub) => format!("{sub} {n}x"),
-            _ => sub.to_owned(),
+        let tier = get("rateLimitTier").filter(|_| !is_team(sub));
+        if let Some(plan) = tier.and_then(max_plan) {
+            return plan.name().to_lowercase();
+        }
+        match tier.and_then(tier_multiplier) {
+            Some(n) => format!("{sub} {n}x"),
+            None => sub.to_owned(),
         }
     }
 

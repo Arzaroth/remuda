@@ -1833,10 +1833,7 @@ mod tests {
         assert_eq!(state["live"][0]["state"], "unstored");
         assert_eq!(state["live"][0]["email"], "u-new@example.com");
         let (_, r) = call(&app, "POST", "/api/import", json!({"name": "new"}));
-        assert_eq!(
-            r["message"],
-            "stored claude/new (u-new@example.com, max 5x)"
-        );
+        assert_eq!(r["message"], "stored claude/new (u-new@example.com, max)");
     }
 
     fn stored_in_org(e: &Env, name: &str) {
