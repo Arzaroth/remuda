@@ -42,7 +42,7 @@ Add a login.
   the pick is kept per CLI in the browser's `localStorage`. Each tile links
   to its CLI's page.
 - A CLI with no stored login whose own login is signed out gets no tile,
-  link or page (`usage.ts` `inUse`); Add a login still offers it. One signed
+  link or page (`windows.ts` `inUse`); Add a login still offers it. One signed
   into a login remuda has not stored stays, to import it. With no CLI in use
   at all, every one is shown.
 - **A CLI's page** opens with its logo, the login in use and how many are
@@ -59,7 +59,7 @@ Add a login.
   "In use" on the one in use, which also has a green edge), and a chevron
   that opens its details in place: a row per usage window (its title,
   percentage and reset over a bar, then "Figures from N minutes ago" when
-  TokenGauge carried them from an earlier ask than its snapshot, `usage.ts`
+  TokenGauge carried them from an earlier ask than its snapshot, `windows.ts`
   `carriedSince`), a Claude login's banked usage-limit resets and when they
   expire, with a Reset limits button that asks for a second click before it
   spends one and then holds until TokenGauge reports the new count, how long

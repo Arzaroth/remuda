@@ -2,7 +2,7 @@ import { createEffect, Match, Show, Switch } from 'solid-js';
 import { act, store } from './state';
 import { go, href, route } from './route';
 import type { Provider } from './types';
-import { autoOn, inUse } from './usage';
+import { autoOn, inUse } from './windows';
 import { AddAccount } from './components/AddAccount';
 import { closeSheet, openSheet, sheet } from './sheet';
 import { AutoMode, dirty } from './components/AutoMode';

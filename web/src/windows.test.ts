@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Combined, Credential, Live, State } from './types';
-import { autoOn, carriedSince, dropping, dropsLive, inUse, overwrite, planFor, resetsAt, shownFor, taken } from './usage';
+import { autoOn, carriedSince, dropping, dropsLive, inUse, overwrite, planFor, resetsAt, shownFor, taken } from './windows';
 
 const cred = (name: string, active = false): Credential => ({
   id: `claude/${name}`,

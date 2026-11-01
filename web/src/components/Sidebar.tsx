@@ -2,7 +2,7 @@ import { For, Show } from 'solid-js';
 import { act, store } from '../state';
 import { href, route, type Route } from '../route';
 import type { Provider } from '../types';
-import { autoOn, inUse } from '../usage';
+import { autoOn, inUse } from '../windows';
 import { usedTone } from '../format';
 import { healthTone } from './Health';
 import { Meter } from './Meter';
