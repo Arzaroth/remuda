@@ -147,6 +147,10 @@ impl Provider for Codex {
             .unwrap_or_default()
     }
 
+    fn live_file(&self) -> Option<PathBuf> {
+        Some(self.auth_path.clone())
+    }
+
     fn access_token<'a>(&self, creds: &'a Value) -> Option<&'a str> {
         token(creds, "access_token")
     }

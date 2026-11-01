@@ -88,6 +88,9 @@ lock while it runs, and `<store>/.pins.json` the `.remuda.toml` files allowed;
 see [../features/run.md](../features/run.md).
 `<store>/.log.jsonl` (and `.log.1.jsonl` once it rotates) is the log, appended
 to under `<store>/.log.lock`; see [../features/log.md](../features/log.md).
+`<store>/.attribution.jsonl` is the ledger of which login each CLI spent and
+when, appended to under `<store>/.attribution.lock`; its format belongs to
+`selvedge::usage::ledger`, and TokenGauge reads it (below).
 
 `Store::lock` takes an exclusive `flock` on `<store>/.lock`, released when the
 process exits, so a crashed command never leaves the store locked.
@@ -100,6 +103,11 @@ sidecar keys `accountId`, `email`, `label`, `credsDigest` (how it is
 computed included), and `oauthAccount`'s `seatTier` and
 `userRateLimitTier`. A change to any of those is a
 change to that ADR as well.
+
+TokenGauge also reads `.attribution.jsonl` to give each billed request a
+login. Its lines are declared in selvedge (`usage::ledger`), not here, so
+the writer and the reader share one definition: `live` lines (from when a CLI's
+files hold a login) and `run` lines (a Claude session a `remuda run` spent).
 
 ## Sources
 

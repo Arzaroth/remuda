@@ -118,6 +118,10 @@ impl Provider for Cursor {
             .unwrap_or_default()
     }
 
+    fn live_file(&self) -> Option<PathBuf> {
+        Some(self.auth_path.clone())
+    }
+
     fn access_token<'a>(&self, creds: &'a Value) -> Option<&'a str> {
         text(creds, "accessToken")
     }

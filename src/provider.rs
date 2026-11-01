@@ -3,6 +3,10 @@ use serde_json::Value;
 
 use crate::store::Entry;
 
+/// The session id a CLI process (`pid`, started at `start` clock ticks) is
+/// running, read from the CLI's directory.
+pub type SessionOf = fn(&std::path::Path, u32, u64) -> Option<String>;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Identity {
     pub account_id: String,
@@ -122,6 +126,11 @@ pub trait Provider: Send + Sync {
     /// `outgoing` (store shape); otherwise fails with [`crate::fsx::Changed`]
     /// and writes nothing. `None` replaces whatever is there.
     fn install(&self, entry: &Entry, outgoing: Option<&Value>) -> Result<()>;
+    /// The file the live login is read from. Its mtime dates a login that
+    /// changed outside remuda, which remuda only notices later.
+    fn live_file(&self) -> Option<std::path::PathBuf> {
+        None
+    }
     /// A lock other tools that rewrite the live login take too, held across a
     /// switch's last read and its write.
     fn lock_live(&self) -> Result<Option<std::fs::File>> {
@@ -134,6 +143,12 @@ pub trait Provider: Send + Sync {
     }
     /// Returns the account id the token endpoint answered for, when it says.
     fn refresh(&self, creds: &mut Value) -> Result<Option<String>>;
+    /// How to read which session a CLI process started at a start time is
+    /// running, from the directory a `remuda run` gave it, for a CLI whose
+    /// transcripts name a session but no login.
+    fn run_sessions(&self) -> Option<SessionOf> {
+        None
+    }
     /// None for a CLI `remuda run` cannot point at a directory of its own.
     fn run_spec(&self) -> Option<RunSpec> {
         None

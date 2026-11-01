@@ -1,4 +1,5 @@
 mod apikey;
+mod attribution;
 mod auto;
 mod browser;
 mod claude;
@@ -320,6 +321,7 @@ fn shielded(
     cmd: &mut std::process::Command,
     lease: &mut session::Lease,
     place: &std::path::Path,
+    watch: &dyn Fn(u32) -> Option<attribution::RunWatch>,
 ) -> io::Result<std::process::ExitStatus> {
     use std::os::unix::process::CommandExt;
     // SAFETY: the previous handlers are put back once the CLI exits.
@@ -340,6 +342,7 @@ fn shielded(
     }
     let status = cmd.spawn().and_then(|mut child| {
         lease.started(place, child.id());
+        let _watch = watch(child.id());
         child.wait()
     });
     for (s, h) in SHIELDED.iter().zip(before) {
@@ -489,6 +492,7 @@ fn run(store: &Store, providers: &[&dyn Provider], target: &str, args: &[OsStrin
     let outside = std::env::var_os(&outer)
         .or_else(|| std::env::var_os(spec.var))
         .unwrap_or_default();
+    let entry = store.get(p.id(), &name).ok().flatten();
     let status = shielded(
         std::process::Command::new(spec.command)
             .args(args)
@@ -496,6 +500,7 @@ fn run(store: &Store, providers: &[&dyn Provider], target: &str, args: &[OsStrin
             .env(&outer, outside),
         &mut lease,
         &session::place(store, p.id(), &name),
+        &|pid| attribution::RunWatch::start(store, p, entry.as_ref()?, &home, pid),
     );
     match store.lock() {
         Ok(_lock) => session::leave(store, p, lease),
