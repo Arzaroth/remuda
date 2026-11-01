@@ -66,15 +66,17 @@ directory.
 The CLI's transcripts land in the shared directory with everyone else's, at
 the same times, so the live login is the wrong one to attribute them to.
 While the CLI runs, `attribution::RunWatch` reads which session it is in from
-Claude Code's `sessions/<pid>.json` (a second after it starts, then every 5
-seconds, and once more when it exits), checks the file's `procStart` against
-the CLI's start time so a recycled pid is not taken for it, and writes a `run`
-line for each new session id to `<store>/.attribution.jsonl`. A `/clear`
-moves the CLI to a new id, which gets its own line. TokenGauge gives a
-session a `run` line names to that run's login, whatever the CLI's files held
-meanwhile ([switching.md](switching.md#whose-spend-it-is)). Codex needs none:
-its transcripts carry the seat they ran on (`creator_user_id` and
-`creator_account_id` in `session_meta`, joined by `__` the stored `accountId`).
+Claude Code's `sessions/<pid>.json`, a quarter of a second after it starts and
+then every second, since Claude Code removes the file when it exits. It checks
+the file's `procStart` against the CLI's start time so a recycled pid is not
+taken for it, and writes a `run` line for each new session id to
+`<store>/.attribution.jsonl`. A `/clear` moves the CLI to a new id, which gets
+its own line. When a `run` line names a session, TokenGauge puts that
+session's spend on the run's login, whatever the CLI's files held meanwhile
+([switching.md](switching.md#whose-spend-it-is)). Codex needs none: its
+transcripts carry the seat they ran on, as `creator_user_id` and
+`creator_account_id` in `session_meta`, which joined by `__` make the stored
+`accountId`.
 
 ## When it ends
 
