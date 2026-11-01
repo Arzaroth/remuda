@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-11-01
+
 ### Changed
 
 - Claude's Max 5x and Max 20x are listed as `max` and `ultra`, their new
