@@ -2,14 +2,15 @@
 
 `remuda serve` opens a page with a sidebar of places and one page for each,
 picked by the address's hash (`#/`, `#/cli/<id>`, `#/cli/<id>/automation`,
-`#/proxy`, `#/status`; `route.ts`), so the browser's back button and a
+`#/usage`, `#/usage/requests`, `#/proxy`, `#/status`; `route.ts`), so the
+browser's back button and a
 bookmark work. The token, which also travels in the hash, is read only from
 a hash that does not start with `#/`.
 
 The sidebar lists, top to bottom: Overview; one link per CLI in use, with
 its icon, the login in use (or "signed out"), the share used of its tile's
-window over a small meter, and an "auto" tag when auto mode is on; the API
-proxy, with an on/off dot; Status, with a dot that turns amber when the
+window over a small meter, and an "auto" tag when auto mode is on; Usage; the
+API proxy, with an on/off dot; Status, with a dot that turns amber when the
 refresh timer is off or its last run is over 75 minutes old and red when it
 reported problems (`healthTone`). Its foot holds Add a login, Refresh tokens,
 the theme switch and the look switch. On a narrow screen it becomes a bar
@@ -147,6 +148,36 @@ from the CLI, or enabling the refresh timer shows within a minute.
 guarded, the API it calls and the service are in
 [architecture/web.md](../architecture/web.md).
 
+## Usage
+
+Two tabs, each filtered by a range (7, 30 or 90 days, 12 months), a CLI and a
+login, and the second by a proxy key.
+
+- **Spend** is TokenGauge's `tokengauge --usage-json` (TokenGauge 0.52 or
+  later), which `serve` runs on demand (`usage::spend`: found on `PATH` or in
+  `~/.local/bin`, 10 seconds at most, one answer kept a minute): the total
+  and each CLI's share with its sessions, daily cost per CLI, the token
+  totals, cost and tokens by rate, spend per login and per model, and a
+  model's own view. remuda prices nothing: every dollar is TokenGauge's, at
+  each month's prices, so the page and the panel agree. A row TokenGauge has
+  no price for counts its tokens and shows as unpriced, never as free (a total
+  with some marks `+`). Logins come back as account digests and are named from
+  the store's sidecars; spend from before remuda recorded who spent it is
+  unattributed ([switching.md](switching.md#whose-spend-it-is)). Without a
+  TokenGauge that exports, the tab says why.
+- **Proxy requests** is the proxy's request log
+  ([proxy.md](proxy.md#the-request-log)), summed by the server per hour,
+  provider, model, login, key and outcome, and again by the page for each
+  view: requests, output tokens per second while answers were written,
+  tokens, the success rate (canceled requests aside), cache hit, latency,
+  requests per minute, tokens per day per model, outcomes and the models that
+  failed most, requests per day by outcome, and the split by login.
+
+Charts are inline SVG (`Charts.tsx`) with a hover readout; models and token
+rates take a fixed categorical palette (`--c1` to `--c7`, validated for both
+themes), CLIs their brand colour, outcomes the status colours, each with a
+legend or labelled values.
+
 ## Auto mode
 
 While auto mode is on, the Automation tab opens with what its last round decided
@@ -182,3 +213,6 @@ refused.
 - [src/serve.rs](../../src/serve.rs)
 - [src/gauge.rs](../../src/gauge.rs)
 - [src/runs.rs](../../src/runs.rs)
+- [src/usage.rs](../../src/usage.rs), [web/src/components/Usage.tsx](../../web/src/components/Usage.tsx),
+  [Charts.tsx](../../web/src/components/Charts.tsx), [spend.ts](../../web/src/spend.ts),
+  [requests.ts](../../web/src/requests.ts)
