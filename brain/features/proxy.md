@@ -73,6 +73,22 @@ beside `.last-refresh.json`, outside any provider's directory. Switching the
 proxy on or off, or changing its port, takes effect at once, from the page or
 from a hand edit of the file; a port that cannot be bound is said on the card.
 
+## The request log
+
+Every request the proxy forwards becomes a line in
+`<store>/.proxy-requests.jsonl` (rotated to `.proxy-requests.1.jsonl` at 8
+MiB): when it came, the provider and model, the stored login it spent, the id
+of the key it came with (never the key), the client's format and whether it
+streamed, how it ended (`ok`, `failed`, `canceled` when the client went away
+first), the status the client got, the time to the upstream's headers and in
+all, the tokens, and the message and request ids the client was given. A
+request refused before a provider is picked (no key, no such model, a bad
+body) is not one of anyone's and is not logged, and neither is a
+`count_tokens`. The format is `selvedge::usage::requests`, which TokenGauge
+reads too: Claude Code going through the proxy writes the same ids in its
+transcript, so TokenGauge counts the request once and takes its login from
+here.
+
 ## Sources
 
 - [src/proxy/](../../src/proxy/)
