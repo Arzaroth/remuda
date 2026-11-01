@@ -4,9 +4,11 @@
 //! for it.
 
 use std::path::Path;
-use std::time::UNIX_EPOCH;
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, UNIX_EPOCH};
 
-use selvedge::usage::ledger::{self, Entry as Line};
+use selvedge::usage::ledger::{self, Entry as Line, Ledger};
 
 use crate::fsx::now_ms;
 use crate::ops::LiveState;
@@ -78,6 +80,80 @@ pub fn noticed(store: &Store, p: &dyn Provider, live: &LiveState) {
 fn modified_ms(path: &Path) -> Option<i64> {
     let at = std::fs::metadata(path).ok()?.modified().ok()?;
     i64::try_from(at.duration_since(UNIX_EPOCH).ok()?.as_millis()).ok()
+}
+
+/// Writes down each session a `remuda run` CLI moves through, so its usage is
+/// the run's login whatever the CLI's own files hold meanwhile. Stops, with a
+/// last look, when dropped.
+pub struct RunWatch {
+    stop: Option<mpsc::Sender<()>>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+const FIRST_LOOK: Duration = Duration::from_secs(1);
+const RUN_POLL: Duration = Duration::from_secs(5);
+
+impl RunWatch {
+    pub fn start(
+        store: &Store,
+        p: &dyn Provider,
+        entry: &Entry,
+        home: &Path,
+        pid: u32,
+    ) -> Option<RunWatch> {
+        let session_of = p.run_sessions()?;
+        let start = selvedge::proc::start_time(pid)?;
+        let root = store.root().to_owned();
+        let home = home.to_owned();
+        let provider = p.id().to_owned();
+        let account_id = entry.meta.account_id.clone();
+        let name = entry.name.clone();
+        let (stop, stopped) = mpsc::channel();
+        let thread = thread::spawn(move || {
+            let mut last: Option<String> = None;
+            let mut wait = FIRST_LOOK;
+            loop {
+                let finished = !matches!(
+                    stopped.recv_timeout(std::mem::replace(&mut wait, RUN_POLL)),
+                    Err(mpsc::RecvTimeoutError::Timeout)
+                );
+                if let Some(session) = session_of(&home, pid, start)
+                    && last.as_ref() != Some(&session)
+                {
+                    let claimed = Ledger::load(&root).is_ok_and(|l| l.claims(&provider, &session));
+                    if !claimed {
+                        let _ = ledger::append(
+                            &root,
+                            &Line::Run {
+                                at: now_ms(),
+                                provider: provider.clone(),
+                                session: session.clone(),
+                                account_id: account_id.clone(),
+                                name: Some(name.clone()),
+                            },
+                        );
+                    }
+                    last = Some(session);
+                }
+                if finished {
+                    break;
+                }
+            }
+        });
+        Some(RunWatch {
+            stop: Some(stop),
+            thread: Some(thread),
+        })
+    }
+}
+
+impl Drop for RunWatch {
+    fn drop(&mut self) {
+        drop(self.stop.take());
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
 }
 
 #[cfg(test)]
