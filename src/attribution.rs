@@ -284,4 +284,87 @@ mod tests {
 
         assert_eq!(account(&lines(&e)[1]), None);
     }
+
+    fn running(home: &std::path::Path, session: &str, start: u64) {
+        let dir = home.join("sessions");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(format!("{}.json", std::process::id())),
+            serde_json::json!({
+                "pid": std::process::id(),
+                "sessionId": session,
+                "procStart": start.to_string(),
+                "kind": "interactive",
+            })
+            .to_string(),
+        )
+        .unwrap();
+    }
+
+    fn watch(e: &Env, home: &std::path::Path) -> Option<super::RunWatch> {
+        let entry = e.store.get("claude", "work").unwrap().unwrap();
+        super::RunWatch::start(&e.store, &e.claude, &entry, home, std::process::id())
+    }
+
+    #[test]
+    fn a_run_writes_down_its_session_and_the_next_one_after_a_clear() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let home = e.tmp.path().join("run-home");
+        let me = selvedge::proc::start_time(std::process::id()).unwrap();
+        running(&home, "s-1", me);
+
+        let watching = watch(&e, &home).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        running(&home, "s-2", me);
+        drop(watching);
+
+        let sessions: Vec<(String, String)> = lines(&e)
+            .into_iter()
+            .filter_map(|line| match line {
+                Line::Run {
+                    session,
+                    account_id,
+                    ..
+                } => Some((session, account_id)),
+                Line::Live { .. } => None,
+            })
+            .collect();
+        assert_eq!(
+            sessions,
+            vec![
+                ("s-1".to_string(), "u-work".to_string()),
+                ("s-2".to_string(), "u-work".to_string())
+            ]
+        );
+        let ledger = Ledger::load(e.store.root()).unwrap();
+        assert_eq!(ledger.login_at("claude", Some("s-2"), 0), Some("u-work"));
+    }
+
+    #[test]
+    fn a_session_file_left_by_another_process_with_this_pid_is_not_this_run_s() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let home = e.tmp.path().join("run-home");
+        let me = selvedge::proc::start_time(std::process::id()).unwrap();
+        running(&home, "s-old", me + 1);
+
+        drop(watch(&e, &home).unwrap());
+
+        assert!(lines(&e).is_empty());
+    }
+
+    #[test]
+    fn a_session_already_claimed_is_not_written_twice() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let home = e.tmp.path().join("run-home");
+        let me = selvedge::proc::start_time(std::process::id()).unwrap();
+        running(&home, "s-1", me);
+
+        drop(watch(&e, &home).unwrap());
+        drop(watch(&e, &home).unwrap());
+
+        assert_eq!(lines(&e).len(), 1);
+    }
 }
