@@ -143,7 +143,7 @@ main { min-width: 0; padding: 34px clamp(20px, 4vw, 52px) 120px; }
 .nav-dot.warn { background: var(--warn); }
 .nav-dot.bad { background: var(--bad); }
 .side-foot { margin-top: auto; display: grid; gap: 8px; }
-.side-foot .theme { justify-self: start; }
+.switches { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 :root[data-skin='instrument'] .side .theme { background: #142333; }
 :root[data-skin='instrument'] .side .theme button { color: #8193a8; }
 :root[data-skin='instrument'] .side .theme button[aria-pressed='true'] { background: #1f3550; color: #e6edf5; }
@@ -198,6 +198,8 @@ main { min-width: 0; padding: 34px clamp(20px, 4vw, 52px) 120px; }
 .weighting button:hover, .theme button:hover, .seg button:hover, .days button:hover { color: var(--ink); }
 .weighting button[aria-pressed='true'], .theme button[aria-pressed='true'], .seg button[aria-pressed='true'], .days button[aria-pressed='true'] {
   background: var(--panel); color: var(--ink); font-weight: 650; box-shadow: var(--lift); }
+.theme button.icon { display: inline-grid; place-items: center; width: 28px; padding: 0; }
+.theme button.icon svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .others { margin-top: 16px; padding-top: 12px; border-top: 1px dashed var(--rule-strong); display: grid; gap: 8px; }
 .other { display: flex; align-items: baseline; gap: 8px; color: var(--muted); }
 .other b { color: var(--ink); font-weight: 700; }
@@ -473,7 +475,7 @@ input:hover, select:hover { border-color: var(--muted); }
   .shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   .side { position: sticky; top: 0; z-index: 5; height: 60px; flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 4px; padding: 0 10px;
     overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--side-rule); }
-  .side-brand span, .nav-sub, .nav-cli .meter, .auto-tag, .side-foot .btn:not(.go), .side-foot .theme { display: none; }
+  .side-brand span, .nav-sub, .nav-cli .meter, .auto-tag, .side-foot .btn:not(.go), .side-foot .switches { display: none; }
   .nav-group { display: flex; gap: 2px; }
   .nav-group + .nav-group { padding: 0 0 0 4px; border-top: 0; border-left: 1px solid var(--side-rule); }
   .nav-item, .nav-cli { padding: 8px 10px; white-space: nowrap; align-items: center; }

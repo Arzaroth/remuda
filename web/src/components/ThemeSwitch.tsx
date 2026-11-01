@@ -20,9 +20,9 @@ export function ThemeSwitch() {
       value={theme()}
       onPick={pick}
       options={[
-        ['auto', 'Auto'],
-        ['light', 'Light'],
-        ['dark', 'Dark'],
+        ['auto', 'Auto', 'auto'],
+        ['light', 'Light', 'light'],
+        ['dark', 'Dark', 'dark'],
       ]}
     />
   );
