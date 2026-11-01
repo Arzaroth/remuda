@@ -4,6 +4,13 @@
 
 ### Added
 
+- The page has a Usage tab. **Spend** shows what each CLI, model and login
+  spent over 7 days to 12 months, priced by TokenGauge (0.52 or later):
+  daily cost, the token totals, cost and tokens by rate, and each model on
+  its own. **Proxy requests** shows what the API proxy answered: requests,
+  success rate, output speed, latency, cache hits, tokens per model per day,
+  and the split by login and key.
+
 - remuda writes down which login each CLI spends and from when, in
   `.attribution.jsonl` in its store: on every switch, when it finds a login
   changed outside it, and for each session a `remuda run` Claude Code goes
