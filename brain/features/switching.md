@@ -36,6 +36,21 @@ Running Claude Code sessions watch their credential files and adopt the new
 login. A running Codex session may keep the login it started with until it is
 restarted.
 
+## Whose spend it is
+
+A transcript names no login, so remuda writes down which one each CLI's files
+hold, in `<store>/.attribution.jsonl`, and TokenGauge gives each billed
+request the login live when it was billed. A switch writes a `live` line for
+the login it installed. `sync_live` writes one when the files hold another
+login than the ledger's last line says, which means something outside remuda
+changed them (`claude /login`); that line is dated by the credential file's
+mtime, the latest the change can have happened, since remuda only notices on
+its next read. A live login remuda does not store, or none, is a line with no
+account: spend from then on is nobody's it knows. Nothing is written before a
+CLI's first login, so spend from before the ledger stays unattributed. Each
+switch drops lines older than 400 days, keeping the one still in force. Code:
+`attribution::{switched, noticed}`.
+
 ## Matching the live login
 
 `sync_live` finds the credential the live login belongs to by refresh token,
@@ -53,4 +68,5 @@ login also carries its `oauthAccount` block and email back (Claude). See
 - [src/claude.rs](../../src/claude.rs) `install`
 - [src/codex.rs](../../src/codex.rs) `install`
 - [src/runs.rs](../../src/runs.rs) `switched`
+- [src/attribution.rs](../../src/attribution.rs) `switched`, `noticed`
 - [src/logbook.rs](../../src/logbook.rs), each switch logged with who made it ([log.md](log.md))

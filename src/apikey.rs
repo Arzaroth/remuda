@@ -174,6 +174,13 @@ impl Provider for ApiKey {
             .unwrap_or_default()
     }
 
+    fn live_file(&self) -> Option<PathBuf> {
+        if self.env_key().is_some() {
+            return None;
+        }
+        self.file.as_ref().map(|f| f.path.clone())
+    }
+
     fn access_token<'a>(&self, creds: &'a Value) -> Option<&'a str> {
         key_of(creds)
     }
@@ -365,6 +372,16 @@ mod tests {
         store
             .save(&Entry::new(p.id(), name, login.creds, login.identity, 1))
             .unwrap();
+    }
+
+    #[test]
+    fn a_key_from_the_environment_is_not_dated_by_the_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert_eq!(
+            opencode(tmp.path(), None).live_file(),
+            Some(tmp.path().join("auth.json"))
+        );
+        assert_eq!(opencode(tmp.path(), Some("sk-env")).live_file(), None);
     }
 
     #[test]

@@ -375,6 +375,22 @@ fn identity_of(oauth_account: Value) -> Result<Identity> {
     })
 }
 
+/// Claude Code names the session each of its processes runs in
+/// `sessions/<pid>.json`, with the process's start time, and removes it on
+/// exit. A `/clear` moves the process to a new session id.
+fn session_of(home: &std::path::Path, pid: u32, start: u64) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Running {
+        session_id: String,
+        proc_start: String,
+    }
+    let path = home.join("sessions").join(format!("{pid}.json"));
+    let running: Running = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    (running.proc_start == start.to_string() && !running.session_id.is_empty())
+        .then_some(running.session_id)
+}
+
 /// Claude Code: the login is `claudeAiOauth` in `.credentials.json`, and the
 /// account its UI shows is `oauthAccount` in `.claude.json`.
 pub struct Claude {
@@ -419,6 +435,14 @@ impl Provider for Claude {
             .parent()
             .map(PathBuf::from)
             .unwrap_or_default()
+    }
+
+    fn run_sessions(&self) -> Option<crate::provider::SessionOf> {
+        Some(session_of)
+    }
+
+    fn live_file(&self) -> Option<PathBuf> {
+        Some(self.creds_path.clone())
     }
 
     fn access_token<'a>(&self, creds: &'a Value) -> Option<&'a str> {

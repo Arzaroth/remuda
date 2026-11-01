@@ -19,6 +19,8 @@ from a CLI. `creds` is always the store's shape for that CLI.
 | `env_line` | The `export` line `remuda env` prints, for a key read from the environment |
 | `begin_login` | Start a sign-in, returning a `PendingLogin` |
 | `redeem_reset` | Spend one of the login's banked usage-limit resets (Claude only; the others refuse) |
+| `live_file` | The file the live login is read from, whose mtime dates a login changed outside remuda in the attribution ledger; none for a key the environment supplies ([../features/switching.md](../features/switching.md#whose-spend-it-is)) |
+| `run_sessions` | How to read the session id a running CLI process is in, for the ledger's `run` lines: Claude Code's `sessions/<pid>.json` (`claude::session_of`); none for the others |
 | `run_spec`, `relocated` | What `remuda run` starts, the variable that moves the CLI's files and the files a session copies; the provider reading a session's directory ([../features/run.md](../features/run.md)). Claude Code and Codex only |
 | `formats`, `upstream`, `shape` | What the proxy may send a login's inference endpoint, where, and with what ([proxy.md](proxy.md)); none by default, as for Cursor |
 

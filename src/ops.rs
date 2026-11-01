@@ -135,6 +135,12 @@ pub const REFRESH_BEFORE_MS: i64 = 5 * 60 * 1000;
 /// Finishes the provider's `remuda run` sessions whose processes all ended
 /// first, so nothing acts on a login whose newest tokens are still in one.
 pub fn sync_live(store: &Store, p: &dyn Provider) -> Result<LiveState> {
+    let live = sync_live_files(store, p)?;
+    crate::attribution::noticed(store, p, &live);
+    Ok(live)
+}
+
+fn sync_live_files(store: &Store, p: &dyn Provider) -> Result<LiveState> {
     crate::session::recover(store, &[p]);
     let live = p.live()?;
     heal(store, p, live.as_ref())?;
@@ -386,6 +392,7 @@ pub fn switch_when(
         }
     }
     crate::runs::switched(store, p.id(), now_ms());
+    crate::attribution::switched(store, p, &target);
     let message = format!(
         "switched {} to {} ({})",
         p.name(),
