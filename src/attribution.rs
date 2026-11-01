@@ -15,8 +15,12 @@ use crate::ops::LiveState;
 use crate::provider::Provider;
 use crate::store::{Entry, Store};
 
+/// TokenGauge keeps 400 days of spend, and nothing older needs a login.
+const KEEP_MS: i64 = 400 * 86_400_000;
+
 /// A switch put `entry` in the CLI's files just now.
 pub fn switched(store: &Store, p: &dyn Provider, entry: &Entry) {
+    let _ = ledger::prune(store.root(), now_ms() - KEEP_MS);
     let _ = ledger::append(
         store.root(),
         &Line::Live {
