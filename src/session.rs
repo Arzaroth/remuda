@@ -8,6 +8,8 @@ use std::time::{Duration, UNIX_EPOCH};
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
+use selvedge::proc::start_time;
+
 use crate::fsx::{create_private_dir, now_ms, read_json, update_json, write_json};
 use crate::logbook::{self, Event, Kind};
 use crate::ops;
@@ -60,18 +62,6 @@ impl Drop for Lease {
             let _ = fs::remove_file(cli);
         }
     }
-}
-
-/// When a process started, in clock ticks since boot, which tells it apart
-/// from a later one given the same pid.
-fn start_time(pid: u32) -> Option<u64> {
-    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    stat.rsplit_once(')')?
-        .1
-        .split_whitespace()
-        .nth(19)?
-        .parse()
-        .ok()
 }
 
 fn clis_alive(place: &Path) -> bool {
