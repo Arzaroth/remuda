@@ -96,6 +96,7 @@ mod tests {
         providers: Vec<Box<dyn Provider>>,
         settings: settings::Settings,
         spent: Mutex<Vec<(String, Option<String>)>>,
+        recorded: Mutex<Vec<selvedge::usage::requests::Request>>,
     }
 
     impl Backend for Test {
@@ -110,6 +111,12 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push((provider.to_owned(), refused.map(str::to_owned)));
+        }
+        fn whose(&self, p: &dyn Provider, creds: &Value) -> Option<(String, String)> {
+            (p.access_token(creds) == Some("a-live")).then(|| ("u-1".into(), "work".into()))
+        }
+        fn record(&self, request: selvedge::usage::requests::Request) {
+            self.recorded.lock().unwrap().push(request);
         }
     }
 
@@ -137,6 +144,7 @@ mod tests {
             providers,
             settings: on(),
             spent: Mutex::default(),
+            recorded: Mutex::default(),
         });
         let control = Control::default();
         let weak: Weak<dyn Backend> = Arc::downgrade(&backend) as Weak<dyn Backend>;
@@ -611,6 +619,7 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
             providers: Vec::new(),
             settings: on(),
             spent: Mutex::default(),
+            recorded: Mutex::default(),
         });
         let off = settings::Settings {
             enabled: false,
@@ -912,5 +921,144 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
         let body: Value = serde_json::from_str(&body).unwrap();
         assert_eq!(body["content"], json!([{"type": "text", "text": "ok"}]));
         assert_eq!(body["stop_reason"], "end_turn");
+    }
+
+    fn recorded(p: &Running) -> Vec<selvedge::usage::requests::Request> {
+        p.backend.recorded.lock().unwrap().clone()
+    }
+
+    #[test]
+    fn a_passed_through_answer_is_logged_with_the_ids_the_client_got() {
+        use selvedge::usage::requests::Outcome;
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/v1/messages")
+            .match_query(Matcher::Any)
+            .with_header("request-id", "req_1")
+            .with_body(
+                r#"{"id":"msg_1","usage":{"input_tokens":4,"cache_read_input_tokens":10,"cache_creation_input_tokens":2,"output_tokens":7}}"#,
+            )
+            .create();
+        let (_tmp, claude) = signed_in_claude(&server, HOUR);
+        let p = run(vec![Box::new(claude)]);
+        let (status, _, _) = post(
+            p.port,
+            "/v1/messages",
+            &format!("x-api-key: {KEY}\r\n"),
+            &json!({"model": "claude-x", "messages": []}),
+        );
+        assert_eq!(status, 200);
+
+        let logged = recorded(&p);
+        assert_eq!(logged.len(), 1);
+        let r = &logged[0];
+        assert_eq!(
+            (r.provider.as_str(), r.model.as_str()),
+            ("claude", "claude-x")
+        );
+        assert_eq!(r.account_id.as_deref(), Some("u-1"));
+        assert_eq!(r.name.as_deref(), Some("work"));
+        assert_eq!(r.key.as_deref(), Some("k"));
+        assert_eq!((r.format.as_str(), r.stream), ("messages", false));
+        assert_eq!((r.outcome, r.status), (Outcome::Ok, 200));
+        assert_eq!(r.dedup_parts(), Some(("msg_1", "req_1")));
+        assert_eq!(
+            (
+                r.tokens.input,
+                r.tokens.cache_read,
+                r.tokens.cache_write_5m,
+                r.tokens.output
+            ),
+            (4, 10, 2, 7)
+        );
+        assert!(r.first_byte_ms.is_some_and(|ms| ms <= r.latency_ms));
+    }
+
+    #[test]
+    fn a_passed_through_stream_reaches_the_client_whole_and_is_read_for_usage() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/v1/messages")
+            .match_query(Matcher::Any)
+            .with_header("content-type", "text/event-stream")
+            .with_body(CLAUDE_HELLO)
+            .create();
+        let (_tmp, claude) = signed_in_claude(&server, HOUR);
+        let p = run(vec![Box::new(claude)]);
+        let (status, _, body) = post(
+            p.port,
+            "/v1/messages",
+            &format!("x-api-key: {KEY}\r\n"),
+            &json!({"model": "claude-x", "messages": [], "stream": true}),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(body, CLAUDE_HELLO);
+
+        let r = &recorded(&p)[0];
+        assert!(r.stream);
+        assert_eq!(r.message_id.as_deref(), Some("m1"));
+        assert_eq!((r.tokens.input, r.tokens.output), (3, 1));
+    }
+
+    #[test]
+    fn a_translated_answer_is_logged_with_the_id_the_encoder_wrote() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/v1/messages")
+            .match_query(Matcher::Any)
+            .with_header("content-type", "text/event-stream")
+            .with_body(CLAUDE_HELLO)
+            .create();
+        let (_tmp, claude) = signed_in_claude(&server, HOUR);
+        let p = run(vec![Box::new(claude)]);
+        let (_, _, body) = post(
+            p.port,
+            "/v1/chat/completions",
+            &format!("Authorization: Bearer {KEY}\r\n"),
+            &json!({"model": "claude-x", "messages": [{"role": "user", "content": "hi"}]}),
+        );
+        let body: Value = serde_json::from_str(&body).unwrap();
+
+        let r = &recorded(&p)[0];
+        assert_eq!(r.format, "chat");
+        assert_eq!(r.message_id.as_deref(), body["id"].as_str());
+        assert_eq!(r.message_id.as_deref(), Some("chatcmpl-m1"));
+    }
+
+    #[test]
+    fn failures_are_logged_and_a_token_count_is_not() {
+        use selvedge::usage::requests::Outcome;
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/v1/messages")
+            .match_query(Matcher::Any)
+            .with_status(429)
+            .with_body(r#"{"type":"error"}"#)
+            .create();
+        server
+            .mock("POST", "/v1/messages/count_tokens")
+            .match_query(Matcher::Any)
+            .with_body(r#"{"input_tokens":3}"#)
+            .create();
+        let (tmp, claude) = signed_in_claude(&server, HOUR);
+        let p = run(vec![Box::new(claude)]);
+        let auth = format!("x-api-key: {KEY}\r\n");
+        let ask = json!({"model": "claude-x", "messages": []});
+        post(p.port, "/v1/messages", &auth, &ask);
+        post(p.port, "/v1/messages/count_tokens", &auth, &ask);
+        std::fs::remove_file(tmp.path().join(".credentials.json")).unwrap();
+        post(p.port, "/v1/messages", &auth, &ask);
+
+        let logged = recorded(&p);
+        assert_eq!(logged.len(), 2);
+        assert_eq!(
+            (logged[0].outcome, logged[0].status),
+            (Outcome::Failed, 429)
+        );
+        assert_eq!(
+            (logged[1].outcome, logged[1].status),
+            (Outcome::Failed, 503)
+        );
+        assert_eq!(logged[1].account_id, None);
     }
 }
