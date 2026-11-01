@@ -25,8 +25,8 @@ Add a login.
   failed, or a CLI's live login that is not stored) is left out.
   Weighted, the default wherever TokenGauge reports a `planWeight`, adds
   the logins up as TokenGauge's combined header does: each counts by its
-  plan's nominal multiplier, in units of the largest plan, so a Max 20x at
-  31% and a Pro at 100% make "36% of 105%"; each segment is as wide as its
+  plan's nominal multiplier, in units of the largest plan, so an Ultra at
+  31% and a Pro at 100% make "41% of 110%"; each segment is as wide as its
   weight, but never under a tenth of the bar, so a few small plans beside a
   large one stay readable (TokenGauge's split bar does the same), and a
   login with no known weight is left out and named. A window no login with
