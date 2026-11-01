@@ -1762,6 +1762,124 @@ mod tests {
         assert!(state["auto"].get("nope").is_none());
     }
 
+    fn app_with_tokengauge(e: &Env, script: &str) -> App {
+        use std::os::unix::fs::PermissionsExt;
+        let program = e.tmp.path().join("tokengauge");
+        std::fs::write(&program, format!("#!/bin/sh\n{script}\n")).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut places = places(e);
+        places.tokengauge = Some(program);
+        App::new(
+            Store::open(e.store.root()),
+            places,
+            vec![Box::new(Claude::at(e.tmp.path(), Api::local(&OFFLINE)))],
+            TOKEN.into(),
+            PORT,
+            Box::new(|_| false),
+        )
+    }
+
+    #[test]
+    fn the_spend_is_tokengauge_s_export_with_the_logins_it_names() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let export = json!({
+            "schemaVersion": 1, "generatedAt": 5, "currency": "USD",
+            "rows": [{"date": "2026-10-30", "provider": "claude", "model": "claude-x",
+                      "login": selvedge::usage::account_digest("u-work"), "source": "cli",
+                      "tokens": {"o": 3}, "usd": {"input": 0.0, "output": 1.5, "cacheWrite": 0.0, "cacheRead": 0.0}}],
+        });
+        let app = app_with_tokengauge(
+            &e,
+            &format!("[ \"$1 $2\" = \"--usage-json --since\" ] || exit 2\necho '{export}'"),
+        );
+
+        let (status, body) = call(&app, "POST", "/api/usage/spend", json!({"days": 7}));
+
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(body["export"]["rows"][0]["usd"]["output"], 1.5);
+        let digest = selvedge::usage::account_digest("u-work");
+        assert_eq!(body["logins"][&digest]["name"], "work");
+        assert_eq!(body["logins"][&digest]["provider"], "claude");
+    }
+
+    #[test]
+    fn without_a_tokengauge_that_exports_the_spend_says_why() {
+        let e = env(&OFFLINE);
+        let (_, body) = call(&app(&e, &OFFLINE), "POST", "/api/usage/spend", json!({}));
+        assert!(
+            body["unavailable"]
+                .as_str()
+                .unwrap()
+                .contains("not installed"),
+            "{body}"
+        );
+
+        let old = app_with_tokengauge(
+            &e,
+            "echo 'error: unexpected argument --usage-json' >&2; exit 2",
+        );
+        let (_, body) = call(&old, "POST", "/api/usage/spend", json!({"days": 30}));
+        assert!(
+            body["unavailable"].as_str().unwrap().contains("0.52.0"),
+            "{body}"
+        );
+    }
+
+    #[test]
+    fn the_proxy_s_requests_are_summed_per_hour_model_login_key_and_outcome() {
+        use selvedge::usage::requests::{Outcome, Request, append};
+        let e = env(&OFFLINE);
+        std::fs::create_dir_all(e.store.root()).unwrap();
+        let app = app(&e, &OFFLINE);
+        let at = crate::fsx::now_ms();
+        let request = |outcome, output, key: &str| Request {
+            at,
+            provider: "claude".into(),
+            model: "claude-x".into(),
+            account_id: Some("u-work".into()),
+            name: Some("work".into()),
+            key: Some(key.into()),
+            format: "messages".into(),
+            stream: true,
+            outcome,
+            status: 200,
+            first_byte_ms: Some(100),
+            latency_ms: 1100,
+            tokens: selvedge::usage::TokenCounts {
+                output,
+                ..Default::default()
+            },
+            reasoning: 0,
+            message_id: None,
+            request_id: None,
+            speed: None,
+        };
+        append(e.store.root(), &request(Outcome::Ok, 10, "k1")).unwrap();
+        append(e.store.root(), &request(Outcome::Ok, 30, "k1")).unwrap();
+        append(e.store.root(), &request(Outcome::Failed, 0, "k1")).unwrap();
+        let old = Request {
+            at: at - 40 * 86_400_000,
+            ..request(Outcome::Ok, 5, "k1")
+        };
+        append(e.store.root(), &old).unwrap();
+
+        let (status, body) = call(&app, "POST", "/api/usage/requests", json!({"days": 30}));
+
+        assert_eq!(status, 200, "{body}");
+        let rows = body["rows"].as_array().unwrap();
+        assert_eq!(rows.len(), 2, "{body}");
+        let ok = rows.iter().find(|r| r["outcome"] == "ok").unwrap();
+        assert_eq!(ok["requests"], 2);
+        assert_eq!(ok["tokens"]["o"], 40);
+        assert_eq!(ok["generatingMs"], 2000);
+        assert_eq!(ok["generated"], 40);
+        assert_eq!(ok["login"], "work");
+        assert_eq!(ok["key"], "k1");
+        let failed = rows.iter().find(|r| r["outcome"] == "failed").unwrap();
+        assert_eq!(failed["requests"], 1);
+    }
+
     #[test]
     fn the_proxy_names_the_stored_login_it_spends_and_logs_each_request() {
         let e = env(&OFFLINE);
