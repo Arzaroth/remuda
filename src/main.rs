@@ -30,6 +30,7 @@ mod session;
 mod shown;
 mod store;
 mod units;
+mod usage;
 mod warm;
 
 use std::ffi::OsString;

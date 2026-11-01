@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
 use jiff::Zoned;
@@ -41,6 +41,8 @@ pub struct Places {
     pub units: Vec<PathBuf>,
     pub snapshot: PathBuf,
     pub config: PathBuf,
+    /// TokenGauge's binary, which the Usage tab asks for the spend.
+    pub tokengauge: Option<PathBuf>,
 }
 
 impl Places {
@@ -49,9 +51,14 @@ impl Places {
             units: paths::systemd_user_units(),
             snapshot: paths::tokengauge_snapshot(),
             config: paths::config_file(),
+            tokengauge: selvedge::proc::installed("tokengauge"),
         }
     }
 }
+
+/// TokenGauge's export is a process and a read of a year of records, so one
+/// answer serves every view of the tab for a minute.
+const SPEND_FRESH: Duration = Duration::from_secs(60);
 
 pub struct App {
     store: Store,
@@ -68,6 +75,7 @@ pub struct App {
     /// Provider to why the proxy last turned its active login down, until
     /// it next spends it.
     refused: Mutex<BTreeMap<String, String>>,
+    spent: Mutex<BTreeMap<u32, (Instant, Value)>>,
     me: OnceLock<Weak<App>>,
 }
 
@@ -163,6 +171,7 @@ impl App {
             warm: Mutex::new(BTreeMap::new()),
             proxy: proxy::Control::default(),
             refused: Mutex::new(BTreeMap::new()),
+            spent: Mutex::new(BTreeMap::new()),
             me: OnceLock::new(),
         }
     }
@@ -585,6 +594,28 @@ impl App {
         }
     }
 
+    /// The spend over the last `days`, as TokenGauge exports it, with the
+    /// stored logins its digests name; or why there is none.
+    fn spend(&self, days: u32) -> Value {
+        if let Ok(spent) = self.spent.lock()
+            && let Some((at, answer)) = spent.get(&days)
+            && at.elapsed() < SPEND_FRESH
+        {
+            return answer.clone();
+        }
+        let answer = match crate::usage::spend(self.places.tokengauge.as_deref(), days) {
+            Ok(export) => json!({
+                "export": export,
+                "logins": crate::usage::logins(&self.store, &self.providers()),
+            }),
+            Err(e) => json!({ "unavailable": format!("{e:#}") }),
+        };
+        if let Ok(mut spent) = self.spent.lock() {
+            spent.insert(days, (Instant::now(), answer.clone()));
+        }
+        answer
+    }
+
     fn logins(&self, provider: &str) -> Option<Vec<String>> {
         let p = self.providers().into_iter().find(|p| p.id() == provider)?;
         let entries = self.store.list(p.id()).ok()?;
@@ -613,6 +644,24 @@ impl App {
         let spec = || text("name").context("name is required");
         let providers = self.providers();
         let store = &self.store;
+        if let Some(view) = path.strip_prefix("/api/usage/") {
+            let days = body
+                .get("days")
+                .and_then(Value::as_u64)
+                .map_or(30, |d| d.clamp(1, 400)) as u32;
+            return match view {
+                "spend" => Ok(self.spend(days)),
+                "requests" => {
+                    let keys = self
+                        .proxy_file()
+                        .read()
+                        .map(|s| s.keys.into_iter().map(|k| (k.id, k.name)).collect())
+                        .unwrap_or_default();
+                    crate::usage::proxied(store, &keys, days)
+                }
+                _ => bail!("no such usage view"),
+            };
+        }
         // A sign-in waits on the browser, so only it runs without the lock.
         let _lock = if path.starts_with("/api/login") {
             None
@@ -915,6 +964,7 @@ mod tests {
             units: vec![e.tmp.path().join("units"), e.tmp.path().join("global")],
             snapshot: e.tmp.path().join("tokengauge-usage.json"),
             config: e.tmp.path().join("config.toml"),
+            tokengauge: None,
         }
     }
 
