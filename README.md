@@ -14,8 +14,8 @@ changes.
 ```
 $ remuda ls
 Claude Code
-* work (Job)  me@work.example  max 20x   token in 5h, refresh in 29d
-  perso       me@example.com   max 5x    token in 2h, refresh in 12d
+* work (Job)  me@work.example  ultra     token in 5h, refresh in 29d
+  perso       me@example.com   max       token in 2h, refresh in 12d
 
 Codex
 * main        me@example.com   plus      token in 9d
