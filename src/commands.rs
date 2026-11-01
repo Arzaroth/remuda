@@ -811,7 +811,7 @@ mod tests {
         let lines: Vec<&str> = out.lines().collect();
         assert_eq!(lines[0], "Claude Code", "{out}");
         assert!(lines[1].starts_with("  perso"), "{out}");
-        assert!(lines[1].contains("max 5x"), "{out}");
+        assert!(lines[1].contains("max "), "{out}");
         assert!(lines[1].contains("token in 2h, refresh in 20d"), "{out}");
         assert!(lines[2].starts_with("* work"), "{out}");
         assert!(lines[2].contains("token expired 1h ago"), "{out}");
@@ -871,7 +871,7 @@ mod tests {
         assert_eq!(row["provider"], "claude");
         assert_eq!(row["name"], "work");
         assert_eq!(row["accountId"], "u-work");
-        assert_eq!(row["plan"], "max 5x");
+        assert_eq!(row["plan"], "max");
         assert_eq!(row["active"], true);
         assert!(row["expiresAt"].is_i64());
         assert_eq!(v["live"][0]["state"], "stored");
@@ -892,10 +892,7 @@ mod tests {
             &mut out,
         )
         .unwrap();
-        assert_eq!(
-            text(out),
-            "stored claude/work (u-work@example.com, max 5x)\n"
-        );
+        assert_eq!(text(out), "stored claude/work (u-work@example.com, max)\n");
         assert_eq!(e.stored_refresh_token("work").as_deref(), Some("r1"));
         let stored = e.store.get("claude", "work").unwrap().unwrap();
         assert!(stored.creds.get("mcpOAuth").is_none());
@@ -1549,13 +1546,20 @@ mod tests {
 
         let mut max = e.store.get("claude", "work").unwrap().unwrap();
         max.creds[OAUTH_KEY]["rateLimitTier"] = json!("default_claude_max_20x");
-        assert_eq!(plan_shown(&e.claude, &max), "max 20x");
+        assert_eq!(plan_shown(&e.claude, &max), "ultra");
         max.creds[OAUTH_KEY]["subscriptionType"] = json!("max");
         max.meta.oauth_account = Some(json!({"seatTier": "team_premium"}));
         assert_eq!(
             plan_shown(&e.claude, &max),
-            "max 20x",
+            "ultra",
             "a login that left Team keeps no seat its profile last reported"
+        );
+        max.creds[OAUTH_KEY]["subscriptionType"] = json!("enterprise");
+        max.creds[OAUTH_KEY]["rateLimitTier"] = json!("default_claude_max_5x");
+        assert_eq!(
+            plan_shown(&e.claude, &max),
+            "enterprise 5x",
+            "only a Max subscription is renamed after its tier"
         );
 
         let mut team = max;

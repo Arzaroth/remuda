@@ -9,9 +9,26 @@ const PATHS: Record<IconName, () => JSX.Element> = {
   copy: () => [<rect x="9" y="9" width="11" height="11" rx="2" />, <path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" />],
   signin: () => [<path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4" />, <path d="M10 8l4 4-4 4" />, <path d="M14 12H4" />],
   show: () => [<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />, <circle cx="12" cy="12" r="3" />],
+  auto: () => [<circle cx="12" cy="12" r="8" />, <path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" />],
+  light: () => [
+    <circle cx="12" cy="12" r="4" />,
+    <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />,
+  ],
+  dark: () => <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" />,
 };
 
-export type IconName = 'refresh' | 'label' | 'rename' | 'remove' | 'save' | 'copy' | 'show' | 'signin';
+export type IconName =
+  | 'refresh'
+  | 'label'
+  | 'rename'
+  | 'remove'
+  | 'save'
+  | 'copy'
+  | 'show'
+  | 'signin'
+  | 'auto'
+  | 'light'
+  | 'dark';
 
 export function Icon(props: { name: IconName }) {
   return (

@@ -134,7 +134,7 @@ fn two_accounts_imported_switched_and_removed() {
     home.sign_in("a-work", "r-work", "u-work");
     assert_eq!(
         home.ok(&["import", "work"]),
-        "stored claude/work (u-work@example.com, max 20x)\n"
+        "stored claude/work (u-work@example.com, ultra)\n"
     );
     assert!(store.join("work.json").exists());
     assert!(
@@ -151,7 +151,7 @@ fn two_accounts_imported_switched_and_removed() {
     let ls = home.ok(&["ls"]);
     assert!(ls.contains("* perso"), "{ls}");
     assert!(ls.contains("  work "), "{ls}");
-    assert!(ls.contains("max 20x"), "{ls}");
+    assert!(ls.contains("ultra"), "{ls}");
 
     assert_eq!(
         home.ok(&["use", "work"]),
