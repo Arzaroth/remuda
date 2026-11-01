@@ -375,6 +375,16 @@ mod tests {
     }
 
     #[test]
+    fn a_key_from_the_environment_is_not_dated_by_the_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert_eq!(
+            opencode(tmp.path(), None).live_file(),
+            Some(tmp.path().join("auth.json"))
+        );
+        assert_eq!(opencode(tmp.path(), Some("sk-env")).live_file(), None);
+    }
+
+    #[test]
     fn a_key_is_filed_under_a_digest_of_itself() {
         let a = identity_of("sk-aaaa1234");
         assert_eq!(a, identity_of(" sk-aaaa1234\n"));
