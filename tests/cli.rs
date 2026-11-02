@@ -501,6 +501,31 @@ fn completions_cover_every_command() {
 }
 
 #[test]
+fn plain_remuda_shows_the_logins_and_which_one_is_in_use() {
+    let home = Home::new();
+    assert_eq!(
+        home.ok(&[]),
+        "no logins yet: `remuda login <cli>` signs one in, `remuda import <name>` keeps the one a CLI uses\n"
+    );
+
+    home.sign_in("a-work", "r-work", "u-work");
+    home.ok(&["import", "work"]);
+    home.sign_in("a-perso", "r-perso", "u-perso");
+    home.ok(&["import", "perso"]);
+
+    let table = home.ok(&[]);
+    let lines: Vec<&str> = table.lines().collect();
+    assert_eq!(lines[0], "cli     login  in use  kept fresh", "{table}");
+    assert!(lines[1].starts_with("claude  perso  ●"), "{table}");
+    assert!(lines[1].ends_with("just now"), "{table}");
+    assert!(lines[2].starts_with("claude  work         "), "{table}");
+    assert!(
+        !table.contains('\x1b'),
+        "piped output has no colour: {table:?}"
+    );
+}
+
+#[test]
 fn updating_is_a_flag_as_in_tokengauge_and_tailgauge() {
     let home = Home::new();
     assert!(home.fails(&["update"]).contains("unrecognized subcommand"));
