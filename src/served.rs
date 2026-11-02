@@ -94,6 +94,16 @@ pub fn taken_over(dir: &Path, port: u16) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// The version of the `serve` that runs, if one does, and whether a remuda
+/// unit runs it.
+pub fn serving(dir: &Path) -> Option<(String, bool)> {
+    running(dir)?;
+    let status: Status = fsx::read_record(&status_path(dir))?;
+    let cgroup =
+        std::fs::read_to_string(format!("/proc/{}/cgroup", status.pid)).unwrap_or_default();
+    Some((status.version, crate::dirs::in_remuda_unit(&cgroup)))
+}
+
 /// The running page's URL, after starting the service when nothing serves
 /// and `start` can.
 pub fn find(dir: &Path, start: impl FnOnce() -> bool, wait: Duration) -> Result<String> {

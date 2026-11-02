@@ -153,6 +153,10 @@ pub trait Provider: Send + Sync {
     fn run_spec(&self) -> Option<RunSpec> {
         None
     }
+    /// The release of the CLI its sign-in was read out of.
+    fn mirrors(&self) -> Option<&'static str> {
+        None
+    }
     /// The same provider with the CLI's files under `dir`, as a `remuda run`
     /// session sees them.
     fn relocated(&self, _dir: &std::path::Path) -> Option<Box<dyn Provider>> {

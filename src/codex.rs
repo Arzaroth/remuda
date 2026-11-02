@@ -15,7 +15,7 @@ use crate::pkce;
 use crate::provider::{Format, Identity, Login, PendingLogin, Provider, RunSpec, Upstream};
 use crate::store::Entry;
 
-// Mirrors codex-cli 0.153.4's ChatGPT sign-in.
+const MIRRORS: &str = "0.153.4";
 const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const ISSUER: &str = "https://auth.openai.com";
 const CALLBACK_PORT: u16 = 1455;
@@ -236,6 +236,10 @@ impl Provider for Codex {
     /// TokenGauge refreshes the live auth.json in place under this lock.
     fn lock_live(&self) -> Result<Option<std::fs::File>> {
         lock_file(&self.auth_path.with_file_name("auth.json.lock")).map(Some)
+    }
+
+    fn mirrors(&self) -> Option<&'static str> {
+        Some(MIRRORS)
     }
 
     fn run_spec(&self) -> Option<RunSpec> {
