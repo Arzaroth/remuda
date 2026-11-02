@@ -82,9 +82,12 @@ of the key it came with (never the key), the client's format and whether it
 streamed, how it ended (`ok`, `failed`, `canceled` when the client went away
 first), the status the client got, the time to the upstream's headers and in
 all, the tokens, and the message and request ids the client was given. A
-request refused before a provider is picked (no key, no such model, a bad
-body) is not one of anyone's and is not logged, and neither is a
-`count_tokens`. The format is `selvedge::usage::requests`, which TokenGauge
+request refused before a provider is picked (no key, a body that is not a
+JSON object or names no model, a model no provider serves) is not one of
+anyone's and is not logged, and neither is a `count_tokens`. Once a provider
+is picked, a refusal is logged as `failed` with the status the client got:
+a signed-out or expired login, or a body the provider's endpoint cannot
+take. The format is `selvedge::usage::requests`, which TokenGauge
 reads too: Claude Code going through the proxy writes the same ids in its
 transcript, so TokenGauge counts the request once and takes its login from
 here.
