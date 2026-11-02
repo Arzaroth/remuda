@@ -919,6 +919,41 @@ mod tests {
     }
 
     #[test]
+    fn the_table_marks_a_login_it_cannot_be_sure_of() {
+        let e = env(&OFFLINE);
+        e.stored("perso", "u-perso", HOUR);
+        e.stored("work", "u-work", HOUR);
+        let table = |state: LiveState| {
+            let mut out = Vec::new();
+            status(&e.store, &live(&e, state), false, &mut out).unwrap();
+            text(out)
+        };
+
+        let sure = table(active("work"));
+        assert!(sure.contains("work   ●"), "{sure}");
+        assert!(!sure.contains('?'), "{sure}");
+
+        let unconfirmed = table(LiveState::Stored {
+            name: "work".into(),
+            synced: false,
+        });
+        assert!(unconfirmed.contains("work   ?"), "{unconfirmed}");
+        assert!(unconfirmed.contains("perso         "), "{unconfirmed}");
+        assert!(
+            unconfirmed.ends_with("`remuda ls` says why\n"),
+            "{unconfirmed}"
+        );
+
+        let unreadable = table(LiveState::Unreadable {
+            error: "bad json".into(),
+        });
+        assert!(
+            unreadable.contains("perso  ?") && unreadable.contains("work   ?"),
+            "{unreadable}"
+        );
+    }
+
+    #[test]
     fn the_list_says_when_the_live_login_is_not_accounted_for() {
         let e = env(&OFFLINE);
         let mut out = Vec::new();
