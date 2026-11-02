@@ -282,6 +282,7 @@ pub fn relay(format: Format, upstream: impl Read, out: &mut impl Write, seen: &m
         upstream,
         out,
         gone: false,
+        broken: false,
     };
     {
         let mut reader = std::io::BufReader::new(&mut relay);
@@ -289,6 +290,9 @@ pub fn relay(format: Format, upstream: impl Read, out: &mut impl Write, seen: &m
             seen.see(&e);
         }
         let _ = std::io::copy(&mut reader, &mut std::io::sink());
+    }
+    if relay.broken {
+        seen.failed = true;
     }
     !relay.gone
 }
@@ -299,6 +303,7 @@ struct Relay<'a, R, W> {
     upstream: R,
     out: &'a mut W,
     gone: bool,
+    broken: bool,
 }
 
 impl<R: Read, W: Write> Read for Relay<'_, R, W> {
@@ -306,7 +311,10 @@ impl<R: Read, W: Write> Read for Relay<'_, R, W> {
         if self.gone {
             return Ok(0);
         }
-        let n = self.upstream.read(buf).unwrap_or(0);
+        let n = self.upstream.read(buf).unwrap_or_else(|_| {
+            self.broken = true;
+            0
+        });
         if n > 0
             && self
                 .out
