@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
@@ -56,12 +57,8 @@ pub fn spend(tokengauge: Option<&Path>, days: u32) -> Result<UsageExport> {
         .stderr(Stdio::piped())
         .spawn()
         .with_context(|| format!("could not run {}", program.display()))?;
-    let mut stdout = child.stdout.take().context("no output")?;
-    let reader = std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let _ = (&mut stdout).take(MAX_EXPORT).read_to_end(&mut bytes);
-        bytes
-    });
+    let out = drain(child.stdout.take().context("no output")?, MAX_EXPORT);
+    let err = drain(child.stderr.take().context("no error output")?, 4096);
     let until = Instant::now() + WAIT;
     let status = loop {
         if let Some(status) = child.try_wait()? {
@@ -74,12 +71,14 @@ pub fn spend(tokengauge: Option<&Path>, days: u32) -> Result<UsageExport> {
         }
         std::thread::sleep(Duration::from_millis(50));
     };
-    let bytes = reader.join().unwrap_or_default();
+    // A process TokenGauge left behind can hold the pipes open after it exits,
+    // so reading them to their end shares the same deadline.
+    let left = || until.saturating_duration_since(Instant::now());
+    let late = || anyhow::anyhow!("TokenGauge's output did not end within {}s", WAIT.as_secs());
+    let bytes = out.recv_timeout(left()).map_err(|_| late())?;
     if !status.success() {
-        let mut said = String::new();
-        if let Some(mut err) = child.stderr.take() {
-            let _ = (&mut err).take(4096).read_to_string(&mut said);
-        }
+        let said = err.recv_timeout(left()).unwrap_or_default();
+        let said = String::from_utf8_lossy(&said);
         let said = said.trim();
         bail!(
             "TokenGauge could not export its usage{}",
@@ -91,6 +90,17 @@ pub fn spend(tokengauge: Option<&Path>, days: u32) -> Result<UsageExport> {
         );
     }
     Ok(UsageExport::parse(&bytes)?)
+}
+
+/// Everything `pipe` holds, up to `limit` bytes, once it ends.
+fn drain(pipe: impl Read + Send + 'static, limit: u64) -> mpsc::Receiver<Vec<u8>> {
+    let (send, receive) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = pipe.take(limit).read_to_end(&mut bytes);
+        let _ = send.send(bytes);
+    });
+    receive
 }
 
 #[derive(Debug, Default, Serialize)]
