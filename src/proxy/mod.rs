@@ -1026,6 +1026,30 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
     }
 
     #[test]
+    fn a_translated_answer_that_failed_is_logged_with_the_status_the_client_got() {
+        use selvedge::usage::requests::Outcome;
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/v1/messages")
+            .match_query(Matcher::Any)
+            .with_header("content-type", "text/event-stream")
+            .with_body("event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"busy\"}}\n\n")
+            .create();
+        let (_tmp, claude) = signed_in_claude(&server, HOUR);
+        let p = run(vec![Box::new(claude)]);
+        let (status, _, _) = post(
+            p.port,
+            "/v1/chat/completions",
+            &format!("Authorization: Bearer {KEY}\r\n"),
+            &json!({"model": "claude-x", "messages": [{"role": "user", "content": "hi"}]}),
+        );
+
+        assert_eq!(status, 529);
+        let r = &recorded(&p)[0];
+        assert_eq!((r.outcome, r.status), (Outcome::Failed, 529));
+    }
+
+    #[test]
     fn failures_are_logged_and_a_token_count_is_not() {
         use selvedge::usage::requests::Outcome;
         let mut server = mockito::Server::new();
