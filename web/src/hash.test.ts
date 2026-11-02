@@ -7,6 +7,8 @@ describe('routes', () => {
       { page: 'overview' },
       { page: 'cli', id: 'claude', tab: 'logins' },
       { page: 'cli', id: 'codex', tab: 'automation' },
+      { page: 'usage', tab: 'spend' },
+      { page: 'usage', tab: 'requests' },
       { page: 'proxy' },
       { page: 'log' },
       { page: 'status' },

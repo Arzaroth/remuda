@@ -26,6 +26,7 @@ running.
 | `runs.rs` | The last scheduled refresh's record, for the page |
 | `attribution.rs` | The ledger lines that say which login each CLI spent, for TokenGauge |
 | `gauge.rs` | Reads TokenGauge's usage snapshot for the page |
+| `usage.rs` | The Usage tab's data: TokenGauge's spend export, and the proxy's requests summed |
 | `fsx.rs` | Atomic 0600 writes, compare-and-swap JSON edits, the file lock, timestamps |
 | `auto.rs` | Auto mode's decision: schedules, tiers, reservations, the score |
 | `config.rs` | `config.toml`: read, checked, written around its comments |

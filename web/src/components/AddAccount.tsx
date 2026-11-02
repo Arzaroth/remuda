@@ -3,7 +3,7 @@ import { api } from '../api';
 import { createConfirm } from '../confirm';
 import { load, store, toast } from '../state';
 import { closeSheet } from '../sheet';
-import { overwrite, taken } from '../usage';
+import { overwrite, taken } from '../windows';
 import { ProviderIcon } from './ProviderIcon';
 
 type Login = { id: string; url: string; needsCode: boolean; asksFor: string; opened: boolean; name: string };
