@@ -258,17 +258,25 @@ pub fn status(store: &Store, lives: &[Live], styled: bool, out: &mut dyn Write) 
     let now = now_ms();
     let mut rows: Vec<[String; 4]> = Vec::new();
     let mut used: Vec<bool> = Vec::new();
+    let mut doubt = false;
     for live in lives {
         let p = live.provider;
         for e in store.list(p.id())? {
             let active = live.state.active_name() == Some(e.name.as_str());
+            let unsure = matches!(
+                live.state,
+                LiveState::Unreadable { .. } | LiveState::Stored { synced: false, .. }
+            ) && (active || matches!(live.state, LiveState::Unreadable { .. }));
             let mark = if session::in_use(store, p.id(), &e.name) {
                 "run"
+            } else if unsure {
+                "?"
             } else if active {
                 "●"
             } else {
                 ""
             };
+            doubt |= unsure;
             let fresh = modified_ms(&store.root().join(p.id()).join(format!("{}.json", e.name)))
                 .map(|at| ago(now - at))
                 .unwrap_or_else(|| "-".into());
@@ -279,7 +287,7 @@ pub fn status(store: &Store, lives: &[Live], styled: bool, out: &mut dyn Write) 
     if rows.is_empty() {
         writeln!(
             out,
-            "no logins yet: `remuda login <cli>` signs one in, `remuda import <name>` keeps the one a CLI uses"
+            "no logins yet: `remuda login <name> [-p <cli>]` signs one in, `remuda import <name>` keeps the one a CLI uses"
         )?;
         return Ok(());
     }
@@ -307,6 +315,12 @@ pub fn status(store: &Store, lives: &[Live], styled: bool, out: &mut dyn Write) 
             pad(&row[1], widths[1]),
             pad(&row[2], widths[2]),
             row[3],
+        )?;
+    }
+    if doubt {
+        writeln!(
+            out,
+            "{dim}? the CLI's login could not be read or confirmed: `remuda ls` says why{reset}"
         )?;
     }
     Ok(())
