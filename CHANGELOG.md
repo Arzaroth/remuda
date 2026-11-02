@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Plain `remuda` shows a table of every stored login, the one each CLI uses,
+  and how long ago its credential file was last written (a refresh, the CLI's
+  own rotation, or a label), in colour on a terminal unless
+  `NO_COLOR` is set. It used to print the help, which `remuda --help` still
+  does.
+
 ## [0.29.0] - 2026-11-02
 
 ### Added
