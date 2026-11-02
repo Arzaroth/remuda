@@ -54,6 +54,46 @@ pub fn running(dir: &Path) -> Option<String> {
         .then(|| url.to_owned())
 }
 
+fn handoff_path(dir: &Path) -> PathBuf {
+    dir.join("serve.handoff")
+}
+
+/// How long a restart has to come back for the page to stay signed in.
+const HANDOFF_MS: i64 = 60_000;
+
+#[derive(Serialize, Deserialize)]
+struct Handoff {
+    port: u16,
+    at: i64,
+}
+
+/// Marks the restart about to happen as one the open page asked for. The
+/// marker holds no secret: the next `serve` takes the token from `serve.url`.
+pub fn hand_off(dir: &Path, port: u16) -> Result<()> {
+    let marker = Handoff {
+        port,
+        at: fsx::now_ms(),
+    };
+    fsx::write_json(&handoff_path(dir), &serde_json::to_value(marker)?)
+}
+
+/// The token of the page that handed off to this `serve`, on the same port
+/// and within a minute. The marker is spent either way.
+pub fn taken_over(dir: &Path, port: u16) -> Option<String> {
+    let marker: Option<Handoff> = fsx::read_record(&handoff_path(dir));
+    let _ = std::fs::remove_file(handoff_path(dir));
+    let marker = marker?;
+    let fresh = (0..HANDOFF_MS).contains(&(fsx::now_ms() - marker.at));
+    if marker.port != port || !fresh {
+        return None;
+    }
+    let url = std::fs::read_to_string(url_path(dir)).ok()?;
+    url.trim()
+        .strip_prefix(&format!("http://127.0.0.1:{port}/#"))
+        .filter(|token| !token.is_empty())
+        .map(str::to_owned)
+}
+
 /// The running page's URL, after starting the service when nothing serves
 /// and `start` can.
 pub fn find(dir: &Path, start: impl FnOnce() -> bool, wait: Duration) -> Result<String> {
@@ -147,6 +187,34 @@ mod tests {
         assert_eq!(running(tmp.path()), None);
         record(std::process::id(), me);
         assert!(running(tmp.path()).is_some());
+    }
+
+    #[test]
+    fn a_handed_off_restart_keeps_the_token_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        announce(tmp.path(), 7429, "http://127.0.0.1:7429/#secret").unwrap();
+        assert_eq!(taken_over(tmp.path(), 7429), None);
+
+        hand_off(tmp.path(), 7429).unwrap();
+        let marker = std::fs::read_to_string(handoff_path(tmp.path())).unwrap();
+        assert!(!marker.contains("secret"));
+        assert_eq!(taken_over(tmp.path(), 7429).as_deref(), Some("secret"));
+        assert_eq!(taken_over(tmp.path(), 7429), None);
+
+        hand_off(tmp.path(), 7429).unwrap();
+        assert_eq!(taken_over(tmp.path(), 7430), None);
+        assert!(!handoff_path(tmp.path()).exists());
+
+        let stale = Handoff {
+            port: 7429,
+            at: fsx::now_ms() - HANDOFF_MS,
+        };
+        fsx::write_json(
+            &handoff_path(tmp.path()),
+            &serde_json::to_value(stale).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(taken_over(tmp.path(), 7429), None);
     }
 
     #[test]

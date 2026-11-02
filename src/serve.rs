@@ -43,6 +43,10 @@ pub struct Places {
     pub config: PathBuf,
     /// TokenGauge's binary, which the Usage tab asks for the spend.
     pub tokengauge: Option<PathBuf>,
+    /// GitHub's API, which the Versions view asks for releases.
+    pub github: String,
+    /// Where `serve.url` is, for a restart the page asks for.
+    pub runtime: PathBuf,
 }
 
 impl Places {
@@ -52,6 +56,8 @@ impl Places {
             snapshot: paths::tokengauge_snapshot(),
             config: paths::config_file(),
             tokengauge: selvedge::proc::installed("tokengauge"),
+            github: crate::versions::GITHUB.to_owned(),
+            runtime: paths::runtime_dir(),
         }
     }
 }
@@ -59,6 +65,9 @@ impl Places {
 /// TokenGauge's export is a process and a read of a year of records, so one
 /// answer serves every view of the tab for a minute.
 const SPEND_FRESH: Duration = Duration::from_secs(60);
+
+/// GitHub allows 60 unsigned requests an hour, and a check spends two.
+const VERSIONS_FRESH: Duration = Duration::from_secs(15 * 60);
 
 pub struct App {
     store: Store,
@@ -76,6 +85,7 @@ pub struct App {
     /// it next spends it.
     refused: Mutex<BTreeMap<String, String>>,
     spent: Mutex<BTreeMap<u32, (Instant, Value)>>,
+    versions: Mutex<Option<(Instant, Value)>>,
     me: OnceLock<Weak<App>>,
 }
 
@@ -172,6 +182,7 @@ impl App {
             proxy: proxy::Control::default(),
             refused: Mutex::new(BTreeMap::new()),
             spent: Mutex::new(BTreeMap::new()),
+            versions: Mutex::new(None),
             me: OnceLock::new(),
         }
     }
@@ -616,6 +627,37 @@ impl App {
         answer
     }
 
+    fn versions(&self, force: bool) -> Result<Value> {
+        if !force
+            && let Ok(versions) = self.versions.lock()
+            && let Some((at, answer)) = versions.as_ref()
+            && at.elapsed() < VERSIONS_FRESH
+        {
+            return Ok(answer.clone());
+        }
+        let answer = crate::versions::check(
+            &crate::oauth::client()?,
+            &self.places.github,
+            self.places.tokengauge.as_deref(),
+        );
+        if let Ok(mut versions) = self.versions.lock() {
+            *versions = Some((Instant::now(), answer.clone()));
+        }
+        Ok(answer)
+    }
+
+    fn update(&self, tool: &str) -> Result<Value> {
+        let done = match tool {
+            "remuda" => crate::versions::update_remuda(&self.places.runtime, self.port),
+            "tokengauge" => crate::versions::update_tokengauge(self.places.tokengauge.as_deref()),
+            _ => bail!("no such tool"),
+        };
+        if let Ok(mut versions) = self.versions.lock() {
+            *versions = None;
+        }
+        done
+    }
+
     fn logins(&self, provider: &str) -> Option<Vec<String>> {
         let p = self.providers().into_iter().find(|p| p.id() == provider)?;
         let entries = self.store.list(p.id()).ok()?;
@@ -661,6 +703,14 @@ impl App {
                 }
                 _ => bail!("no such usage view"),
             };
+        }
+        match (method, path) {
+            ("GET", "/api/versions") => return self.versions(false),
+            ("POST", "/api/versions") => return self.versions(flag("force")),
+            ("POST", "/api/versions/update") => {
+                return self.update(text("tool").context("tool is required")?);
+            }
+            _ => {}
         }
         // A sign-in waits on the browser, so only it runs without the lock.
         let _lock = if path.starts_with("/api/login") {
@@ -965,6 +1015,8 @@ mod tests {
             snapshot: e.tmp.path().join("tokengauge-usage.json"),
             config: e.tmp.path().join("config.toml"),
             tokengauge: None,
+            github: "http://127.0.0.1:1".into(),
+            runtime: e.tmp.path().join("run"),
         }
     }
 
@@ -1801,6 +1853,73 @@ mod tests {
         let digest = selvedge::usage::account_digest("u-work");
         assert_eq!(body["logins"][&digest]["name"], "work");
         assert_eq!(body["logins"][&digest]["provider"], "claude");
+    }
+
+    #[test]
+    fn versions_ask_github_once_per_tool_until_forced() {
+        let e = env(&OFFLINE);
+        let mut github = mockito::Server::new();
+        let release = |repo: &str, tag: &str| {
+            json!([{
+                "tag_name": tag,
+                "published_at": "2026-11-02T11:13:16Z",
+                "html_url": format!("https://github.com/{repo}/releases/tag/{tag}"),
+                "body": "### Added\n\n- something",
+            }])
+            .to_string()
+        };
+        let remuda = github
+            .mock("GET", "/repos/Arzaroth/remuda/releases?per_page=30")
+            .with_body(release("Arzaroth/remuda", "v99.0.0"))
+            .expect(2)
+            .create();
+        let tokengauge = github
+            .mock("GET", "/repos/Arzaroth/TokenGauge/releases?per_page=30")
+            .with_status(500)
+            .expect(2)
+            .create();
+        let mut places = places(&e);
+        places.github = github.url();
+        let app = App::new(
+            Store::open(e.store.root()),
+            places,
+            vec![Box::new(Claude::at(e.tmp.path(), Api::local(&OFFLINE)))],
+            TOKEN.into(),
+            PORT,
+            Box::new(|_| false),
+        );
+
+        let (status, body) = call(&app, "GET", "/api/versions", Value::Null);
+        assert_eq!(status, 200, "{body}");
+        let ours = &body["tools"][0];
+        assert_eq!(ours["current"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(ours["latest"], "99.0.0");
+        assert_eq!(ours["available"], true);
+        assert_eq!(ours["releases"][0]["notes"], "### Added\n\n- something");
+        let theirs = &body["tools"][1];
+        assert_eq!(theirs["held"], "TokenGauge is not installed");
+        assert!(theirs["error"].as_str().unwrap().contains("500"), "{body}");
+
+        call(&app, "GET", "/api/versions", Value::Null);
+        call(&app, "POST", "/api/versions", json!({"force": true}));
+        remuda.assert();
+        tokengauge.assert();
+
+        let (status, body) = call(&app, "POST", "/api/versions/update", json!({"tool": "x"}));
+        assert_eq!(
+            (status, body["error"].as_str()),
+            (400, Some("no such tool"))
+        );
+        let (status, body) = call(
+            &app,
+            "POST",
+            "/api/versions/update",
+            json!({"tool": "tokengauge"}),
+        );
+        assert_eq!(
+            (status, body["error"].as_str()),
+            (400, Some("TokenGauge is not installed"))
+        );
     }
 
     #[test]

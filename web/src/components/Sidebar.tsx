@@ -96,6 +96,12 @@ export function Sidebar(props: { onAdd: () => void }) {
           <span class={`nav-dot ${tone() || 'good'}`} />
           <span class="sr">{{ '': 'all good', warn: 'needs a look', bad: 'has problems' }[tone()]}</span>
         </a>
+        <a class="nav-item" href={href({ page: 'versions' })} aria-current={here({ page: 'versions' }) ? 'page' : undefined}>
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M10 15V5M6 9l4-4 4 4M4 17h12" />
+          </svg>
+          Versions
+        </a>
       </div>
       <div class="side-foot">
         <button class="btn go wide" onClick={() => props.onAdd()}>

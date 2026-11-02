@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- The page has a Versions view: the remuda and TokenGauge installed here
+  beside GitHub's latest release of each, an Update button for either, and
+  the release notes of every version since the one installed. Updating
+  remuda under `remuda-serve.service` restarts the page, which keeps its
+  link working and reloads by itself. A binary a package manager installed
+  is left to it, and the card says so.
+
 ### Fixed
 
 - A usage window whose reset has passed shows 0% on the page, instead of

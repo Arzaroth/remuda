@@ -2,6 +2,7 @@ mod apikey;
 mod attribution;
 mod auto;
 mod browser;
+mod child;
 mod claude;
 mod codex;
 mod commands;
@@ -31,6 +32,7 @@ mod shown;
 mod store;
 mod units;
 mod usage;
+mod versions;
 mod warm;
 
 use std::ffi::OsString;
@@ -605,7 +607,10 @@ fn main() -> Result<()> {
             Box::new(opencode),
         ];
         let (listener, port) = http::bind(port)?;
-        let token = pkce::random()?;
+        let token = match served::taken_over(&paths::runtime_dir(), port) {
+            Some(token) if service => token,
+            _ => pkce::random()?,
+        };
         let url = format!("http://127.0.0.1:{port}/#{token}");
         if let Err(e) = served::announce(&paths::runtime_dir(), port, &url) {
             eprintln!("warning: `remuda open` will not find this page: {e:#}");

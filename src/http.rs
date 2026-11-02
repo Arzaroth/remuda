@@ -345,6 +345,8 @@ mod tests {
                 snapshot: e.tmp.path().join("tokengauge-usage.json"),
                 config: e.tmp.path().join("config.toml"),
                 tokengauge: None,
+                github: "http://127.0.0.1:1".into(),
+                runtime: e.tmp.path().join("run"),
             },
             providers,
             TOKEN.into(),

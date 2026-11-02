@@ -17,6 +17,7 @@ import { SkinSwitch } from './components/SkinSwitch';
 import { ThemeSwitch } from './components/ThemeSwitch';
 import { Toast } from './components/Toast';
 import { Usage } from './components/Usage';
+import { Versions } from './components/Versions';
 
 function AutoBadge(props: { p: Provider }) {
   const on = () => autoOn(store.s!, props.p.id);
@@ -128,6 +129,9 @@ export function App() {
                 </Match>
                 <Match when={route().page === 'log'}>
                   <Log />
+                </Match>
+                <Match when={route().page === 'versions'}>
+                  <Versions />
                 </Match>
                 <Match when={route().page === 'status'}>
                   <div class="page">
