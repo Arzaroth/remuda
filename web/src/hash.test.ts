@@ -12,6 +12,7 @@ describe('routes', () => {
       { page: 'proxy' },
       { page: 'log' },
       { page: 'status' },
+      { page: 'versions' },
     ];
     for (const r of all) expect(parse(href(r))).toEqual(r);
   });
