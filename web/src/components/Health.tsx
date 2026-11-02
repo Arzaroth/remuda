@@ -33,6 +33,7 @@ function Row(props: { v: Vital }) {
   return (
     <div class="vital">
       <span class={`dot ${props.v.level === 'ok' ? 'good' : tone(props.v.level)}`} />
+      <span class="sr">{props.v.level}</span>
       <div class="vital-body">
         <div>
           <b>{props.v.title}</b> <Text text={detail(props.v, now())} />
