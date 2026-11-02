@@ -166,7 +166,7 @@ login, and the second by a proxy key.
   unattributed ([switching.md](switching.md#whose-spend-it-is)). Without a
   TokenGauge that exports, the tab says why.
 - **Proxy requests** is the proxy's request log
-  ([proxy.md](proxy.md#the-request-log)), summed by the server per hour,
+  ([proxy.md](proxy.md#the-request-log)), summed by the server per quarter hour,
   provider, model, login, key and outcome, and again by the page for each
   view: requests, output tokens per second while answers were written,
   tokens, the success rate (canceled requests aside), cache hit, latency,
