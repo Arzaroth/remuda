@@ -235,6 +235,83 @@ pub fn list(store: &Store, lives: &[Live], as_json: bool, out: &mut dyn Write) -
     Ok(())
 }
 
+/// How long ago, at most two units: "2h ago", "3d ago", "just now".
+fn ago(ms: i64) -> String {
+    let secs = ms.max(0) / 1000;
+    match secs {
+        s if s < 60 => "just now".to_owned(),
+        s if s < 3600 => format!("{}m ago", s / 60),
+        s if s < 86_400 => format!("{}h ago", s / 3600),
+        s => format!("{}d ago", s / 86_400),
+    }
+}
+
+fn modified_ms(path: &Path) -> Option<i64> {
+    let at = std::fs::metadata(path).ok()?.modified().ok()?;
+    i64::try_from(at.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis()).ok()
+}
+
+/// Plain `remuda`: every stored login, which one each CLI uses, and when its
+/// tokens were last written, by a refresh or by the CLI's own rotation synced
+/// back. `styled` adds colour for a terminal.
+pub fn status(store: &Store, lives: &[Live], styled: bool, out: &mut dyn Write) -> Result<()> {
+    let now = now_ms();
+    let mut rows: Vec<[String; 4]> = Vec::new();
+    let mut used: Vec<bool> = Vec::new();
+    for live in lives {
+        let p = live.provider;
+        for e in store.list(p.id())? {
+            let active = live.state.active_name() == Some(e.name.as_str());
+            let mark = if session::in_use(store, p.id(), &e.name) {
+                "run"
+            } else if active {
+                "●"
+            } else {
+                ""
+            };
+            let fresh = modified_ms(&store.root().join(p.id()).join(format!("{}.json", e.name)))
+                .map(|at| ago(now - at))
+                .unwrap_or_else(|| "-".into());
+            rows.push([p.id().to_owned(), e.name.clone(), mark.to_owned(), fresh]);
+            used.push(active);
+        }
+    }
+    if rows.is_empty() {
+        writeln!(
+            out,
+            "no logins yet: `remuda login <cli>` signs one in, `remuda import <name>` keeps the one a CLI uses"
+        )?;
+        return Ok(());
+    }
+    let head = ["cli", "login", "in use", "kept fresh"];
+    let mut widths = head.map(|h| h.chars().count());
+    for row in &rows {
+        for (w, cell) in widths.iter_mut().zip(row) {
+            *w = (*w).max(cell.chars().count());
+        }
+    }
+    let pad = |text: &str, w: usize| format!("{text}{}", " ".repeat(w - text.chars().count()));
+    let (dim, green, reset) = if styled {
+        ("\x1b[2m", "\x1b[32m", "\x1b[0m")
+    } else {
+        ("", "", "")
+    };
+    let line: Vec<String> = head.iter().zip(widths).map(|(h, w)| pad(h, w)).collect();
+    writeln!(out, "{dim}{}{reset}", line.join("  ").trim_end())?;
+    for (row, active) in rows.iter().zip(used) {
+        let mark = if active { green } else { "" };
+        writeln!(
+            out,
+            "{}  {}  {mark}{}{reset}  {dim}{}{reset}",
+            pad(&row[0], widths[0]),
+            pad(&row[1], widths[1]),
+            pad(&row[2], widths[2]),
+            row[3],
+        )?;
+    }
+    Ok(())
+}
+
 pub fn import(
     store: &Store,
     p: &dyn Provider,

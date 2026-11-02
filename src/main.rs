@@ -52,11 +52,7 @@ use crate::store::Store;
 
 /// Keep several Claude Code and Codex logins and switch between them.
 #[derive(Parser)]
-#[command(
-    version,
-    args_conflicts_with_subcommands = true,
-    arg_required_else_help = true
-)]
+#[command(version, args_conflicts_with_subcommands = true)]
 struct Cli {
     /// Replace this binary with the latest release.
     #[arg(long, conflicts_with = "check_update")]
@@ -163,6 +159,9 @@ enum Cmd {
     /// arguments reach it untouched.
     #[command(skip)]
     Cli(Vec<OsString>),
+    /// Plain `remuda`: the logins, which one each CLI uses, and how fresh.
+    #[command(skip)]
+    Status,
     /// Show what remuda did: switches and who made them, refreshes, auto
     /// mode, keep-warm, the proxy. PROVIDER, NAME or PROVIDER/NAME narrows it.
     Log {
@@ -216,7 +215,8 @@ impl Cmd {
             | Cmd::Login { .. }
             | Cmd::Open { .. }
             | Cmd::Completions { .. }
-            | Cmd::SyncUnits => None,
+            | Cmd::SyncUnits
+            | Cmd::Status => None,
         }
     }
 }
@@ -523,7 +523,8 @@ fn main() -> Result<()> {
             let cli = Cli::parse();
             match cli.command {
                 Some(command) => command,
-                None => return update(cli.check_update),
+                None if cli.update || cli.check_update => return update(cli.check_update),
+                None => Cmd::Status,
             }
         }
     };
@@ -560,6 +561,10 @@ fn main() -> Result<()> {
             .collect();
         print!("{}", pins::shell_init(shell, &commands)?);
         return Ok(());
+    }
+    if matches!(command, Cmd::Status) && !store.root().exists() {
+        let mut out = io::stdout();
+        return commands::status(&store, &[], false, &mut out);
     }
     let seen = dirs::now(&providers);
     if let Some(doing) = command.needs_store()
@@ -691,6 +696,12 @@ fn main() -> Result<()> {
         Cmd::List { json } => {
             let lives = commands::sync_all(&store, &providers)?;
             commands::list(&store, &lives, json, out)
+        }
+        Cmd::Status => {
+            use std::io::IsTerminal;
+            let styled = io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
+            let lives = commands::sync_all(&store, &providers)?;
+            commands::status(&store, &lives, styled, out)
         }
         Cmd::Import {
             name,
