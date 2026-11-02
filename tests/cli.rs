@@ -479,8 +479,19 @@ fn doctor_checks_the_setup_and_fails_on_what_is_broken() {
     let home = Home::new();
     home.sign_in("a-work", "r-work", "u-work");
     home.ok(&["import", "work"]);
+    let nothing = home.path("empty-bin");
+    std::fs::create_dir_all(&nothing).unwrap();
+    let doctor = |args: &[&str]| {
+        home.command(args)
+            .env("PATH", &nothing)
+            .current_dir(home.path(""))
+            .output()
+            .unwrap()
+    };
 
-    let out = home.ok(&["doctor"]);
+    let out = doctor(&["doctor"]);
+    assert!(out.status.success());
+    let out = String::from_utf8(out.stdout).unwrap();
     assert!(out.contains("info  remuda serve "), "{out}");
     assert!(out.contains("1 stored, all verified"), "{out}");
     assert!(!out.contains("Claude Code version"), "{out}");
@@ -491,7 +502,7 @@ fn doctor_checks_the_setup_and_fails_on_what_is_broken() {
         "[auto.claude]\nenabled = true\nlogins = [\"work\"]\n",
     )
     .unwrap();
-    let out = home.run(&["doctor"]);
+    let out = doctor(&["doctor"]);
     assert!(!out.status.success());
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(
@@ -504,7 +515,7 @@ fn doctor_checks_the_setup_and_fails_on_what_is_broken() {
             .contains("1 vital(s) failing")
     );
 
-    let out = home.run(&["doctor", "--json"]);
+    let out = doctor(&["doctor", "--json"]);
     assert!(!out.status.success());
     let vitals: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(vitals[0]["id"], "serve");
