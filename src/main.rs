@@ -273,9 +273,11 @@ fn sync_units() -> Result<()> {
             eprintln!("warning: run `systemctl --user daemon-reload`");
         }
     }
-    if systemctl(&["is-active", "--quiet", SERVE_UNIT]) && !systemctl(&["restart", SERVE_UNIT]) {
+    if systemctl(&["is-active", "--quiet", units::SERVE]) && !systemctl(&["restart", units::SERVE])
+    {
         eprintln!(
-            "warning: {SERVE_UNIT} still runs the old binary; run `systemctl --user restart {SERVE_UNIT}`"
+            "warning: {serve} still runs the old binary; run `systemctl --user restart {serve}`",
+            serve = units::SERVE
         );
     }
     if !done.failed.is_empty() {
@@ -284,15 +286,13 @@ fn sync_units() -> Result<()> {
     Ok(())
 }
 
-const SERVE_UNIT: &str = "remuda-serve.service";
-
 fn start_service() -> bool {
     let installed = paths::systemd_user_units()
         .iter()
-        .any(|dir| dir.join(SERVE_UNIT).exists());
+        .any(|dir| dir.join(units::SERVE).exists());
     installed
         && std::process::Command::new("systemctl")
-            .args(["--user", "start", SERVE_UNIT])
+            .args(["--user", "start", units::SERVE])
             .stdin(std::process::Stdio::null())
             .status()
             .is_ok_and(|s| s.success())

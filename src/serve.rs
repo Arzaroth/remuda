@@ -22,6 +22,7 @@ use crate::proxy;
 use crate::runs;
 use crate::shown;
 use crate::store::Store;
+use crate::units;
 use crate::warm;
 
 const PAGE: &str = include_str!(concat!(env!("OUT_DIR"), "/serve.html"));
@@ -485,26 +486,8 @@ impl App {
     }
 
     fn health(&self) -> Value {
-        let unit = "remuda-refresh.timer";
-        let dirs = &self.places.units;
-        let found = dirs
-            .iter()
-            .map(|d| d.join(unit))
-            .find(|p| p.symlink_metadata().is_ok());
-        let masked = found
-            .as_ref()
-            .is_some_and(|p| std::fs::canonicalize(p).is_ok_and(|t| t == Path::new("/dev/null")));
-        let wanted = dirs
-            .iter()
-            .any(|d| d.join("timers.target.wants").join(unit).metadata().is_ok());
-        let timer = match (found, masked, wanted) {
-            (_, true, _) => "masked",
-            (Some(_), false, true) => "enabled",
-            (Some(_), false, false) => "disabled",
-            (None, ..) => "absent",
-        };
         json!({
-            "timer": timer,
+            "timer": units::state(&self.places.units, units::TIMER, "timers.target.wants"),
             "lastRefresh": runs::last(&self.store),
             "tokengauge": self.places.snapshot.exists(),
             "switchedAt": runs::switches(&self.store),
