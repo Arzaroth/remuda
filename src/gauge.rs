@@ -6,6 +6,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
+use jiff::Timestamp;
 use serde_json::{Map, Value, json};
 
 const LIMIT: u64 = 4 << 20;
@@ -52,6 +53,12 @@ pub fn nudge(snapshot: &Path) {
 }
 
 pub fn read(snapshot: &Path) -> Option<Value> {
+    read_at(snapshot, Timestamp::now())
+}
+
+/// TokenGauge's figures as of `now`: a window whose reset has passed since
+/// TokenGauge read it is empty again.
+fn read_at(snapshot: &Path, now: Timestamp) -> Option<Value> {
     let data = load(snapshot)?;
     let payloads = data.get("payloads").unwrap_or(&data).as_array()?;
     let mut providers = Map::new();
@@ -59,8 +66,8 @@ pub fn read(snapshot: &Path) -> Option<Value> {
         let Some(id) = p.get("provider").and_then(Value::as_str) else {
             continue;
         };
-        let slot = slot(&mut providers, id, p.get("credential"));
-        if let (Some(slot), Value::Object(fields)) = (slot.as_object_mut(), provider(p)) {
+        let slot = slot(&mut providers, id, p.get("credential"), now);
+        if let (Some(slot), Value::Object(fields)) = (slot.as_object_mut(), provider(p, now)) {
             slot.extend(fields);
         }
     }
@@ -72,7 +79,7 @@ pub fn read(snapshot: &Path) -> Option<Value> {
         ) else {
             continue;
         };
-        slot(&mut providers, id, e.get("credential"))["error"] = message.into();
+        slot(&mut providers, id, e.get("credential"), now)["error"] = message.into();
     }
     Some(json!({
         // A snapshot from before TokenGauge stamped it is as old as the file.
@@ -88,9 +95,10 @@ fn slot<'a>(
     providers: &'a mut Map<String, Value>,
     id: &str,
     credential: Option<&Value>,
+    now: Timestamp,
 ) -> &'a mut Value {
     let entry = providers.entry(id.to_owned()).or_insert_with(|| {
-        let mut entry = provider(&Value::Null);
+        let mut entry = provider(&Value::Null, now);
         entry["accounts"] = json!({});
         entry
     });
@@ -98,7 +106,7 @@ fn slot<'a>(
         Some(name) => {
             let account = &mut entry["accounts"][name];
             if account.is_null() {
-                *account = provider(&Value::Null);
+                *account = provider(&Value::Null, now);
             }
             account
         }
@@ -106,11 +114,11 @@ fn slot<'a>(
     }
 }
 
-fn provider(p: &Value) -> Value {
+fn provider(p: &Value, now: Timestamp) -> Value {
     let usage = p.get("usage").unwrap_or(&Value::Null);
     let fixed = ["primary", "secondary", "tertiary"]
         .into_iter()
-        .filter_map(|k| window(None, usage.get(k)?, false));
+        .filter_map(|k| window(None, usage.get(k)?, false, now));
     let extra = usage
         .get("extraRateWindows")
         .and_then(Value::as_array)
@@ -126,6 +134,7 @@ fn provider(p: &Value) -> Value {
                 w.get("title").and_then(Value::as_str),
                 w.get("window")?,
                 true,
+                now,
             )
         });
     json!({
@@ -160,19 +169,23 @@ fn banked(resets: Option<&Value>) -> Value {
     }
 }
 
-fn window(title: Option<&str>, w: &Value, extra: bool) -> Option<Value> {
+fn window(title: Option<&str>, w: &Value, extra: bool, now: Timestamp) -> Option<Value> {
     let used = w.get("usedPercent")?.as_u64()?;
     let title = match (title, w.get("windowMinutes").and_then(Value::as_u64)) {
         (Some(t), _) => t.to_owned(),
         (None, Some(m)) => span(m),
         (None, None) => "Usage".to_owned(),
     };
+    let resets = w.get("resetsAt").and_then(Value::as_str);
+    let elapsed = resets
+        .and_then(|at| at.parse::<Timestamp>().ok())
+        .is_some_and(|at| at <= now);
     Some(json!({
         "title": title,
         "minutes": w.get("windowMinutes").and_then(Value::as_u64),
         "extra": extra,
-        "usedPercent": used.min(100),
-        "resetsAt": w.get("resetsAt").and_then(Value::as_str),
+        "usedPercent": if elapsed { 0 } else { used.min(100) },
+        "resetsAt": resets.filter(|_| !elapsed),
     }))
 }
 
@@ -295,7 +308,7 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let usage = read(&file).unwrap();
+        let usage = read_at(&file, "2026-09-28T00:00:00Z".parse().unwrap()).unwrap();
         assert_eq!(usage["updatedAt"], 1_790_638_810_718_i64);
         let titles: Vec<_> = usage["providers"]["claude"]["windows"]
             .as_array()
