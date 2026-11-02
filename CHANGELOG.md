@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-11-02
+
 ### Added
 
 - Plain `remuda` shows a table of every stored login, the one each CLI uses,
