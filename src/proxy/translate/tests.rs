@@ -672,3 +672,33 @@ fn an_id_keeps_a_prefix_it_already_has() {
     assert_eq!(encode::id_or("resp_1", "resp_"), "resp_1");
     assert_eq!(encode::id_or("1", "resp_"), "resp_1");
 }
+
+struct BreaksOff(&'static [u8]);
+
+impl Read for BreaksOff {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.0.is_empty() {
+            return Err(std::io::Error::other("connection reset"));
+        }
+        let n = self.0.len().min(buf.len());
+        buf[..n].copy_from_slice(&self.0[..n]);
+        self.0 = &self.0[n..];
+        Ok(n)
+    }
+}
+
+#[test]
+fn a_relayed_stream_the_upstream_broke_off_is_a_failure() {
+    let head = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"usage\":{\"input_tokens\":3}}}\n\n";
+    let mut out = Vec::new();
+    let mut seen = Seen::default();
+    assert!(relay(
+        Format::Messages,
+        BreaksOff(head.as_bytes()),
+        &mut out,
+        &mut seen
+    ));
+    assert_eq!(String::from_utf8(out).unwrap(), head);
+    assert_eq!(seen.id.as_deref(), Some("m1"));
+    assert!(seen.failed);
+}
