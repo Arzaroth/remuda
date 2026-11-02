@@ -505,7 +505,7 @@ fn plain_remuda_shows_the_logins_and_which_one_is_in_use() {
     let home = Home::new();
     assert_eq!(
         home.ok(&[]),
-        "no logins yet: `remuda login <cli>` signs one in, `remuda import <name>` keeps the one a CLI uses\n"
+        "no logins yet: `remuda login <name> [-p <cli>]` signs one in, `remuda import <name>` keeps the one a CLI uses\n"
     );
 
     home.sign_in("a-work", "r-work", "u-work");
