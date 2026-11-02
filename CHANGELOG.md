@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- A usage window whose reset has passed shows 0% on the page, instead of
+  its old percentage and a reset in the past, while TokenGauge has not
+  fetched that login since.
+
 ## [0.30.0] - 2026-11-02
 
 ### Added
