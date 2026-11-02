@@ -10,9 +10,9 @@ a hash that does not start with `#/`.
 The sidebar lists, top to bottom: Overview; one link per CLI in use, with
 its icon, the login in use (or "signed out"), the share used of its tile's
 window over a small meter, and an "auto" tag when auto mode is on; Usage; the
-API proxy, with an on/off dot; Status, with a dot that turns amber when the
-refresh timer is off or its last run is over 75 minutes old and red when it
-reported problems (`healthTone`); Versions. Its foot holds Add a login, Refresh tokens,
+API proxy, with an on/off dot; Status, with a dot that turns amber when a
+vital is a warning and red when one is bad (`healthTone`,
+[doctor.md](doctor.md)); Versions. Its foot holds Add a login, Refresh tokens,
 the theme switch and the look switch. On a narrow screen it becomes a bar
 along the top, with Add a login first; Refresh tokens and the two switches
 move to the foot of the Status page. Each CLI is shown by its own logo, in its own colour, both shared with
@@ -91,10 +91,10 @@ Add a login.
   key masked until shown but always copied whole, Manage keys to make and remove keys (a second
   click removes) and change the port, and the models it routes per CLI with
   the formats its endpoint speaks. The protocol last picked is remembered.
-- **Status**: whether the refresh timer is enabled, when it last ran, how
-  many credentials it refreshed and, behind a toggle, what it skipped or
-  failed on (from `<store>/.last-refresh.json`); whether TokenGauge's
-  snapshot was found and how old it is; and the store's path.
+- **Status**: the vitals `remuda doctor` checks ([doctor.md](doctor.md)),
+  one row each with a dot for its level, its fix and, behind a toggle, its
+  items (what the last refresh skipped or failed on, TokenGauge's errors, the
+  logins to sign in again); and the store's path.
 - **Versions**: a card each for remuda and TokenGauge with the version
   installed (TokenGauge's from `tokengauge --version`) and GitHub's latest
   release, and an Update button, unless a package manager owns the binary

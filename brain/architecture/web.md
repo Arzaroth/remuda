@@ -156,15 +156,17 @@ or why `.proxy.json` could not be read),
 `.proxy.json` sits at the store's root, so `App::fingerprint` follows it
 already.
 
-`health` is `timer`, from systemd's user unit search path in its order
-(`paths::systemd_user_units`: the config directory, `/etc`, the runtime
-directories, the data directory and `$XDG_DATA_DIRS`, `/usr/local/lib`,
-`/usr/lib`): `masked` when the first copy of the unit is a link to
-`/dev/null`, `enabled` when a `timers.target.wants/remuda-refresh.timer` link
-that still resolves exists in any of them, `disabled` when only the unit does,
-else `absent`. An enabled timer that was stopped still reads as enabled, and
-shows as a late last run. Then `lastRefresh` (`runs::last`, or null), `tokengauge` (whether the snapshot exists) and `switchedAt` (provider
-id to the time of its last switch, `runs::switches`).
+`health` is `vitals`, the checks `remuda doctor` makes
+([features/doctor.md](../features/doctor.md)), then `tokengauge` (whether the
+snapshot exists) and `switchedAt` (provider id to the time of its last
+switch, `runs::switches`). A unit's state comes from systemd's user unit
+search path in its order (`paths::systemd_user_units`: the config directory,
+`/etc`, the runtime directories, the data directory and `$XDG_DATA_DIRS`,
+`/usr/local/lib`, `/usr/lib`, `units::state`): `masked` when the first copy of
+the unit is a link to `/dev/null`, `enabled` when a link to it under the
+target's `.wants` directory that still resolves exists in any of them,
+`disabled` when only the unit does, else `absent`. An enabled timer that was
+stopped still reads as enabled, and shows as a late last run.
 
 `usage` is `gauge::read` of TokenGauge's snapshot, or null. The snapshot is
 where TokenGauge puts it: the top-level `cache_file` of its config

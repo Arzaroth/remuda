@@ -10,6 +10,21 @@
   remuda under `remuda-serve.service` restarts the page, which keeps its
   link working and reloads by itself. A binary a package manager installed
   is left to it, and the card says so.
+- `remuda doctor` checks what remuda relies on and says how to fix what is
+  wrong: whether `remuda serve` runs, as the service and at this version,
+  when auto mode, keep-warm or the proxy need it; the refresh timer and its
+  last run; how old TokenGauge's figures are, since auto mode holds on a
+  stale snapshot; logins whose refresh token expired or that are unverified;
+  CLIs on a login remuda has not stored; the installed Claude Code and Codex
+  against the releases remuda's sign-in was read from; and an untrusted
+  `.remuda.toml` here. It exits non-zero when something is broken, and
+  `--json` prints the checks as data.
+
+### Changed
+
+- The page's Status shows the same checks as `remuda doctor`, each with its
+  fix, and its sidebar dot turns amber or red for any of them, not only the
+  refresh timer.
 
 ### Fixed
 

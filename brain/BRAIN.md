@@ -32,6 +32,7 @@ shared.
 | Why was a login pinged, or not? | [features/keep-warm.md](features/keep-warm.md) |
 | Who switched this CLI, when, and why? | [features/log.md](features/log.md) |
 | Which login spent a request, for TokenGauge? | [features/switching.md](features/switching.md#whose-spend-it-is) |
+| Why is the Status dot amber, and what does `remuda doctor` check? | [features/doctor.md](features/doctor.md) |
 | How do I start a CLI on a login without switching, or pin one per repo? | [features/run.md](features/run.md) |
 | What does TokenGauge rely on? | [architecture/store.md](architecture/store.md) |
 | How is Claude Code different from Codex? | [architecture/providers.md](architecture/providers.md) |
@@ -60,5 +61,6 @@ shared.
 | The local page | [features/web-page.md](features/web-page.md) |
 | The proxy | [features/proxy.md](features/proxy.md) |
 | The log | [features/log.md](features/log.md) |
+| The doctor | [features/doctor.md](features/doctor.md) |
 | Running without switching, and pins | [features/run.md](features/run.md) |
 | Completions and self-update | [features/completions-and-update.md](features/completions-and-update.md) |

@@ -229,7 +229,9 @@ and has no such variable.
 
 Client ids, endpoints and scopes are not a public API. They were read out of
 Claude Code 2.1.282 and codex-cli 0.153.4 binaries and are pinned in one place
-per provider, so a CLI release that moves them is one edit.
+per provider, so a CLI release that moves them is one edit. Each provider's
+`MIRRORS` names that release, and `remuda doctor` compares the installed CLI
+with it.
 
 ## The page edits the config the user edits by hand
 
