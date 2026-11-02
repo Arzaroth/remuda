@@ -427,4 +427,44 @@ mod tests {
         std::fs::write(&file, "{ torn").unwrap();
         assert!(read(&file).is_none());
     }
+
+    #[test]
+    fn a_window_whose_reset_has_passed_is_back_at_zero() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("tokengauge-usage.json");
+        std::fs::write(
+            &file,
+            json!({"payloads": [{"provider": "claude", "credential": "work", "stale": true, "usage": {
+                "primary": {"usedPercent": 10, "resetsAt": "2026-10-19T17:59:59.535049+00:00", "windowMinutes": 300},
+                "secondary": {"usedPercent": 9, "resetsAt": "2026-10-24T00:59:59.535070+00:00", "windowMinutes": 10080},
+                "tertiary": {"usedPercent": 40, "resetsAt": "soon", "windowMinutes": 1440},
+                "extraRateWindows": [{"title": "Fable only", "placeholder": false,
+                    "window": {"usedPercent": 7, "resetsAt": "2026-10-20T08:00:00+02:00", "windowMinutes": 10080}}]
+            }}]})
+            .to_string(),
+        )
+        .unwrap();
+        let shown = |now: &str| {
+            let usage = read_at(&file, now.parse().unwrap()).unwrap();
+            usage["providers"]["claude"]["accounts"]["work"]["windows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|w| {
+                    (
+                        w["usedPercent"].as_u64().unwrap(),
+                        w["resetsAt"].is_string(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            shown("2026-10-19T17:00:00Z"),
+            [(10, true), (9, true), (40, true), (7, true)]
+        );
+        assert_eq!(
+            shown("2026-10-20T07:00:00Z"),
+            [(0, false), (9, true), (40, true), (0, false)]
+        );
+    }
 }
