@@ -302,7 +302,7 @@ function Requests(props: { answer: RequestsAnswer; days: number; provider: strin
     const index = new Map(range().map((d, i) => [d, i]));
     const out = new Map<string, number[]>();
     for (const r of rows()) {
-      const i = index.get(dayOf(r.hour));
+      const i = index.get(dayOf(r.at));
       if (i === undefined) continue;
       const k = keyOf(r);
       if (!out.has(k)) out.set(k, new Array(range().length).fill(0));

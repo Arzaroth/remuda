@@ -118,7 +118,7 @@ struct Group {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct Key {
-    hour: i64,
+    at: i64,
     provider: String,
     model: String,
     login: Option<String>,
@@ -126,9 +126,11 @@ struct Key {
     outcome: &'static str,
 }
 
-const HOUR_MS: i64 = 3_600_000;
+/// Every time zone sits a whole number of quarter hours from UTC, so no
+/// bucket this wide crosses a local midnight the page splits days at.
+const BUCKET_MS: i64 = 900_000;
 
-/// The proxy's requests over the last `days`, summed per hour, provider,
+/// The proxy's requests over the last `days`, summed per quarter hour, provider,
 /// model, login, key and outcome: small enough for the page to filter and
 /// sum again however it is asked.
 pub fn proxied(store: &Store, keys: &BTreeMap<String, String>, days: u32) -> Result<Value> {
@@ -143,7 +145,7 @@ pub fn proxied(store: &Store, keys: &BTreeMap<String, String>, days: u32) -> Res
             continue;
         }
         let key = Key {
-            hour: r.at - r.at.rem_euclid(HOUR_MS),
+            at: r.at - r.at.rem_euclid(BUCKET_MS),
             provider: r.provider.clone(),
             model: r.model.clone(),
             login: r.name.clone(),
@@ -171,7 +173,7 @@ pub fn proxied(store: &Store, keys: &BTreeMap<String, String>, days: u32) -> Res
         .into_iter()
         .map(|(k, g)| {
             let mut row = serde_json::to_value(g).unwrap_or_default();
-            row["hour"] = json!(k.hour);
+            row["at"] = json!(k.at);
             row["provider"] = json!(k.provider);
             row["model"] = json!(k.model);
             row["login"] = json!(k.login);

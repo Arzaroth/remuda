@@ -3,7 +3,7 @@ import { iso, split, total, type Split, type Tokens } from './spend';
 export type Outcome = 'ok' | 'failed' | 'canceled';
 
 export type RequestRow = {
-  hour: number;
+  at: number;
   provider: string;
   model: string;
   login: string | null;
@@ -79,4 +79,4 @@ export const tps = (t: Tally) => (t.generatingMs > 0 ? t.generated / (t.generati
 
 export const averageLatency = (t: Tally) => (t.requests > 0 ? t.latencyMs / t.requests : null);
 
-export const dayOf = (hour: number) => iso(new Date(hour));
+export const dayOf = (at: number) => iso(new Date(at));
