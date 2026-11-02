@@ -10,6 +10,7 @@ type Tool = {
   id: string;
   name: string;
   url: string;
+  installed: boolean;
   current: string | null;
   held: string | null;
   latest: string | null;
@@ -46,7 +47,11 @@ function Inline(props: { spans: Span[] }) {
 
 function Card(props: { t: Tool; busy: boolean; onUpdate: () => void }) {
   const state = () =>
-    !props.t.current ? 'Not installed' : props.t.available ? 'Update available' : props.t.latest ? 'Up to date' : 'Not checked';
+    !props.t.installed
+      ? 'Not installed'
+      : !props.t.current
+        ? 'Not answering'
+        : props.t.available ? 'Update available' : props.t.latest ? 'Up to date' : 'Not checked';
   return (
     <section class="u-card v-card">
       <header class="v-head">
@@ -68,12 +73,12 @@ function Card(props: { t: Tool; busy: boolean; onUpdate: () => void }) {
       <Show when={props.t.error}>
         <p class="v-said bad">{props.t.error}</p>
       </Show>
-      <Show when={props.t.current && props.t.held}>
+      <Show when={props.t.installed && props.t.held}>
         <p class="v-said">{props.t.held}</p>
       </Show>
       <div class="v-actions">
         <Show
-          when={props.t.current}
+          when={props.t.installed}
           fallback={
             <a class="btn go" href={props.t.url.replace(/\/releases$/, '')} target="_blank" rel="noopener noreferrer">
               Install {props.t.name}

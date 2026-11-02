@@ -100,7 +100,8 @@ Add a login.
   release, and an Update button, unless a package manager owns the binary
   (selvedge's owner check for remuda, a path under `/usr` outside
   `/usr/local` for TokenGauge), which the card then says instead; a
-  TokenGauge not installed gets a link to its repository. Below, the release
+  TokenGauge not installed gets a link to its repository, and one that does
+  not answer `--version` is shown as not answering, with no Update. Below, the release
   notes of every release newer than the one installed, up to ten, or of the
   latest when none is, for the tool picked: the CHANGELOG section GitHub's
   release carries, its `###` headings as labels, up to the first `##`

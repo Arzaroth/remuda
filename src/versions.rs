@@ -70,6 +70,7 @@ pub struct Tool {
     pub id: &'static str,
     pub name: &'static str,
     pub repo: String,
+    pub installed: bool,
     pub current: Option<String>,
     /// Why the page cannot update it: a package manager owns it, or it is
     /// not installed.
@@ -86,6 +87,7 @@ impl Tool {
             id: "remuda",
             name: "remuda",
             repo: REMUDA.repo(),
+            installed: true,
             current: Some(REMUDA.version.to_owned()),
             held,
         }
@@ -107,6 +109,7 @@ impl Tool {
             id: "tokengauge",
             name: "TokenGauge",
             repo,
+            installed: program.is_some(),
             current,
             held,
         }
@@ -119,6 +122,7 @@ impl Tool {
             "id": self.id,
             "name": self.name,
             "url": format!("https://github.com/{}/releases", self.repo),
+            "installed": self.installed,
             "current": self.current,
             "held": self.held,
             "latest": null,
@@ -270,6 +274,7 @@ mod tests {
             id: "remuda",
             name: "remuda",
             repo: "x/y".into(),
+            installed: current.is_some(),
             current: current.map(str::to_owned),
             held: None,
         }
@@ -369,11 +374,18 @@ mod tests {
         assert_eq!(t.held, None);
 
         let t = Tool::tokengauge(None);
+        assert!(!t.installed);
         assert_eq!(t.current, None);
         assert_eq!(t.held.as_deref(), Some("TokenGauge is not installed"));
 
         let mute = script(tmp.path(), "exit 2");
-        assert!(Tool::tokengauge(Some(&mute)).held.is_some());
+        let t = Tool::tokengauge(Some(&mute));
+        assert!(t.installed);
+        assert_eq!(t.current, None);
+        assert_eq!(
+            t.held.as_deref(),
+            Some("TokenGauge does not answer `--version`")
+        );
     }
 
     #[test]
