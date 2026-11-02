@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { averageLatency, successRate, tally, tallyBy, tps, type RequestRow } from './requests';
 
 const row = (over: Partial<RequestRow>): RequestRow => ({
-  hour: Date.parse('2026-10-30T10:00:00'),
+  at: Date.parse('2026-10-30T10:00:00'),
   provider: 'claude',
   model: 'claude-x',
   login: 'work',
