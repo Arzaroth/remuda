@@ -91,6 +91,9 @@ to under `<store>/.log.lock`; see [../features/log.md](../features/log.md).
 `<store>/.attribution.jsonl` is the ledger of which login each CLI spent and
 when, appended to under `<store>/.attribution.lock`; its format belongs to
 `selvedge::usage::ledger`, and TokenGauge reads it (below).
+`<store>/.proxy-requests.jsonl` (and `.proxy-requests.1.jsonl` once it
+rotates) is the proxy's request log, appended to under
+`<store>/.proxy-requests.lock`; see [../features/proxy.md](../features/proxy.md#the-request-log).
 
 `Store::lock` takes an exclusive `flock` on `<store>/.lock`, released when the
 process exits, so a crashed command never leaves the store locked.
@@ -108,6 +111,7 @@ TokenGauge also reads `.attribution.jsonl` to give each billed request a
 login. Its lines are declared in selvedge (`usage::ledger`), not here, so
 the writer and the reader share one definition: `live` lines (from when a CLI's
 files hold a login) and `run` lines (a Claude session a `remuda run` spent).
+It reads `.proxy-requests.jsonl` the same way (`usage::requests`).
 
 ## Sources
 

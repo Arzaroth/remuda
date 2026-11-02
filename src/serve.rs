@@ -879,6 +879,25 @@ impl proxy::Backend for App {
         };
         logbook::note(&self.store, event.about(provider, None));
     }
+
+    fn whose(&self, p: &dyn Provider, creds: &Value) -> Option<(String, String)> {
+        let refresh = p.refresh_token(creds);
+        let access = p.access_token(creds);
+        self.store
+            .list(p.id())
+            .ok()?
+            .into_iter()
+            .filter(|e| e.verified)
+            .find(|e| {
+                (refresh.is_some() && p.refresh_token(&e.creds) == refresh)
+                    || (access.is_some() && p.access_token(&e.creds) == access)
+            })
+            .map(|e| (e.meta.account_id, e.name))
+    }
+
+    fn record(&self, request: selvedge::usage::requests::Request) {
+        let _ = selvedge::usage::requests::append(self.store.root(), &request);
+    }
 }
 
 #[cfg(test)]
@@ -1691,6 +1710,36 @@ mod tests {
         assert!(claude["error"].is_string(), "{claude}");
         assert!(claude.get("switched").is_none());
         assert!(state["auto"].get("nope").is_none());
+    }
+
+    #[test]
+    fn the_proxy_names_the_stored_login_it_spends_and_logs_each_request() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let app = app(&e, &OFFLINE);
+        let backend: &dyn proxy::Backend = &app;
+        let work = e.store.get("claude", "work").unwrap().unwrap();
+        let claude = Claude::at(e.tmp.path(), Api::local(&OFFLINE));
+
+        assert_eq!(
+            backend.whose(&claude, &work.creds),
+            Some(("u-work".to_owned(), "work".to_owned()))
+        );
+        assert_eq!(
+            backend.whose(&claude, &oauth("a-other", "r-other", HOUR)),
+            None
+        );
+
+        let request: selvedge::usage::requests::Request = serde_json::from_value(json!({
+            "at": 1, "provider": "claude", "model": "claude-x", "format": "messages",
+            "stream": false, "outcome": "ok", "status": 200, "latencyMs": 5,
+        }))
+        .unwrap();
+        backend.record(request.clone());
+        assert_eq!(
+            selvedge::usage::requests::read(e.store.root()).unwrap(),
+            vec![request]
+        );
     }
 
     #[test]

@@ -16,7 +16,8 @@ It runs at start, after every `/api/proxy/settings`, and from `serve::watch`
 whenever the store's files change, so a hand edit takes effect within seconds.
 A file that cannot be read leaves the listener as it was and shows as the
 card's error, without its content (serde's message would quote a key). The listener sees the app through the `proxy::Backend` trait
-(settings, providers), which tests implement on their own.
+(settings, providers, `whose` login a credential is, `record` for the request
+log), which tests implement on their own.
 
 ## The listener (`listen.rs`)
 
@@ -26,7 +27,8 @@ runs on its own thread.
 
 1. The head is read within 10 s and 16 KiB.
 2. The key, `Authorization: Bearer` or `x-api-key`, is checked against every
-   key in `.proxy.json` in full, before any body is read. No `Host` or
+   key in `.proxy.json` in full, before any body is read
+   (`Settings::matching`, which also says which key it was, for the log). No `Host` or
    `Origin` check: the key is the guard, the listener serves nothing but the
    proxy, and a browser cannot send either header cross-site without a
    preflight the listener never answers.
@@ -168,9 +170,37 @@ completed response with the items Codex streamed, as it sent them, since the
 completed event's own `output` can be empty. The client's session headers go
 with it.
 
+## The request log (`journal.rs`)
+
+`forward` wraps the work in a `journal::Trace`, filled as the request goes:
+the provider and model once `pick` has them, the login from `Backend::whose`
+(the stored, verified entry whose refresh or access token the live login
+holds), the upstream's status, the time to its headers and its
+`request-id`, then what the client was told (`translate::Seen`). After it,
+`Trace::request` turns that into a `selvedge::usage::requests::Request` for
+`Backend::record`, which `serve` appends to the store.
+
+What the client was told depends on the path:
+
+- **Passed through, streamed:** `translate::relay` writes each upstream read
+  on to the client as it arrives and decodes the same bytes for the id and
+  the last usage event, so nothing waits on the parsing.
+- **Passed through, whole:** the body is kept, up to 8 MiB, and read once
+  written (`translate::decode::whole`).
+- **Translated:** `respond` notes the events it encodes, and the id becomes
+  the one the encoder writes (`msg_`, `chatcmpl-` or `resp_` before the
+  upstream's), which is what the client, and Claude Code's transcript, keep.
+- **Collected Codex responses:** read from the completed response.
+
+A write to the client that fails marks it `canceled`. Usage is logged with
+input fresh, as the store format counts it: the decoders' input includes
+cached tokens, so the cache reads and writes are taken out. A cache write
+counts as the 5-minute kind.
+
 ## Sources
 
 - [src/proxy/mod.rs](../../src/proxy/mod.rs)
+- [src/proxy/journal.rs](../../src/proxy/journal.rs)
 - [src/proxy/listen.rs](../../src/proxy/listen.rs)
 - [src/proxy/forward.rs](../../src/proxy/forward.rs)
 - [src/proxy/route.rs](../../src/proxy/route.rs)
