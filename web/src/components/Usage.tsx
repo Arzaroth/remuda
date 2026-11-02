@@ -52,6 +52,8 @@ const TYPES = [
   ['output', 'Output', 'var(--c4)'],
 ] as const;
 
+const zeros = (n: number) => new Array<number>(n).fill(0);
+
 const nameOf = (id: string) => store.s?.providers.find((p) => p.id === id)?.name ?? id;
 
 /** A colour per model, fixed by its spend over the whole range so a filter never repaints one. */
@@ -159,7 +161,7 @@ function Spend(props: { answer: SpendAnswer; days: number; provider: string | nu
   const color = createMemo(() => palette(by(all(), (r) => r.model).map(([m]) => m)));
   const series = createMemo((): Series[] => {
     const per = daily(rows(), range(), (r) => r.provider, usdOf);
-    return providers().map(([id]) => ({ id, label: nameOf(id), color: brand(id), values: per.get(id) ?? [] }));
+    return providers().map(([id]) => ({ id, label: nameOf(id), color: brand(id), values: per.get(id) ?? zeros(range().length) }));
   });
   const proxied = createMemo(() => sum(rows().filter((r) => r.source === 'proxy')));
   return (
@@ -312,14 +314,14 @@ function Requests(props: { answer: RequestsAnswer; days: number; provider: strin
   };
   const trend = createMemo((): Series[] => {
     const per = perDay((r) => total({ input: r.tokens.i ?? 0, output: r.tokens.o ?? 0, cacheWrite: (r.tokens.cw5 ?? 0) + (r.tokens.cw1h ?? 0), cacheRead: r.tokens.cr ?? 0 }), (r) => r.model);
-    return models().map(([m]) => ({ id: m, label: m, color: color()(m), values: per.get(m) ?? [] }));
+    return models().map(([m]) => ({ id: m, label: m, color: color()(m), values: per.get(m) ?? zeros(range().length) }));
   });
   const activity = createMemo((): Series[] => {
     const per = perDay((r) => r.requests, (r) => r.outcome);
     return [
-      { id: 'ok', label: 'Success', color: 'var(--good)', values: per.get('ok') ?? [] },
-      { id: 'failed', label: 'Failed', color: 'var(--bad)', values: per.get('failed') ?? [] },
-      { id: 'canceled', label: 'Canceled', color: 'var(--muted)', values: per.get('canceled') ?? [] },
+      { id: 'ok', label: 'Success', color: 'var(--good)', values: per.get('ok') ?? zeros(range().length) },
+      { id: 'failed', label: 'Failed', color: 'var(--bad)', values: per.get('failed') ?? zeros(range().length) },
+      { id: 'canceled', label: 'Canceled', color: 'var(--muted)', values: per.get('canceled') ?? zeros(range().length) },
     ];
   });
   const minutes = () => props.days * 24 * 60;

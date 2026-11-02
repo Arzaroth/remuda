@@ -152,7 +152,7 @@ export function LineChart(props: { dates: string[]; series: Series[]; format: (v
 export function StackedBars(props: { dates: string[]; series: Series[]; format: (v: number) => string; label: string }) {
   const [hover, setHover] = createSignal<number | null>(null);
   const [w, setW] = createSignal(640);
-  const totals = createMemo(() => props.dates.map((_, i) => props.series.reduce((a, s) => a + s.values[i], 0)));
+  const totals = createMemo(() => props.dates.map((_, i) => props.series.reduce((a, s) => a + (s.values[i] ?? 0), 0)));
   const max = createMemo(() => niceMax(Math.max(0, ...totals())));
   const plotW = () => w() - PAD.left - PAD.right;
   const plotH = H - PAD.top - PAD.bottom;
@@ -176,7 +176,7 @@ export function StackedBars(props: { dates: string[]; series: Series[]; format: 
           const parts = () => {
             let base = 0;
             return props.series
-              .filter((s) => s.values[i()] > 0)
+              .filter((s) => (s.values[i()] ?? 0) > 0)
               .map((s) => {
                 const h = (s.values[i()] / max()) * plotH;
                 const y = PAD.top + plotH - base - h;
