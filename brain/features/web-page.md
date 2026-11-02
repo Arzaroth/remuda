@@ -12,7 +12,7 @@ its icon, the login in use (or "signed out"), the share used of its tile's
 window over a small meter, and an "auto" tag when auto mode is on; Usage; the
 API proxy, with an on/off dot; Status, with a dot that turns amber when the
 refresh timer is off or its last run is over 75 minutes old and red when it
-reported problems (`healthTone`). Its foot holds Add a login, Refresh tokens,
+reported problems (`healthTone`); Versions. Its foot holds Add a login, Refresh tokens,
 the theme switch and the look switch. On a narrow screen it becomes a bar
 along the top, with Add a login first; Refresh tokens and the two switches
 move to the foot of the Status page. Each CLI is shown by its own logo, in its own colour, both shared with
@@ -95,6 +95,24 @@ Add a login.
   many credentials it refreshed and, behind a toggle, what it skipped or
   failed on (from `<store>/.last-refresh.json`); whether TokenGauge's
   snapshot was found and how old it is; and the store's path.
+- **Versions**: a card each for remuda and TokenGauge with the version
+  installed (TokenGauge's from `tokengauge --version`) and GitHub's latest
+  release, and an Update button, unless a package manager owns the binary
+  (selvedge's owner check for remuda, a path under `/usr` outside
+  `/usr/local` for TokenGauge), which the card then says instead; a
+  TokenGauge not installed gets a link to its repository. Below, the release
+  notes of every release newer than the one installed, up to ten, or of the
+  latest when none is, for the tool picked: the CHANGELOG section GitHub's
+  release carries, its `###` headings as labels, up to the first `##`
+  (GitHub's generated list of pull requests), with bold, code and `http(s)`
+  links rendered and anything else as text (`notes.ts`). GitHub is asked
+  when the page opens, at most every 15 minutes, and on Check for updates.
+  Updating remuda is selvedge's `apply`, as `remuda --update`, then `remuda
+  sync-units` a second after the answer; under the service that restarts
+  the page, which keeps its token
+  ([architecture/web.md](../architecture/web.md#restarting-on-an-update)),
+  and the page reloads once it answers again. Updating TokenGauge runs
+  `tokengauge --update`, which refreshes its own frontends.
 
 The theme follows the system until the Auto / Light / Dark switch overrides
 it. The page has two looks, picked under the theme switch: Sage, green on a
@@ -213,6 +231,8 @@ refused.
 - [src/serve.rs](../../src/serve.rs)
 - [src/gauge.rs](../../src/gauge.rs)
 - [src/runs.rs](../../src/runs.rs)
+- [src/versions.rs](../../src/versions.rs), [web/src/components/Versions.tsx](../../web/src/components/Versions.tsx),
+  [web/src/notes.ts](../../web/src/notes.ts)
 - [src/usage.rs](../../src/usage.rs), [web/src/components/Usage.tsx](../../web/src/components/Usage.tsx),
   [Charts.tsx](../../web/src/components/Charts.tsx), [spend.ts](../../web/src/spend.ts),
   [requests.ts](../../web/src/requests.ts)

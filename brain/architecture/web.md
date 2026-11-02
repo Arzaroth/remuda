@@ -45,6 +45,16 @@ a refusal is not retried) with `REMUDA_SERVICE=1`, and `serve` then:
 - opens no browser at start. Sign-ins still open their private window when
   the user manager has a display.
 
+## Restarting on an update
+
+A remuda update made from the page under the service ends in `sync-units`,
+which restarts the service, and a new `serve` draws a new token, which the
+open page does not have. So before it, the page's process writes
+`serve.handoff` beside `serve.url`, `{port, at}` and no secret, and the next
+`serve`, under the service only, takes the token from `serve.url` when the
+marker names its port and is under a minute old. The marker is removed
+whether it was taken or not, so any other restart draws a new token.
+
 ## Guards (`App::handle`)
 
 1. `Host` must be `127.0.0.1:<port>` or `localhost:<port>`: defeats DNS
@@ -116,13 +126,16 @@ access to anything, and it ends when they stop.
 | `POST /api/proxy/settings` `{enabled?, port?}` | Save the proxy's settings and start, move or stop it to match |
 | `POST /api/proxy/keys` `{name}` / `keys/remove` `{id}` | Make or remove a proxy access key |
 | `POST /api/usage/spend` `{days}` | `{export, logins}`: TokenGauge's `--usage-json` from the first day of the range, and every stored login by the digest it names logins with; or `{unavailable}` saying why there is none ([../features/web-page.md](../features/web-page.md#usage)) |
+| `GET /api/versions` | `{tools, checkedAt}`: for remuda and TokenGauge, `current`, `latest`, `available`, `held` (why the page cannot update it), `url`, `releases` (`{version, published, url, notes}`) and `error` when GitHub could not be asked; the answer is kept 15 minutes ([../features/web-page.md](../features/web-page.md)) |
+| `POST /api/versions` `{force?}` | The same, asking GitHub again when `force` |
+| `POST /api/versions/update` `{tool}` | `{message, restarting}`: update `remuda` or `tokengauge` |
 | `POST /api/usage/requests` `{days}` | `{since, rows}`: the proxy's request log over the range, summed per quarter hour (every time zone splits its days on one), provider, model, login, key name and outcome |
 
 Pending sign-ins live in memory, one per provider; starting another cancels the
 previous one. `App::api` takes the store lock once for every route except the
 `/api/login` ones, which lock only to save (`commands::save_login`), and the
-`/api/usage` ones, which only read and run TokenGauge, so a slow export holds
-up nothing else. The name
+`/api/usage` and `/api/versions` ones, which only read, ask GitHub and run
+TokenGauge or an update, so a slow one holds up nothing else. The name
 check before a sign-in and the "stored ..." message are `commands::begin_login`
 and `commands::stored_message`, shared with the CLI.
 
@@ -233,6 +246,7 @@ the focus.
 
 - [src/serve.rs](../../src/serve.rs)
 - [src/served.rs](../../src/served.rs)
+- [src/versions.rs](../../src/versions.rs)
 - [src/http.rs](../../src/http.rs)
 - [web/](../../web/), built by [build.rs](../../build.rs)
 - [src/main.rs](../../src/main.rs) `Serve`, `open`

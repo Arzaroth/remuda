@@ -143,7 +143,8 @@ stops it before anything is created.
 
 `remuda --update` / `--check-update` is selvedge `check_cached` / `apply` over the
 `REMUDA` project (no frontends, no aliases). `REMUDA_REPO` overrides the repo
-for a fork.
+for a fork. The page's Versions view updates through the same `apply`
+([web.md](web.md#restarting-on-an-update)).
 
 selvedge replaces the binary only, so an update that replaced it then runs
 the new binary's hidden `remuda sync-units` (the path is taken before the
