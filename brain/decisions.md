@@ -382,6 +382,18 @@ hook would have told remuda each session's id too, but it would mean writing
 into Claude Code's settings; `sessions/<pid>.json`, which Claude Code already
 writes, says the same for the one process remuda started.
 
+## The Usage tab draws TokenGauge's prices, never its own
+
+The spend on the page is `tokengauge --usage-json` as printed, run by `serve`
+when the tab asks. Pricing tokens in remuda as well would mean a second copy of
+TokenGauge's table, its archive of past prices and its long-context tiers, and
+the two would disagree, as the page and the panel once did over a window
+drawn in the wrong slot. remuda runs the binary rather than reading TokenGauge's
+store, because the store holds tokens and the prices are TokenGauge's to apply;
+the format between them is `selvedge::usage::export`. Requests are the
+exception: only the proxy saw their outcome, timing and key, so that view is
+remuda's own log, and puts no price on a request.
+
 ## Packages are made from the release archive
 
 The `.deb`, the `.rpm` and `remuda-bin` repackage the per-architecture archive

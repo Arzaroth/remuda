@@ -3,7 +3,7 @@ import { api } from '../api';
 import { byLabel, days, subject } from '../log';
 import { now, store } from '../state';
 import type { LogEvent } from '../types';
-import { inUse } from '../usage';
+import { inUse } from '../windows';
 import { ProviderIcon } from './ProviderIcon';
 
 const day = (ms: number) => new Date(ms).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });

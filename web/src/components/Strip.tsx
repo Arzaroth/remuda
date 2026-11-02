@@ -5,7 +5,7 @@ import { date, plural, until, usedTone } from '../format';
 import { now, store } from '../state';
 import { remember, remembered } from '../storage';
 import type { Provider } from '../types';
-import { inUse, providerUsage, resetsAt } from '../usage';
+import { inUse, providerUsage, resetsAt } from '../windows';
 import { Meter } from './Meter';
 import { ProviderIcon } from './ProviderIcon';
 import { href } from '../route';

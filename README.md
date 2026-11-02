@@ -172,6 +172,12 @@ usage, read from TokenGauge's snapshot (only the login in use before
 TokenGauge 0.37). It keeps itself current: a change made from the CLI, by the
 refresh timer or by a TokenGauge fetch shows within a couple of seconds.
 
+Its Usage tab shows what was spent, per CLI, model and login, priced by
+TokenGauge (0.52 or later, which remuda runs for it), and what the API proxy
+answered: requests, outcomes, speed, latency and tokens per model, login and
+key. Spend is put to a login from what remuda records as it switches and runs
+CLIs, so it starts from when you install this version.
+
 The URL it prints carries an access token in its fragment. Every request must
 send that token back and name this listener in its `Host` and `Origin`, so
 another site open in the same browser cannot drive it.

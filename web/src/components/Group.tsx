@@ -4,7 +4,7 @@ import { ago, date, DAY, HOUR, plural, span, until, usedTone } from '../format';
 import { openSheet } from '../sheet';
 import { act, now, store } from '../state';
 import type { Credential, Live, Provider, Window } from '../types';
-import { carriedSince, dropping, dropsLive, overwrite, planFor, shownFor, taken } from '../usage';
+import { carriedSince, dropping, dropsLive, overwrite, planFor, shownFor, taken } from '../windows';
 import { warmLine } from '../warm';
 import { remember, remembered } from '../storage';
 import { Icon } from './Icon';

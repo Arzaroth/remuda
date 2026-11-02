@@ -115,10 +115,14 @@ access to anything, and it ends when they stop.
 | `POST /api/login/cancel` `{id}` | Abandon it; a waiting Codex callback stops |
 | `POST /api/proxy/settings` `{enabled?, port?}` | Save the proxy's settings and start, move or stop it to match |
 | `POST /api/proxy/keys` `{name}` / `keys/remove` `{id}` | Make or remove a proxy access key |
+| `POST /api/usage/spend` `{days}` | `{export, logins}`: TokenGauge's `--usage-json` from the first day of the range, and every stored login by the digest it names logins with; or `{unavailable}` saying why there is none ([../features/web-page.md](../features/web-page.md#usage)) |
+| `POST /api/usage/requests` `{days}` | `{since, rows}`: the proxy's request log over the range, summed per quarter hour (every time zone splits its days on one), provider, model, login, key name and outcome |
 
 Pending sign-ins live in memory, one per provider; starting another cancels the
 previous one. `App::api` takes the store lock once for every route except the
-`/api/login` ones, which lock only to save (`commands::save_login`). The name
+`/api/login` ones, which lock only to save (`commands::save_login`), and the
+`/api/usage` ones, which only read and run TokenGauge, so a slow export holds
+up nothing else. The name
 check before a sign-in and the "stored ..." message are `commands::begin_login`
 and `commands::stored_message`, shared with the CLI.
 
