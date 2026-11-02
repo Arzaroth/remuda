@@ -13,6 +13,18 @@ is already stored (under any name), when the name is taken (unless `--force`),
 when the account is already stored under another name (even with `--force`),
 and when the CLI is signed out.
 
+## `remuda`
+
+With no command, remuda prints a table of every stored login (`commands::status`):
+its CLI, its name, `●` on the one the CLI uses (or `run` when a `remuda run`
+session holds it), and "kept fresh", how long ago its credential file in the
+store was written. That file is rewritten whenever the login's tokens change,
+by a refresh or by the CLI's own rotation synced back, so the column is right
+for the login in use too. The live logins are synced first, as `ls` does. A
+terminal gets the header and the age dimmed and the `●` green, unless
+`NO_COLOR` is set; piped, it is plain text. Without a store it prints how to
+start one and exits 0. It used to print the help (`remuda --help` still does).
+
 ## `remuda ls [--json]`
 
 Syncs every provider's live login back, then prints a block per provider that
@@ -44,5 +56,5 @@ session holds as well ([run.md](run.md)).
 
 ## Sources
 
-- [src/commands.rs](../../src/commands.rs) `import`, `list`, `list_json`, `print_env`, `remove`
+- [src/commands.rs](../../src/commands.rs) `status`, `import`, `list`, `list_json`, `print_env`, `remove`
 - [src/main.rs](../../src/main.rs)
