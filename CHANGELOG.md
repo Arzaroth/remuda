@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-11-02
+
 ### Added
 
 - The page has a Usage tab. **Spend** shows what each CLI, model and login
