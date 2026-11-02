@@ -844,6 +844,15 @@ pub fn remove(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn freshness_reads_in_one_unit() {
+        assert_eq!(ago(20_000), "just now");
+        assert_eq!(ago(5 * 60_000), "5m ago");
+        assert_eq!(ago(2 * 3_600_000 + 1), "2h ago");
+        assert_eq!(ago(3 * 86_400_000), "3d ago");
+        assert_eq!(ago(-5), "just now");
+    }
     use super::*;
     use crate::claude::OAUTH_KEY;
     use crate::fsx::write_json;
