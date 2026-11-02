@@ -10,7 +10,7 @@ mod parse;
 mod sse;
 
 use std::collections::HashMap;
-use std::io::{BufRead, Write};
+use std::io::{BufRead, Read, Write};
 
 use anyhow::Result;
 use serde_json::Value;
@@ -234,9 +234,106 @@ pub fn request(from: Format, to: Format, body: &Value) -> Result<(Value, Names, 
     Ok((out, names, conversation))
 }
 
+/// What a client was answered: the answer's id as the client got it, its
+/// usage, and whether it ended in an error.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Seen {
+    pub id: Option<String>,
+    pub usage: Option<Usage>,
+    pub failed: bool,
+}
+
+impl Seen {
+    fn see(&mut self, e: &Event) {
+        match e {
+            Event::Start { id } if !id.is_empty() => self.id = Some(id.clone()),
+            Event::Usage(u) => self.usage = Some(*u),
+            Event::Error { .. } => self.failed = true,
+            _ => {}
+        }
+    }
+
+    /// One whole answer body in `format`.
+    pub fn whole(format: Format, body: &Value) -> Seen {
+        let (id, usage) = decode::whole(format, body);
+        Seen {
+            id: (!id.is_empty()).then_some(id),
+            usage: Some(usage),
+            failed: false,
+        }
+    }
+}
+
+/// The id a client in `to` is shown for an upstream answer `id`, as the
+/// encoder writes it.
+fn shown_id(to: Format, id: &str) -> String {
+    let prefix = match to {
+        Format::Messages => "msg_",
+        Format::Chat => "chatcmpl-",
+        Format::Responses => "resp_",
+    };
+    encode::id_or(id, prefix)
+}
+
+/// Copies an upstream stream in `format` to the client as it arrives, reading
+/// its id and usage on the way. Returns false when the client went away.
+pub fn relay(format: Format, upstream: impl Read, out: &mut impl Write, seen: &mut Seen) -> bool {
+    let mut relay = Relay {
+        upstream,
+        out,
+        gone: false,
+        broken: false,
+    };
+    {
+        let mut reader = std::io::BufReader::new(&mut relay);
+        for e in decode::decode(format, &mut reader) {
+            seen.see(&e);
+        }
+        let _ = std::io::copy(&mut reader, &mut std::io::sink());
+    }
+    if relay.broken {
+        seen.failed = true;
+    }
+    !relay.gone
+}
+
+/// A reader that writes on to the client whatever it reads, and ends when the
+/// client is gone.
+struct Relay<'a, R, W> {
+    upstream: R,
+    out: &'a mut W,
+    gone: bool,
+    broken: bool,
+}
+
+impl<R: Read, W: Write> Read for Relay<'_, R, W> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.gone {
+            return Ok(0);
+        }
+        let n = self.upstream.read(buf).unwrap_or_else(|_| {
+            self.broken = true;
+            0
+        });
+        if n > 0
+            && self
+                .out
+                .write_all(&buf[..n])
+                .and_then(|()| self.out.flush())
+                .is_err()
+        {
+            self.gone = true;
+            return Ok(0);
+        }
+        Ok(n)
+    }
+}
+
 /// Reads an upstream stream in `from` and writes the answer the client asked
 /// for in `to`: a stream when it streamed, else one JSON body. `head` writes
-/// the status line and headers for a status and content type.
+/// the status line and headers for a status and content type. What the
+/// client was told goes into `seen`.
+#[allow(clippy::too_many_arguments)]
 pub fn respond<W: Write>(
     from: Format,
     to: Format,
@@ -245,8 +342,27 @@ pub fn respond<W: Write>(
     upstream: impl BufRead,
     out: &mut W,
     head: impl FnOnce(&mut W, u16, &str, Option<usize>) -> std::io::Result<()>,
+    seen: &mut Seen,
 ) -> std::io::Result<()> {
-    let events = decode::decode(from, upstream);
+    let result = answer(from, to, conversation, names, upstream, out, head, seen);
+    if let Some(id) = &seen.id {
+        seen.id = Some(shown_id(to, id));
+    }
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn answer<W: Write>(
+    from: Format,
+    to: Format,
+    conversation: &Conversation,
+    names: &Names,
+    upstream: impl BufRead,
+    out: &mut W,
+    head: impl FnOnce(&mut W, u16, &str, Option<usize>) -> std::io::Result<()>,
+    seen: &mut Seen,
+) -> std::io::Result<()> {
+    let events = decode::decode(from, upstream).inspect(|e| seen.see(e));
     if conversation.stream {
         head(out, 200, "text/event-stream", None)?;
         return encode::stream(to, conversation, names, events, out);

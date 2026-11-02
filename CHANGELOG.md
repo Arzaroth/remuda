@@ -8,6 +8,10 @@
   `.attribution.jsonl` in its store: on every switch, when it finds a login
   changed outside it, and for each session a `remuda run` Claude Code goes
   through. TokenGauge reads it to tell what each login spent, from now on.
+- The API proxy logs every request it forwards to `.proxy-requests.jsonl` in
+  the store: the login and key it spent, how it ended, how long it took, its
+  tokens, and the ids the client got, by which TokenGauge counts a request
+  Claude Code also wrote down only once.
 
 ## [0.28.0] - 2026-11-01
 

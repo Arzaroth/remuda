@@ -1,10 +1,11 @@
 use std::io::{BufReader, Read, Write};
 use std::sync::OnceLock;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
 use super::Backend;
+use super::journal::Trace;
 use super::listen::error_body;
 use super::route;
 use super::translate;
@@ -19,6 +20,10 @@ pub struct Call<'a> {
     pub count_tokens: bool,
     pub head: &'a Head,
     pub body: Value,
+    /// When the request arrived, and the id of the key it came with.
+    pub at: i64,
+    pub started: Instant,
+    pub key: Option<String>,
 }
 
 /// Refused before anything was written back.
@@ -83,6 +88,7 @@ fn merged_betas(ours: Option<&str>, theirs: Option<&str>) -> Option<String> {
 fn pick<'b>(
     backend: &'b dyn Backend,
     model: &str,
+    trace: &mut Trace,
 ) -> Result<(&'b dyn Provider, String, Value), Refusal> {
     let providers = backend.providers();
     let ids: Vec<&str> = providers.iter().map(|p| p.id()).collect();
@@ -105,9 +111,13 @@ fn pick<'b>(
             format!("the proxy cannot spend {} logins", p.name()),
         ));
     }
+    trace.provider = Some(p.id());
+    trace.model = model.to_owned();
     let creds = active(p);
     backend.spent(p.id(), creds.as_ref().err().map(|r| r.message.as_str()));
-    Ok((p, model.to_owned(), creds?))
+    let creds = creds?;
+    trace.login = backend.whose(p, &creds);
+    Ok((p, model.to_owned(), creds))
 }
 
 fn active(p: &dyn Provider) -> Result<Value, Refusal> {
@@ -137,7 +147,24 @@ fn active(p: &dyn Provider) -> Result<Value, Refusal> {
     Ok(creds)
 }
 
-pub fn forward(backend: &dyn Backend, mut call: Call, out: &mut impl Write) -> Result<(), Refusal> {
+/// Sends `call` on and writes the answer back, then logs it, unless it only
+/// counted tokens.
+pub fn forward(backend: &dyn Backend, call: Call, out: &mut impl Write) -> Result<(), Refusal> {
+    let mut trace = Trace::new(call.at, call.started, call.key.clone(), call.format);
+    let counting = call.count_tokens;
+    let result = send(backend, call, out, &mut trace);
+    if !counting && let Some(request) = trace.request(result.as_ref().err().map(|r| r.status)) {
+        backend.record(request);
+    }
+    result
+}
+
+fn send(
+    backend: &dyn Backend,
+    mut call: Call,
+    out: &mut impl Write,
+    trace: &mut Trace,
+) -> Result<(), Refusal> {
     let model = call
         .body
         .get("model")
@@ -145,7 +172,7 @@ pub fn forward(backend: &dyn Backend, mut call: Call, out: &mut impl Write) -> R
         .filter(|m| !m.is_empty())
         .ok_or_else(|| refuse(400, "the request names no model"))?
         .to_owned();
-    let (p, model, creds) = pick(backend, &model)?;
+    let (p, model, creds) = pick(backend, &model, trace)?;
     let formats = p.formats(&model);
     let target = if formats.contains(&call.format) {
         call.format
@@ -153,6 +180,7 @@ pub fn forward(backend: &dyn Backend, mut call: Call, out: &mut impl Write) -> R
         formats[0]
     };
     let asked_stream = call.body.get("stream").and_then(Value::as_bool) == Some(true);
+    trace.stream = asked_stream;
     let translated = target != call.format;
     let translation = if !translated {
         None
@@ -231,6 +259,8 @@ pub fn forward(backend: &dyn Backend, mut call: Call, out: &mut impl Write) -> R
         .map_err(|e| refuse(502, format!("{} could not be reached: {e}", p.name())))?;
 
     let status = resp.status().as_u16();
+    trace.status = status;
+    trace.first_byte = Some(trace.started.elapsed());
     let header = |name: &str| {
         resp.headers()
             .get(name)
@@ -244,17 +274,23 @@ pub fn forward(backend: &dyn Backend, mut call: Call, out: &mut impl Write) -> R
             extra.push((name, v));
         }
     }
+    trace.request_id = header("request-id").or_else(|| header("x-request-id"));
     if collect && (200..300).contains(&status) {
         let (status, body) = match translate::collect(BufReader::new(resp)) {
-            Ok(body) => (200, body),
+            Ok(body) => {
+                trace.seen = translate::Seen::whole(target, &body);
+                (200, body)
+            }
             Err((kind, message)) => {
                 let status = translate::status_of(&kind);
                 (status, error_body(Some(call.format), status, &message))
             }
         };
+        trace.status = status;
         let body = body.to_string();
-        let _ = write_head(out, status, "application/json", Some(body.len()), &extra)
-            .and_then(|()| out.write_all(body.as_bytes()));
+        trace.canceled = write_head(out, status, "application/json", Some(body.len()), &extra)
+            .and_then(|()| out.write_all(body.as_bytes()))
+            .is_err();
         return Ok(());
     }
     if let Some((names, conversation)) = translation {
@@ -267,11 +303,13 @@ pub fn forward(backend: &dyn Backend, mut call: Call, out: &mut impl Write) -> R
                 translate::error_message(&text)
             );
             let body = error_body(Some(call.format), status, &message).to_string();
-            let _ = write_head(out, status, "application/json", Some(body.len()), &extra)
-                .and_then(|()| out.write_all(body.as_bytes()));
+            trace.canceled = write_head(out, status, "application/json", Some(body.len()), &extra)
+                .and_then(|()| out.write_all(body.as_bytes()))
+                .is_err();
             return Ok(());
         }
-        let _ = translate::respond(
+        let told = std::cell::Cell::new(status);
+        trace.canceled = translate::respond(
             target,
             call.format,
             &conversation,
@@ -279,31 +317,52 @@ pub fn forward(backend: &dyn Backend, mut call: Call, out: &mut impl Write) -> R
             BufReader::new(resp),
             out,
             |out, status, content_type, length| {
+                told.set(status);
                 write_head(out, status, content_type, length, &extra)
             },
-        );
+            &mut trace.seen,
+        )
+        .is_err();
+        trace.status = told.get();
         return Ok(());
     }
     let length = resp.content_length().map(|n| n as usize);
     if write_head(out, status, &content_type, length, &extra).is_err() {
+        trace.canceled = true;
         return Ok(());
     }
+    if content_type.starts_with("text/event-stream") {
+        trace.canceled = !translate::relay(target, resp, out, &mut trace.seen);
+        return Ok(());
+    }
+    let mut body = Vec::new();
     let mut chunk = vec![0u8; 16 * 1024];
     loop {
         match resp.read(&mut chunk) {
-            Ok(0) | Err(_) => return Ok(()),
+            Ok(0) | Err(_) => break,
             Ok(n) => {
+                if body.len() + n <= KEPT_BODY {
+                    body.extend_from_slice(&chunk[..n]);
+                }
                 if out
                     .write_all(&chunk[..n])
                     .and_then(|()| out.flush())
                     .is_err()
                 {
+                    trace.canceled = true;
                     return Ok(());
                 }
             }
         }
     }
+    if let Ok(body) = serde_json::from_slice::<Value>(&body) {
+        trace.seen = translate::Seen::whole(target, &body);
+    }
+    Ok(())
 }
+
+/// A whole answer is read for its usage only up to this size.
+const KEPT_BODY: usize = 8 << 20;
 
 /// The models of every provider with an active login, in the shape the
 /// client asked for.
