@@ -308,6 +308,7 @@ fn send(
                 .is_err();
             return Ok(());
         }
+        let told = std::cell::Cell::new(status);
         trace.canceled = translate::respond(
             target,
             call.format,
@@ -316,11 +317,13 @@ fn send(
             BufReader::new(resp),
             out,
             |out, status, content_type, length| {
+                told.set(status);
                 write_head(out, status, content_type, length, &extra)
             },
             &mut trace.seen,
         )
         .is_err();
+        trace.status = told.get();
         return Ok(());
     }
     let length = resp.content_length().map(|n| n as usize);
