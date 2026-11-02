@@ -18,9 +18,12 @@ and when the CLI is signed out.
 With no command, remuda prints a table of every stored login (`commands::status`):
 its CLI, its name, `●` on the one the CLI uses (or `run` when a `remuda run`
 session holds it), and "kept fresh", how long ago its credential file in the
-store was written. That file is rewritten whenever the login's tokens change,
-by a refresh or by the CLI's own rotation synced back, so the column is right
-for the login in use too. The live logins are synced first, as `ls` does. A
+store was last written. Its tokens changing rewrites it, by a refresh or by
+the CLI's own rotation synced back, so the column follows the login in use
+too; so does any other save of the entry, such as a label. A CLI whose login
+cannot be read marks its rows `?`, and so does a login it only looks signed
+into, with a line pointing at `ls`. The live logins are synced first, as `ls`
+does. A
 terminal gets the header and the age dimmed and the `●` green, unless
 `NO_COLOR` is set; piped, it is plain text. Without a store it prints how to
 start one and exits 0. It used to print the help (`remuda --help` still does).

@@ -108,7 +108,7 @@ take `-p <cli>`: `claude` (the default), `codex`, `cursor`, `glm`, `grok`,
 | `remuda pin [name] [--remove <cli>] [--allow]` | Pin a login to this directory in `.remuda.toml`, show the pins in force, or trust a `.remuda.toml` as it is |
 | `remuda shell-init <shell>` | Print functions that start `claude` and `codex` on the login pinned where they run |
 | `remuda env <name>` | Print the `export` line that selects a stored API key in a shell |
-| `remuda` | Show every stored login, the one each CLI uses (`●`), and when its tokens were last refreshed |
+| `remuda` | Show every stored login, the one each CLI uses (`●`), and when its credential file was last written |
 | `remuda ls [--json]` | List stored credentials, marking the active ones |
 | `remuda refresh [name] [--force] [--within MIN]` | Refresh the inactive credentials expiring within `MIN` minutes (default 60) |
 | `remuda label <name> [text]` | Set the label shown beside a credential, or clear it |
