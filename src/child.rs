@@ -65,9 +65,35 @@ pub fn run(who: &str, program: &Path, args: &[&str], wait: Duration, limit: u64)
 fn drain(pipe: impl Read + Send + 'static, limit: u64) -> mpsc::Receiver<Vec<u8>> {
     let (send, receive) = mpsc::channel();
     std::thread::spawn(move || {
+        let mut pipe = pipe;
         let mut bytes = Vec::new();
-        let _ = pipe.take(limit).read_to_end(&mut bytes);
+        let _ = pipe.by_ref().take(limit).read_to_end(&mut bytes);
         let _ = send.send(bytes);
+        // A child blocked on a full pipe never exits.
+        let _ = std::io::copy(&mut pipe, &mut std::io::sink());
     });
     receive
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn output_past_the_limit_does_not_hold_the_child() {
+        let ran = run(
+            "sh",
+            Path::new("/bin/sh"),
+            &[
+                "-c",
+                "head -c 1000000 /dev/zero >&2; head -c 1000000 /dev/zero; exit 3",
+            ],
+            Duration::from_secs(5),
+            16,
+        )
+        .unwrap();
+        assert!(!ran.ok);
+        assert_eq!(ran.out.len(), 16);
+        assert_eq!(ran.err.len(), 4096);
+    }
 }
