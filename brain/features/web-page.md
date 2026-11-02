@@ -181,7 +181,9 @@ login, and the second by a proxy key.
   each month's prices, so the page and the panel agree. A row TokenGauge has
   no price for counts its tokens and shows as unpriced, never as free (a total
   with some marks `+`). Logins come back as account digests and are named from
-  the store's sidecars; spend from before remuda recorded who spent it is
+  the store's sidecars; a removed login keeps the last name the attribution
+  ledger wrote down for it, marked "(removed)", and one the ledger never named
+  is "A login no longer stored". Spend from before remuda recorded who spent it is
   unattributed ([switching.md](switching.md#whose-spend-it-is)). Without a
   TokenGauge that exports, the tab says why.
 - **Proxy requests** is the proxy's request log
