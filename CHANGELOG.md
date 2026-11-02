@@ -28,6 +28,8 @@
 
 ### Fixed
 
+- Usage shows a removed login's spend under the name it last had, marked
+  "(removed)", instead of "A login no longer stored".
 - A usage window whose reset has passed shows 0% on the page, instead of
   its old percentage and a reset in the past, while TokenGauge has not
   fetched that login since.

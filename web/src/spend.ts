@@ -12,7 +12,7 @@ export type SpendRow = {
   usd: TypeCosts | null;
 };
 
-export type Login = { provider: string; name: string; label?: string | null };
+export type Login = { provider: string; name: string; label?: string | null; removed?: boolean };
 
 export type SpendAnswer = {
   export?: { generatedAt: number; coversFrom?: string; rows: SpendRow[] };
@@ -128,7 +128,9 @@ export function cacheHit(t: Split): number | null {
 export function loginName(digest: string | null, logins: Record<string, Login> | undefined): string {
   if (!digest) return 'Unattributed';
   const l = logins?.[digest];
-  return l ? (l.label ? `${l.label} (${l.name})` : l.name) : 'A login no longer stored';
+  if (!l) return 'A login no longer stored';
+  if (l.removed) return `${l.name} (removed)`;
+  return l.label ? `${l.label} (${l.name})` : l.name;
 }
 
 export function money(usd: number): string {

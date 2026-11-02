@@ -51,6 +51,7 @@ describe('spend', () => {
     expect(loginName('bb', logins)).toBe('perso');
     expect(loginName(null, logins)).toBe('Unattributed');
     expect(loginName('cc', logins)).toBe('A login no longer stored');
+    expect(loginName('dd', { dd: { provider: 'claude', name: 'old', removed: true } })).toBe('old (removed)');
   });
 
   it('writes large counts short and small sums with a third digit', () => {

@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use selvedge::usage::export::{self, UsageExport};
+use selvedge::usage::ledger::{self, Entry as Line};
 use selvedge::usage::requests::{self, Outcome};
 use selvedge::usage::{TokenCounts, account_digest};
 use serde::Serialize;
@@ -30,7 +31,8 @@ fn first_day(days: u32) -> String {
         .to_string()
 }
 
-/// Every stored login by the digest TokenGauge names it with.
+/// Every stored login by the digest TokenGauge names it with, then each
+/// removed one by the last name the ledger wrote down for it.
 pub fn logins(store: &Store, providers: &[&dyn Provider]) -> Value {
     let mut out = serde_json::Map::new();
     for p in providers {
@@ -41,6 +43,32 @@ pub fn logins(store: &Store, providers: &[&dyn Provider]) -> Value {
             );
         }
     }
+    let mut removed = serde_json::Map::new();
+    for line in ledger::read(store.root()).unwrap_or_default() {
+        let (provider, account_id, name) = match &line {
+            Line::Live {
+                provider,
+                account_id: Some(account_id),
+                name: Some(name),
+                ..
+            }
+            | Line::Run {
+                provider,
+                account_id,
+                name: Some(name),
+                ..
+            } => (provider, account_id, name),
+            _ => continue,
+        };
+        let digest = account_digest(account_id);
+        if providers.iter().any(|p| p.id() == provider) && !out.contains_key(&digest) {
+            removed.insert(
+                digest,
+                json!({"provider": provider, "name": name, "removed": true}),
+            );
+        }
+    }
+    out.extend(removed);
     Value::Object(out)
 }
 

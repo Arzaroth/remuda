@@ -1864,6 +1864,38 @@ mod tests {
     }
 
     #[test]
+    fn a_removed_login_keeps_the_last_name_the_ledger_gave_it() {
+        use selvedge::usage::ledger::{self, Entry as Line};
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let live = |at, account: &str, name: &str| Line::Live {
+            at,
+            provider: "claude".into(),
+            account_id: Some(account.into()),
+            name: Some(name.into()),
+        };
+        for line in [
+            live(1, "u-gone", "axeo"),
+            live(2, "u-work", "old-work"),
+            live(3, "u-gone", "Axeo"),
+        ] {
+            ledger::append(e.store.root(), &line).unwrap();
+        }
+        let export = json!({"schemaVersion": 1, "generatedAt": 5, "currency": "USD", "rows": []});
+        let app = app_with_tokengauge(&e, &format!("echo '{export}'"));
+
+        let (status, body) = call(&app, "POST", "/api/usage/spend", json!({"days": 7}));
+
+        assert_eq!(status, 200, "{body}");
+        let gone = &body["logins"][selvedge::usage::account_digest("u-gone")];
+        assert_eq!(gone["name"], "Axeo");
+        assert_eq!(gone["removed"], true);
+        let work = &body["logins"][selvedge::usage::account_digest("u-work")];
+        assert_eq!(work["name"], "work");
+        assert!(work.get("removed").is_none());
+    }
+
+    #[test]
     fn versions_ask_github_once_per_tool_until_forced() {
         let e = env(&OFFLINE);
         let mut github = mockito::Server::new();
