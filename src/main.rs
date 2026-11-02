@@ -2,6 +2,7 @@ mod apikey;
 mod attribution;
 mod auto;
 mod browser;
+mod child;
 mod claude;
 mod codex;
 mod commands;

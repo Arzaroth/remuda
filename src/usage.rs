@@ -4,11 +4,8 @@
 //! panel can never price a token two ways.
 
 use std::collections::BTreeMap;
-use std::io::Read;
 use std::path::Path;
-use std::process::{Command, Stdio};
-use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use selvedge::usage::export::{self, UsageExport};
@@ -50,36 +47,15 @@ pub fn logins(store: &Store, providers: &[&dyn Provider]) -> Value {
 /// `tokengauge --usage-json --since <first day>`, parsed.
 pub fn spend(tokengauge: Option<&Path>, days: u32) -> Result<UsageExport> {
     let program = tokengauge.context("TokenGauge is not installed")?;
-    let mut child = Command::new(program)
-        .args([export::FLAG, export::SINCE, &first_day(days)])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .with_context(|| format!("could not run {}", program.display()))?;
-    let out = drain(child.stdout.take().context("no output")?, MAX_EXPORT);
-    let err = drain(child.stderr.take().context("no error output")?, 4096);
-    let until = Instant::now() + WAIT;
-    let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        if Instant::now() >= until {
-            let _ = child.kill();
-            let _ = child.wait();
-            bail!("TokenGauge took longer than {}s to answer", WAIT.as_secs());
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    };
-    // A process TokenGauge left behind can hold the pipes open after it exits,
-    // so reading them to their end shares the same deadline.
-    let left = || until.saturating_duration_since(Instant::now());
-    let late = || anyhow::anyhow!("TokenGauge's output did not end within {}s", WAIT.as_secs());
-    let bytes = out.recv_timeout(left()).map_err(|_| late())?;
-    if !status.success() {
-        let said = err.recv_timeout(left()).unwrap_or_default();
-        let said = String::from_utf8_lossy(&said);
-        let said = said.trim();
+    let ran = crate::child::run(
+        "TokenGauge",
+        program,
+        &[export::FLAG, export::SINCE, &first_day(days)],
+        WAIT,
+        MAX_EXPORT,
+    )?;
+    if !ran.ok {
+        let said = ran.said();
         bail!(
             "TokenGauge could not export its usage{}",
             if said.contains("--usage-json") || said.is_empty() {
@@ -89,18 +65,7 @@ pub fn spend(tokengauge: Option<&Path>, days: u32) -> Result<UsageExport> {
             }
         );
     }
-    Ok(UsageExport::parse(&bytes)?)
-}
-
-/// Everything `pipe` holds, up to `limit` bytes, once it ends.
-fn drain(pipe: impl Read + Send + 'static, limit: u64) -> mpsc::Receiver<Vec<u8>> {
-    let (send, receive) = mpsc::channel();
-    std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let _ = pipe.take(limit).read_to_end(&mut bytes);
-        let _ = send.send(bytes);
-    });
-    receive
+    Ok(UsageExport::parse(&ran.out)?)
 }
 
 #[derive(Debug, Default, Serialize)]
