@@ -80,7 +80,7 @@ pub fn is_service(flag: bool) -> bool {
         || in_remuda_unit(&std::fs::read_to_string("/proc/self/cgroup").unwrap_or_default())
 }
 
-fn in_remuda_unit(cgroup: &str) -> bool {
+pub fn in_remuda_unit(cgroup: &str) -> bool {
     cgroup.lines().any(|line| {
         let unit = line.rsplit('/').next().unwrap_or_default();
         unit.starts_with("remuda-") && unit.ends_with(".service")

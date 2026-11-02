@@ -65,8 +65,10 @@ computes for the live key too. Changing any of them changes that ADR too.
   `packaging/remuda.asc`; once it is committed a release without the
   `REMUDA_GPG_KEY` secret fails.
 - The OAuth constants in `claude.rs` and `codex.rs` were read out of Claude Code
-  2.1.282 and codex-cli 0.153.4. When a CLI release breaks sign-in or refresh,
-  re-read them from the new binary (`strings` on it) rather than guessing.
+  2.1.282 and codex-cli 0.153.4 (each file's `MIRRORS`, which `remuda doctor`
+  compares with the installed CLI). When a CLI release breaks sign-in or
+  refresh, re-read them from the new binary (`strings` on it) rather than
+  guessing, and bump `MIRRORS` with them.
   Grok's and Kimi's come from their open-source CLIs (xai-org/grok-build,
   MoonshotAI/kimi-code); Cursor's from the open-source clients that talk to
   it, since cursor-agent is closed.

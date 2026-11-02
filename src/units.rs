@@ -1,6 +1,9 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::fsx;
+
+pub const TIMER: &str = "remuda-refresh.timer";
+pub const SERVE: &str = "remuda-serve.service";
 
 pub const UNITS: [(&str, &str); 3] = [
     (
@@ -41,6 +44,27 @@ pub fn refresh(dir: &Path) -> Refreshed {
         }
     }
     done
+}
+
+/// `enabled`, `disabled`, `masked` or `absent`, as systemd would find `unit`
+/// in `dirs` and pulled in by `wants`.
+pub fn state(dirs: &[PathBuf], unit: &str, wants: &str) -> &'static str {
+    let found = dirs
+        .iter()
+        .map(|d| d.join(unit))
+        .find(|p| p.symlink_metadata().is_ok());
+    let masked = found
+        .as_ref()
+        .is_some_and(|p| std::fs::canonicalize(p).is_ok_and(|t| t == Path::new("/dev/null")));
+    let wanted = dirs
+        .iter()
+        .any(|d| d.join(wants).join(unit).metadata().is_ok());
+    match (found, masked, wanted) {
+        (_, true, _) => "masked",
+        (Some(_), false, true) => "enabled",
+        (Some(_), false, false) => "disabled",
+        (None, ..) => "absent",
+    }
 }
 
 #[cfg(test)]

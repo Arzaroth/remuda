@@ -324,9 +324,15 @@ input:hover, select:hover { border-color: var(--muted); }
 .health { padding: 8px 22px; }
 .health-line { display: grid; }
 .health-line > div { display: flex; align-items: center; gap: 12px; padding: 14px 0; min-width: 0; }
+.health-line > .vital { align-items: flex-start; }
+.vital > .dot { margin-top: 7px; }
 .health-line > div + div { border-top: 1px solid var(--rule); }
 .health-line code { overflow-wrap: anywhere; }
 .health a { color: var(--focus); }
+.vital-body { display: grid; gap: 4px; min-width: 0; }
+.vital-body b { font-weight: 600; margin-right: 4px; }
+.vital-fix { color: var(--muted); font-size: 13px; }
+.vital .problems { margin: 6px 0 0; font-size: 13px; }
 .problems { margin: 0 0 14px; padding: 12px 16px 12px 34px; border-radius: var(--r-s); background: var(--sunk); }
 .problems li + li { margin-top: 4px; }
 

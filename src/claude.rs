@@ -12,7 +12,7 @@ use crate::pkce;
 use crate::provider::{Copied, Format, Identity, Login, PendingLogin, Provider, RunSpec, Upstream};
 use crate::store::Entry;
 
-// Mirrors Claude Code 2.1.282's OAuth client.
+const MIRRORS: &str = "2.1.282";
 const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const AUTHORIZE_URL: &str = "https://claude.com/cai/oauth/authorize";
 const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
@@ -551,6 +551,10 @@ impl Provider for Claude {
             });
         }
         written
+    }
+
+    fn mirrors(&self) -> Option<&'static str> {
+        Some(MIRRORS)
     }
 
     fn run_spec(&self) -> Option<RunSpec> {

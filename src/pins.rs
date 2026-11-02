@@ -87,6 +87,19 @@ fn read_pin(store: &Store, path: &Path, provider: &str) -> Result<Option<String>
     Ok(Some(name))
 }
 
+/// The nearest `.remuda.toml` from `dir` up, when it is not read until allowed.
+pub fn untrusted(store: &Store, dir: &Path) -> Option<PathBuf> {
+    let path = dir
+        .ancestors()
+        .map(|d| d.join(FILE))
+        .find(|p| std::fs::symlink_metadata(p).is_ok())?;
+    let trusted = ours(&path)
+        && std::fs::read_to_string(&path).is_ok_and(|text| {
+            allowed(store).get(&path.display().to_string()) == Some(&digest(&text))
+        });
+    (!trusted).then_some(path)
+}
+
 /// Pins `provider` to `name` in `dir`'s `.remuda.toml`, or unpins it, keeping
 /// the rest of the file as written, and allows what it then holds.
 pub fn set(store: &Store, dir: &Path, provider: &str, name: Option<&str>) -> Result<PathBuf> {

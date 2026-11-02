@@ -10,6 +10,7 @@ mod config;
 mod cursor;
 mod device;
 mod dirs;
+mod doctor;
 mod fsx;
 mod gauge;
 mod grok;
@@ -131,6 +132,13 @@ enum Cmd {
     Remove { name: String },
     /// Say which login auto mode puts each CLI on now, and why, without switching.
     Auto,
+    /// Check what remuda relies on: the service, the refresh timer,
+    /// TokenGauge, the stored and live logins, the CLIs' versions.
+    Doctor {
+        /// Print the vitals as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Start a CLI on a stored login without switching the one every other
     /// session uses: NAME, PROVIDER/NAME, or a provider alone for the login
     /// `.remuda.toml` pins here, else the one it uses now. Anything after `--`
@@ -209,6 +217,7 @@ impl Cmd {
             Cmd::Rename { .. } => Some("renaming"),
             Cmd::Remove { .. } => Some("removing"),
             Cmd::Auto => Some("checking auto mode"),
+            Cmd::Doctor { .. } => Some("checking"),
             Cmd::Log { .. } => Some("reading the log"),
             Cmd::Run { .. } | Cmd::Cli(_) | Cmd::ShellInit { .. } => None,
             Cmd::Pin { name, .. } => name.as_ref().map(|_| "pinning"),
@@ -273,9 +282,11 @@ fn sync_units() -> Result<()> {
             eprintln!("warning: run `systemctl --user daemon-reload`");
         }
     }
-    if systemctl(&["is-active", "--quiet", SERVE_UNIT]) && !systemctl(&["restart", SERVE_UNIT]) {
+    if systemctl(&["is-active", "--quiet", units::SERVE]) && !systemctl(&["restart", units::SERVE])
+    {
         eprintln!(
-            "warning: {SERVE_UNIT} still runs the old binary; run `systemctl --user restart {SERVE_UNIT}`"
+            "warning: {serve} still runs the old binary; run `systemctl --user restart {serve}`",
+            serve = units::SERVE
         );
     }
     if !done.failed.is_empty() {
@@ -284,15 +295,13 @@ fn sync_units() -> Result<()> {
     Ok(())
 }
 
-const SERVE_UNIT: &str = "remuda-serve.service";
-
 fn start_service() -> bool {
     let installed = paths::systemd_user_units()
         .iter()
-        .any(|dir| dir.join(SERVE_UNIT).exists());
+        .any(|dir| dir.join(units::SERVE).exists());
     installed
         && std::process::Command::new("systemctl")
-            .args(["--user", "start", SERVE_UNIT])
+            .args(["--user", "start", units::SERVE])
             .stdin(std::process::Stdio::null())
             .status()
             .is_ok_and(|s| s.success())
@@ -780,6 +789,24 @@ fn main() -> Result<()> {
                 &paths::tokengauge_snapshot(),
                 out,
             )
+        }
+        Cmd::Doctor { json } => {
+            let lives = commands::sync_all(&store, &providers)?;
+            let here = std::env::current_dir().ok();
+            let search = std::env::var_os("PATH");
+            let now = fsx::now_ms();
+            let vitals = doctor::vitals(&doctor::Checkup {
+                store: &store,
+                lives: &lives,
+                units: &paths::systemd_user_units(),
+                snapshot: &paths::tokengauge_snapshot(),
+                config: &paths::config_file(),
+                serving: served::serving(&paths::runtime_dir()),
+                search: search.as_deref(),
+                here: here.as_deref(),
+                now,
+            });
+            doctor::print(&vitals, now, json, out)
         }
         Cmd::Log { name, lines, json } => commands::log(
             &store,

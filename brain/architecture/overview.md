@@ -18,7 +18,8 @@ running.
 | `store.rs` | The credential store: entries, sidecars, rename, remove, the lock |
 | `serve.rs` | The local page and its JSON API; the page is built from `web/` by `build.rs` |
 | `served.rs` | The files a running page announces itself in, and finding it again for `open` |
-| `units.rs` | The systemd units the binary carries, and rewriting installed ones after an update |
+| `units.rs` | The systemd units the binary carries, rewriting installed ones after an update, and whether one is enabled |
+| `doctor.rs` | The vitals `remuda doctor` prints and the page's Status shows |
 | `http.rs` | The page's HTTP listener: bounded reads, checks before bodies, a connection limit, the event stream |
 | `proxy/` | The API proxy: its settings and keys, its own listener, model routing, forwarding to each CLI's endpoint |
 | `oauth.rs` | The HTTP client and token requests both providers share |

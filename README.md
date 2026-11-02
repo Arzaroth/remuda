@@ -116,6 +116,7 @@ take `-p <cli>`: `claude` (the default), `codex`, `cursor`, `glm`, `grok`,
 | `remuda rm <name>` | Delete a stored credential |
 | `remuda auto` | Say which login auto mode would put each CLI on now, and why |
 | `remuda log [name] [-n N] [--json]` | Show what remuda did: switches and who made them, refreshes, auto mode, keep-warm, the proxy |
+| `remuda doctor [--json]` | Check what remuda relies on (the service, the refresh timer, TokenGauge, the logins, the CLIs' versions) and say how to fix what is wrong |
 | `remuda serve [--port N] [--no-browser]` | Do all of the above from a page in the browser, and run auto mode |
 | `remuda open [--no-browser]` | Open the page a running `serve` shows |
 | `remuda completions <shell>` | Print a completion script |
@@ -166,8 +167,9 @@ did not write, one that came with a clone say, is ignored until `remuda pin
 `remuda serve` listens on `127.0.0.1:7429` and opens a page listing each CLI's
 credentials, with use, refresh, label, rename and remove, an import button for
 a live login nobody stored yet, and sign-in for a new account. It also shows how
-long each credential's tokens have left, whether the refresh timer is running
-and what its last run did, and, when
+long each credential's tokens have left, what `remuda doctor` finds (the
+service, the refresh timer and its last run, the logins that need signing in
+again), and, when
 [TokenGauge](https://github.com/Arzaroth/TokenGauge) is installed, each login's
 usage, read from TokenGauge's snapshot (only the login in use before
 TokenGauge 0.37). It keeps itself current: a change made from the CLI, by the

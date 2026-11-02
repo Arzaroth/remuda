@@ -1,97 +1,83 @@
-import { createSignal, For, Match, Show, Switch } from 'solid-js';
-import { ago, MIN, plural } from '../format';
+import { createSignal, For, Show } from 'solid-js';
+import { plural } from '../format';
 import { now } from '../state';
-import type { State } from '../types';
+import type { State, Vital } from '../types';
+import { detail, parts, tone, worst } from '../vitals';
 
 export function healthTone(s: State): '' | 'warn' | 'bad' {
-  const h = s.health;
-  if (h.timer !== 'enabled') return 'warn';
-  const r = h.lastRefresh;
-  if (!r || now() - r.at > 75 * MIN) return 'warn';
-  return r.problems.length ? 'bad' : '';
+  return tone(worst(s.health.vitals));
+}
+
+function Text(props: { text: string }) {
+  return (
+    <For each={parts(props.text)}>
+      {(p) =>
+        p.kind === 'code' ? (
+          <code>{p.text}</code>
+        ) : p.kind === 'link' ? (
+          <a href={p.text} target="_blank" rel="noopener noreferrer">
+            {p.text}
+          </a>
+        ) : (
+          p.text
+        )
+      }
+    </For>
+  );
+}
+
+function Row(props: { v: Vital }) {
+  const [open, setOpen] = createSignal(false);
+  const items = () => props.v.items ?? [];
+  const id = () => `vital-${props.v.id}`;
+  return (
+    <div class="vital">
+      <span class={`dot ${props.v.level === 'ok' ? 'good' : tone(props.v.level)}`} />
+      <span class="sr">{props.v.level}</span>
+      <div class="vital-body">
+        <div>
+          <b>{props.v.title}</b> <Text text={detail(props.v, now())} />
+          <Show when={items().length}>
+            {' '}
+            <button class="linkish" aria-expanded={open()} aria-controls={id()} onClick={() => setOpen(!open())}>
+              {plural(items().length, 'detail')}
+            </button>
+          </Show>
+        </div>
+        <Show when={props.v.fix}>
+          {(fix) => (
+            <div class="vital-fix">
+              <Text text={fix()} />
+            </div>
+          )}
+        </Show>
+        <Show when={items().length}>
+          <ul class="problems" id={id()} hidden={!open()}>
+            <For each={items()}>
+              {(item) => (
+                <li>
+                  <Text text={item} />
+                </li>
+              )}
+            </For>
+          </ul>
+        </Show>
+      </div>
+    </div>
+  );
 }
 
 export function Health(props: { state: State }) {
-  const [open, setOpen] = createSignal(false);
-  const h = () => props.state.health;
-  const run = () => h().lastRefresh;
-  const count = () => run()?.problems?.length || 0;
-  const tone = () => healthTone(props.state) || 'good';
   return (
     <div class="health">
       <div class="health-line">
-        <Switch>
-          <Match when={h().timer === 'enabled'}>
-            <div>
-              <span class={`dot ${tone()}`} />
-              <span>
-                {run() ? `Refresh timer ran ${ago(run()!.at, now())}, refreshed ${run()!.refreshed.length}` : 'Refresh timer on, it has not run yet'}
-                <Show when={count()}>
-                  ,{' '}
-                  <button class="linkish" aria-expanded={open()} aria-controls="problems" onClick={() => setOpen(!open())}>
-                    {plural(count(), 'problem')}
-                  </button>
-                </Show>
-              </span>
-            </div>
-          </Match>
-          <Match when={h().timer === 'masked'}>
-            <div>
-              <span class="dot warn" />
-              <span>
-                Refresh timer masked: <code>systemctl --user unmask remuda-refresh.timer</code>
-              </span>
-            </div>
-          </Match>
-          <Match when={h().timer === 'disabled'}>
-            <div>
-              <span class="dot warn" />
-              <span>
-                Refresh timer installed but off: <code>systemctl --user enable --now remuda-refresh.timer</code>
-              </span>
-            </div>
-          </Match>
-          <Match when={true}>
-            <div>
-              <span class="dot warn" />
-              <span>No refresh timer; spare logins stay fresh only when you press Refresh tokens</span>
-            </div>
-          </Match>
-        </Switch>
-        <Show
-          when={h().tokengauge}
-          fallback={
-            <div>
-              <span class="dot" />
-              <span>
-                Install{' '}
-                <a href="https://github.com/Arzaroth/TokenGauge" target="_blank" rel="noopener noreferrer">
-                  TokenGauge
-                </a>{' '}
-                to see usage here
-              </span>
-            </div>
-          }
-        >
-          <div>
-            <span class="dot good" />
-            <span>
-              Usage from TokenGauge
-              {props.state.usage?.updatedAt ? `, updated ${ago(props.state.usage.updatedAt, now())}` : ''}
-            </span>
-          </div>
-        </Show>
+        <For each={props.state.health.vitals}>{(v) => <Row v={v} />}</For>
         <div>
           <span>
             Store <code>{props.state.store}</code>
           </span>
         </div>
       </div>
-      <Show when={count()}>
-        <ul class="problems" id="problems" hidden={!open()}>
-          <For each={run()!.problems}>{(l) => <li>{l}</li>}</For>
-        </ul>
-      </Show>
     </div>
   );
 }

@@ -138,7 +138,9 @@ export function App() {
                     <header class="page-head">
                       <div>
                         <h1>Status</h1>
-                        <p class="page-sub">The refresh timer, TokenGauge, and where the logins are stored</p>
+                        <p class="page-sub">
+                          What remuda relies on, as <code>remuda doctor</code> checks it
+                        </p>
                       </div>
                     </header>
                     <Health state={store.s!} />

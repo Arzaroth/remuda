@@ -42,9 +42,20 @@ export type Usage = {
 
 export type Shown = Usage & { passive?: boolean; missing?: boolean; behind?: boolean };
 
+export type Level = 'ok' | 'info' | 'warn' | 'bad';
+
+export type Vital = {
+  id: string;
+  level: Level;
+  title: string;
+  detail: string;
+  since?: number;
+  fix?: string;
+  items?: string[];
+};
+
 export type Health = {
-  timer: 'enabled' | 'disabled' | 'masked' | 'absent';
-  lastRefresh: { at: number; refreshed: string[]; problems: string[] } | null;
+  vitals: Vital[];
   tokengauge: boolean;
   switchedAt: Record<string, number>;
 };

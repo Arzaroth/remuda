@@ -347,6 +347,7 @@ mod tests {
                 tokengauge: None,
                 github: "http://127.0.0.1:1".into(),
                 runtime: e.tmp.path().join("run"),
+                search: None,
             },
             providers,
             TOKEN.into(),

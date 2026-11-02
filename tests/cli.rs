@@ -475,6 +475,54 @@ fn auto_says_where_it_would_move_a_cli_and_moves_nothing() {
 }
 
 #[test]
+fn doctor_checks_the_setup_and_fails_on_what_is_broken() {
+    let home = Home::new();
+    home.sign_in("a-work", "r-work", "u-work");
+    home.ok(&["import", "work"]);
+    let nothing = home.path("empty-bin");
+    std::fs::create_dir_all(&nothing).unwrap();
+    let doctor = |args: &[&str]| {
+        home.command(args)
+            .env("PATH", &nothing)
+            .current_dir(home.path(""))
+            .output()
+            .unwrap()
+    };
+
+    let out = doctor(&["doctor"]);
+    assert!(out.status.success());
+    let out = String::from_utf8(out.stdout).unwrap();
+    assert!(out.contains("info  remuda serve "), "{out}");
+    assert!(out.contains("1 stored, all verified"), "{out}");
+    assert!(!out.contains("Claude Code version"), "{out}");
+
+    std::fs::create_dir_all(home.path(".config/remuda")).unwrap();
+    std::fs::write(
+        home.path(".config/remuda/config.toml"),
+        "[auto.claude]\nenabled = true\nlogins = [\"work\"]\n",
+    )
+    .unwrap();
+    let out = doctor(&["doctor"]);
+    assert!(!out.status.success());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        stdout.contains("not running, so auto mode does nothing"),
+        "{stdout}"
+    );
+    assert!(
+        String::from_utf8(out.stderr)
+            .unwrap()
+            .contains("1 vital(s) failing")
+    );
+
+    let out = doctor(&["doctor", "--json"]);
+    assert!(!out.status.success());
+    let vitals: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(vitals[0]["id"], "serve");
+    assert_eq!(vitals[0]["level"], "bad");
+}
+
+#[test]
 fn completions_cover_every_command() {
     let home = Home::new();
     let zsh = home.ok(&["completions", "zsh"]);
@@ -485,6 +533,7 @@ fn completions_cover_every_command() {
         "label",
         "rename",
         "auto",
+        "doctor",
         "log",
         "run",
         "pin",
