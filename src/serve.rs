@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 use crate::auto;
 use crate::commands::{self, RefreshScope};
 use crate::config;
+use crate::doctor;
 use crate::fsx;
 use crate::gauge;
 use crate::logbook::{self, By, Event, Kind};
@@ -22,7 +23,6 @@ use crate::proxy;
 use crate::runs;
 use crate::shown;
 use crate::store::Store;
-use crate::units;
 use crate::warm;
 
 const PAGE: &str = include_str!(concat!(env!("OUT_DIR"), "/serve.html"));
@@ -48,6 +48,8 @@ pub struct Places {
     pub github: String,
     /// Where `serve.url` is, for a restart the page asks for.
     pub runtime: PathBuf,
+    /// Where the CLIs are looked for, as `$PATH`.
+    pub search: Option<std::ffi::OsString>,
 }
 
 impl Places {
@@ -59,6 +61,7 @@ impl Places {
             tokengauge: selvedge::proc::installed("tokengauge"),
             github: crate::versions::GITHUB.to_owned(),
             runtime: paths::runtime_dir(),
+            search: std::env::var_os("PATH"),
         }
     }
 }
@@ -485,10 +488,23 @@ impl App {
         })
     }
 
-    fn health(&self) -> Value {
+    fn health(&self, lives: &[commands::Live]) -> Value {
+        let vitals = doctor::vitals(&doctor::Checkup {
+            store: &self.store,
+            lives,
+            units: &self.places.units,
+            snapshot: &self.places.snapshot,
+            config: &self.places.config,
+            serving: Some((
+                env!("CARGO_PKG_VERSION").to_owned(),
+                crate::dirs::is_service(false),
+            )),
+            search: self.places.search.as_deref(),
+            here: None,
+            now: fsx::now_ms(),
+        });
         json!({
-            "timer": units::state(&self.places.units, units::TIMER, "timers.target.wants"),
-            "lastRefresh": runs::last(&self.store),
+            "vitals": vitals,
             "tokengauge": self.places.snapshot.exists(),
             "switchedAt": runs::switches(&self.store),
         })
@@ -713,7 +729,7 @@ impl App {
                         json!({"id": p.id(), "name": p.name(), "warm": warm})
                     })
                     .collect();
-                state["health"] = self.health();
+                state["health"] = self.health(&lives);
                 state["usage"] = gauge::read(&self.places.snapshot).unwrap_or(Value::Null);
                 state["shown"] = shown::shown(&state);
                 state["auto"] = json!(*self.auto.lock().unwrap());
@@ -1000,6 +1016,7 @@ mod tests {
             tokengauge: None,
             github: "http://127.0.0.1:1".into(),
             runtime: e.tmp.path().join("run"),
+            search: None,
         }
     }
 
@@ -1248,12 +1265,21 @@ mod tests {
     }
 
     #[test]
-    fn the_state_reports_the_timer_its_last_run_and_tokengauge_usage() {
+    fn the_state_reports_the_vitals_and_tokengauge_usage() {
         let e = env(&OFFLINE);
         let app = app(&e, &OFFLINE);
+        let vital = |id: &str| {
+            let (_, state) = call(&app, "GET", "/api/state", Value::Null);
+            let vitals = state["health"]["vitals"].as_array().unwrap().clone();
+            vitals.into_iter().find(|v| v["id"] == id).unwrap()
+        };
         let (_, state) = call(&app, "GET", "/api/state", Value::Null);
-        assert_eq!(state["health"]["timer"], "absent");
-        assert_eq!(state["health"]["lastRefresh"], Value::Null);
+        assert_eq!(vital("timer")["level"], "warn");
+        assert_eq!(vital("refresh")["detail"], "the timer has not run yet");
+        assert_eq!(
+            vital("serve")["detail"],
+            "running, but not as remuda-serve.service: it stops with its terminal or at logout"
+        );
         assert_eq!(state["health"]["tokengauge"], false);
         assert_eq!(state["usage"], Value::Null);
 
@@ -1262,8 +1288,7 @@ mod tests {
         std::fs::create_dir_all(global.join("timers.target.wants")).unwrap();
         std::fs::create_dir_all(&units).unwrap();
         std::fs::write(units.join("remuda-refresh.timer"), "").unwrap();
-        let (_, state) = call(&app, "GET", "/api/state", Value::Null);
-        assert_eq!(state["health"]["timer"], "disabled");
+        assert_eq!(vital("timer")["detail"], "installed but off");
         std::os::unix::fs::symlink(
             units.join("remuda-refresh.timer"),
             global.join("timers.target.wants/remuda-refresh.timer"),
@@ -1287,8 +1312,8 @@ mod tests {
         )
         .unwrap();
         let (_, state) = call(&app, "GET", "/api/state", Value::Null);
-        assert_eq!(state["health"]["timer"], "enabled");
-        assert_eq!(state["health"]["lastRefresh"]["at"], 7);
+        assert_eq!(vital("timer")["level"], "ok");
+        assert_eq!(vital("refresh")["since"], 7);
         assert_eq!(state["health"]["tokengauge"], true);
         assert_eq!(state["health"]["switchedAt"]["claude"], 9);
         assert_eq!(
@@ -1303,14 +1328,14 @@ mod tests {
         );
         assert_eq!(state["shown"]["claude"]["weighted"], json!([]));
 
-        let timer = || call(&app, "GET", "/api/state", Value::Null).1["health"]["timer"].clone();
+        let timer = || vital("timer")["detail"].clone();
         std::fs::remove_file(units.join("remuda-refresh.timer")).unwrap();
         std::os::unix::fs::symlink("/dev/null", units.join("remuda-refresh.timer")).unwrap();
         assert_eq!(timer(), "masked");
         std::fs::remove_file(units.join("remuda-refresh.timer")).unwrap();
-        assert_eq!(timer(), "absent");
+        assert!(timer().as_str().unwrap().starts_with("not installed"));
         std::fs::write(global.join("remuda-refresh.timer"), "").unwrap();
-        assert_eq!(timer(), "disabled");
+        assert_eq!(timer(), "installed but off");
     }
 
     #[test]
