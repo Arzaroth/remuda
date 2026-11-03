@@ -198,14 +198,19 @@ Three tabs, each filtered by a CLI and a login, the first two by a range (7,
   requests per minute, tokens per day per model, outcomes and the models that
   failed most, requests per day by outcome, and the split by login.
 - **Value** is what a week of each login bought: the API dollars it spent per
-  percent of its weekly allowance, week by week, with a chart of the whole
-  closed weeks once there are two and how the last closed week compares with
-  the four before it. `value::weeks` joins TokenGauge's window history (the
+  percent of its weekly allowance, week by week, with a chart of the whole,
+  priced closed weeks once there are two and how the last such week compares
+  with the four before it. `value::weeks` joins TokenGauge's window history (the
   weeks it recorded as they closed, TokenGauge 0.56 or later, and the one
   still open) with the spend export of the last 400 days by login. A login's
   week is its first weekly window of the three fixed ones at the time, since a
   model's own window counts one model and the spend is every model's; a login
-  whose weekly window moved to another slot keeps its weeks from before. A day
+  whose weekly window moved to another slot keeps the weeks that ended before
+  the move, and the week the move cut through is not counted, since its
+  percent covers the whole of it. A week is matched to the spend by the account
+  TokenGauge recorded it for, so a name the store reused for another account
+  keeps the old account's weeks, and by its name only when that account is
+  unknown. A day
   the week covers in part counts in proportion, today's row as spent so far, a
   week reset early ends where the next one opened, and the open week runs to
   now ("so far"). Spend no record attributes is shown beside the week, a week
