@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `remuda doctor` and the Status page showed Claude Code's version for Codex
+  when both are installed through a version manager such as mise, whose
+  shims all link to one program.
+
 ## [0.31.0] - 2026-11-03
 
 ### Added
