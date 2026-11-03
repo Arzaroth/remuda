@@ -32,6 +32,8 @@ const FIXED: [&str; 3] = ["primary", "secondary", "tertiary"];
 pub struct Week {
     pub provider: String,
     pub login: Option<String>,
+    /// The account digest the week's spend was matched by.
+    pub account: Option<String>,
     pub opened_at: i64,
     /// When it reset, or now for a week still open.
     pub ends_at: i64,
@@ -146,12 +148,20 @@ pub fn weeks(
     now: i64,
 ) -> Vec<Week> {
     let mut spans = spans(history, now);
+    for s in &mut spans {
+        let named = s
+            .login
+            .as_ref()
+            .and_then(|name| digests.get(&(s.provider.clone(), name.clone())))
+            .cloned();
+        s.digest = s.digest.take().filter(|d| known.contains(d)).or(named);
+    }
     let slot = |w: &str| FIXED.iter().position(|f| *f == w).unwrap_or(FIXED.len());
     let shadowed: Vec<bool> = spans
         .iter()
         .map(|s| {
             spans.iter().any(|t| {
-                (&t.provider, &t.login) == (&s.provider, &s.login)
+                (&t.provider, &t.login, &t.digest) == (&s.provider, &s.login, &s.digest)
                     && slot(&t.window) < slot(&s.window)
                     && t.opened < s.resets
                     && s.opened < t.resets
@@ -161,9 +171,10 @@ pub fn weeks(
     let mut shadowed = shadowed.into_iter();
     spans.retain(|_| !shadowed.next().unwrap_or(false));
     spans.sort_by(|a, b| {
-        (&a.provider, &a.login, &a.window, a.opened).cmp(&(
+        (&a.provider, &a.login, &a.digest, &a.window, a.opened).cmp(&(
             &b.provider,
             &b.login,
+            &b.digest,
             &b.window,
             b.opened,
         ))
@@ -187,22 +198,17 @@ pub fn weeks(
     for (i, s) in spans.iter().enumerate() {
         let next = spans
             .get(i + 1)
-            .filter(|n| (&n.provider, &n.login, &n.window) == (&s.provider, &s.login, &s.window))
+            .filter(|n| {
+                (&n.provider, &n.login, &n.digest, &n.window)
+                    == (&s.provider, &s.login, &s.digest, &s.window)
+            })
             .map(|n| n.opened);
         let ends = if s.open {
             now
         } else {
             next.map_or(s.resets, |n| n.min(s.resets))
         };
-        let digest = s
-            .digest
-            .as_ref()
-            .filter(|d| known.contains(*d))
-            .or_else(|| {
-                s.login
-                    .as_ref()
-                    .and_then(|name| digests.get(&(s.provider.clone(), name.clone())))
-            });
+        let digest = s.digest.as_ref();
         let (mut usd, mut unattributed, mut unpriced) = (0.0, 0.0, false);
         for (row, day) in export.rows.iter().zip(&days) {
             let Some((start, end)) = *day else {
@@ -232,6 +238,7 @@ pub fn weeks(
         out.push(Week {
             provider: s.provider.clone(),
             login: s.login.clone(),
+            account: s.digest.clone(),
             opened_at: s.opened,
             ends_at: ends,
             open: s.open,
