@@ -5,6 +5,10 @@ import { change, changeText, plans, type ValueAnswer, type Week } from '../value
 import { LineChart } from './Charts';
 import { ProviderIcon } from './ProviderIcon';
 
+const iso = (ms: number) => {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 const day = (ms: number) => new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
 function flags(w: Week): string {
@@ -53,7 +57,7 @@ export function Value(props: { answer: ValueAnswer; provider: string | null; log
                 </h3>
                 <Show when={charted().length > 1}>
                   <LineChart
-                    dates={charted().map((w) => new Date(w.openedAt).toISOString().slice(0, 10))}
+                    dates={charted().map((w) => iso(w.openedAt))}
                     series={[{ id: p.login, label: 'Per 1%', color: brand(p.provider), values: charted().map((w) => w.usdPerPercent!) }]}
                     format={money}
                     label={`API dollars per percent of ${p.login}'s week`}

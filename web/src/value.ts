@@ -3,6 +3,7 @@ import type { Login } from './spend';
 export type Week = {
   provider: string;
   login: string | null;
+  account: string | null;
   openedAt: number;
   endsAt: number;
   open: boolean;
@@ -19,12 +20,12 @@ export type ValueAnswer = { weeks?: Week[]; logins?: Record<string, Login>; unav
 export type Plan = { provider: string; login: string; weeks: Week[] };
 
 // Every login's weeks, oldest first, the logins in the order their newest
-// week came.
+// week came. Two accounts that held one name are two histories.
 export function plans(weeks: Week[]): Plan[] {
   const out = new Map<string, Plan>();
   for (const w of [...weeks].sort((a, b) => b.openedAt - a.openedAt)) {
     if (!w.login) continue;
-    const key = `${w.provider}/${w.login}`;
+    const key = `${w.provider}/${w.login}/${w.account ?? ''}`;
     if (!out.has(key)) out.set(key, { provider: w.provider, login: w.login, weeks: [] });
     out.get(key)!.weeks.unshift(w);
   }
