@@ -5,6 +5,7 @@ const DAY = 86_400_000;
 const week = (n: number, over: Partial<Week> = {}): Week => ({
   provider: 'codex',
   login: 'work',
+  account: 'd-work',
   openedAt: n * 7 * DAY,
   endsAt: (n + 1) * 7 * DAY,
   open: false,
@@ -18,10 +19,11 @@ const week = (n: number, over: Partial<Week> = {}): Week => ({
 });
 
 describe('value', () => {
-  it('groups the weeks by login, oldest first, newest login first', () => {
-    const got = plans([week(1), week(3, { login: 'perso' }), week(2), week(0, { login: null })]);
-    expect(got.map((p) => p.login)).toEqual(['perso', 'work']);
-    expect(got[1].weeks.map((w) => w.openedAt)).toEqual([7 * DAY, 14 * DAY]);
+  it('groups the weeks by login and account, oldest first, newest login first', () => {
+    const got = plans([week(1), week(3, { login: 'perso' }), week(2), week(0, { login: null }), week(4, { account: 'd-old' })]);
+    expect(got.map((p) => p.login)).toEqual(['work', 'perso', 'work']);
+    expect(got[0].weeks.map((w) => w.account)).toEqual(['d-old']);
+    expect(got[2].weeks.map((w) => w.openedAt)).toEqual([7 * DAY, 14 * DAY]);
   });
 
   it('compares the last closed week with up to four before it', () => {
