@@ -406,7 +406,8 @@ jobs:
         env:
           RPM: ${{ matrix.rpm }}
         run: |
-          docker run --rm -e RPM -v "$PWD/dist:/d:ro" -v "$PWD/scripts:/s:ro" fedora:latest sh -ec '
+          docker run --rm -e RPM -v "$PWD/dist:/d:ro" -v "$PWD/scripts:/s:ro" -v "$PWD/packaging:/p:ro" fedora:latest sh -ec '
+            rpm --import /p/remuda.asc
             rpm -i /d/remuda-*."$RPM".rpm
             rpm -V remuda
             sh /s/check-package.sh
