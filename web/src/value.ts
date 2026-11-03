@@ -11,6 +11,7 @@ export type Week = {
   usdPerPercent: number | null;
   unattributedUsd: number;
   partial: boolean;
+  unpriced: boolean;
 };
 
 export type ValueAnswer = { weeks?: Week[]; logins?: Record<string, Login>; unavailable?: string };

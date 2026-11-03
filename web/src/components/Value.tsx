@@ -11,6 +11,7 @@ function flags(w: Week): string {
   const out: string[] = [];
   if (w.open) out.push('so far');
   if (w.partial) out.push('the record starts mid-week');
+  if (w.unpriced) out.push('some use has no price');
   if (w.unattributedUsd >= 0.01) out.push(`${money(w.unattributedUsd)} more no login claims`);
   return out.join(' · ');
 }
@@ -27,17 +28,28 @@ export function Value(props: { answer: ValueAnswer; provider: string | null; log
         What a week of each login bought, in API dollars per percent of its weekly allowance. It counts only what TokenGauge saw on the
         machines it syncs: use on the web, in the desktop apps or on a machine without it makes a week look worth less than it was.
       </p>
-      <Show when={shown().length} fallback={<p class="note">No week has been recorded yet: TokenGauge 0.56 or later keeps them once they close.</p>}>
+      <Show
+        when={shown().length}
+        fallback={
+          <p class="note">
+            {props.answer.weeks?.length
+              ? 'No week recorded for this CLI or login.'
+              : 'No week has been recorded yet: TokenGauge 0.56 or later keeps them once they close.'}
+          </p>
+        }
+      >
         <For each={shown()}>
           {(p) => {
             const ratio = () => change(p.weeks);
-            const charted = () => p.weeks.filter((w) => !w.open && w.usdPerPercent != null);
+            const charted = () => p.weeks.filter((w) => !w.open && !w.partial && w.usdPerPercent != null);
             return (
               <section class="u-card">
                 <h3 class="u-plan">
                   <ProviderIcon provider={p.provider} size={20} />
                   <span>{p.login}</span>
-                  <Show when={ratio()}>{(r) => <small class="u-sub">Last week: {changeText(r())}</small>}</Show>
+                  <Show when={ratio() != null}>
+                    <small class="u-sub">Last week: {changeText(ratio()!)}</small>
+                  </Show>
                 </h3>
                 <Show when={charted().length > 1}>
                   <LineChart

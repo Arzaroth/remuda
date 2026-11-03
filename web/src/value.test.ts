@@ -13,6 +13,7 @@ const week = (n: number, over: Partial<Week> = {}): Week => ({
   usdPerPercent: 1,
   unattributedUsd: 0,
   partial: false,
+  unpriced: false,
   ...over,
 });
 
