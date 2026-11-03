@@ -59,7 +59,11 @@ Add a login.
   small meter per usage window, how long its access token has left, Use (or
   "In use" on the one in use, which also has a green edge), and a chevron
   that opens its details in place: a row per usage window (its title,
-  percentage and reset over a bar, then "Figures from N minutes ago" when
+  percentage and reset over a bar; under the bar the window's trail since it
+  opened, a step line on the window's whole length with the forecast dashed
+  on from now, and "Full Thu 14:00 at this pace" or "Ends ~60% at this pace",
+  toned like a meter, with the recent rate on hover, `forecast.ts`; neither
+  when TokenGauge has no history or burn for the window; then "Figures from N minutes ago" when
   TokenGauge carried them from an earlier ask than its snapshot, `windows.ts`
   `carriedSince`), a Claude login's banked usage-limit resets and when they
   expire, with a Reset limits button that asks for a second click before it
@@ -232,7 +236,7 @@ refused.
   the settings in [AutoMode.tsx](../../web/src/components/AutoMode.tsx) and
   [config.ts](../../web/src/config.ts)
 - [src/serve.rs](../../src/serve.rs)
-- [src/gauge.rs](../../src/gauge.rs)
+- [src/gauge.rs](../../src/gauge.rs), [web/src/forecast.ts](../../web/src/forecast.ts)
 - [src/runs.rs](../../src/runs.rs)
 - [src/versions.rs](../../src/versions.rs), [web/src/components/Versions.tsx](../../web/src/components/Versions.tsx),
   [web/src/notes.ts](../../web/src/notes.ts)

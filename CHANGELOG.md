@@ -4,6 +4,13 @@
 
 ### Added
 
+- A login's details draw each usage window's trail since it opened and say
+  where it is heading at its recent pace: "Full Thu 14:00 at this pace" when
+  it runs out before its reset, "Ends ~60% at this pace" otherwise. The pace
+  is how fast the window has been filling lately, as TokenGauge measures it,
+  so a morning's burst followed by a quiet afternoon does not read as a
+  run-out. Needs TokenGauge 0.54 or later; with an older one the meters show
+  as before.
 - The page has a Versions view: the remuda and TokenGauge installed here
   beside GitHub's latest release of each, an Update button for either, and
   the release notes of every version since the one installed. Updating
