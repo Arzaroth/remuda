@@ -226,3 +226,142 @@ pub fn history(snapshot: &Path) -> Value {
         .and_then(|t| serde_json::from_str(&t).ok())
         .unwrap_or(Value::Null)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    const DAY: i64 = 86_400_000;
+    // 2026-10-05T00:00:00Z, a Monday.
+    const MON: i64 = 1_791_158_400_000;
+
+    fn iso(ms: i64) -> String {
+        Timestamp::from_millisecond(ms).unwrap().to_string()
+    }
+
+    fn closed(login: &str, window: &str, minutes: u64, opened: i64, used: u64) -> Value {
+        json!({"provider": "codex", "credential": login, "window": window, "windowMinutes": minutes,
+               "openedAt": iso(opened), "resetsAt": iso(opened + minutes as i64 * 60_000),
+               "used": used, "seenAt": iso(opened + DAY)})
+    }
+
+    fn export(rows: &[(&str, Option<&str>, f64)], covers_from: Option<&str>) -> UsageExport {
+        serde_json::from_value(json!({
+            "schemaVersion": 1, "generatedAt": 0, "currency": "USD", "coversFrom": covers_from,
+            "rows": rows.iter().map(|(date, login, usd)| json!({
+                "date": date, "provider": "codex", "model": "gpt-6", "login": login, "source": "cli",
+                "tokens": {"input": 0, "output": 0, "cacheWrite5m": 0, "cacheWrite1h": 0, "cacheRead": 0},
+                "usd": {"input": usd, "output": 0.0, "cacheWrite": 0.0, "cacheRead": 0.0}
+            })).collect::<Vec<_>>()
+        }))
+        .unwrap()
+    }
+
+    fn digests() -> HashMap<(String, String), String> {
+        HashMap::from([
+            (("codex".into(), "work".into()), "d-work".into()),
+            (("codex".into(), "perso".into()), "d-perso".into()),
+        ])
+    }
+
+    fn close(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-9
+    }
+
+    #[test]
+    fn a_week_counts_its_logins_days_and_a_day_it_covers_in_part_in_proportion() {
+        let opened = MON + DAY / 2;
+        let history = json!({"closed": [closed("work", "primary", WEEK_MINUTES, opened, 40)]});
+        let rows = export(
+            &[
+                ("2026-10-04", Some("d-work"), 99.0),
+                ("2026-10-05", Some("d-work"), 10.0),
+                ("2026-10-06", Some("d-work"), 30.0),
+                ("2026-10-06", Some("d-perso"), 500.0),
+                ("2026-10-07", None, 8.0),
+                ("2026-10-12", Some("d-work"), 20.0),
+                ("2026-10-13", Some("d-work"), 99.0),
+            ],
+            Some("2026-09-01"),
+        );
+        let weeks = weeks(&history, &rows, &digests(), &TimeZone::UTC, MON + 30 * DAY);
+        assert_eq!(weeks.len(), 1);
+        let w = &weeks[0];
+        assert!(close(w.usd, 5.0 + 30.0 + 10.0), "{}", w.usd);
+        assert!(close(w.unattributed_usd, 8.0));
+        assert!(close(w.usd_per_percent.unwrap(), 45.0 / 40.0));
+        assert_eq!(
+            (w.opened_at, w.ends_at, w.used),
+            (opened, opened + 7 * DAY, 40)
+        );
+        assert!(!w.open && !w.partial);
+    }
+
+    #[test]
+    fn a_week_reset_early_ends_where_the_next_opened_and_the_open_week_runs_to_now() {
+        let next = MON + 3 * DAY;
+        let now = next + DAY;
+        let history = json!({
+            "closed": [closed("work", "primary", WEEK_MINUTES, MON, 70)],
+            "trails": [{"provider": "codex", "credential": "work", "window": "primary",
+                        "windowMinutes": WEEK_MINUTES, "resetsAt": iso(next + 7 * DAY),
+                        "samples": [[next, 0], [next + DAY / 2, 12]]}]
+        });
+        let rows = export(
+            &[
+                ("2026-10-05", Some("d-work"), 7.0),
+                ("2026-10-08", Some("d-work"), 6.0),
+                ("2026-10-09", Some("d-work"), 100.0),
+            ],
+            Some("2026-09-01"),
+        );
+        let weeks = weeks(&history, &rows, &digests(), &TimeZone::UTC, now);
+        assert_eq!(weeks.len(), 2);
+        let (open, shut) = (&weeks[0], &weeks[1]);
+        assert!(open.open && open.used == 12 && open.ends_at == now);
+        assert!(close(open.usd, 6.0));
+        assert!(!shut.open && shut.ends_at == next);
+        assert!(close(shut.usd, 7.0));
+    }
+
+    #[test]
+    fn a_login_s_week_is_its_first_weekly_fixed_window() {
+        let history = json!({"closed": [
+            closed("work", "primary", 300, MON, 90),
+            closed("work", "secondary", WEEK_MINUTES, MON, 50),
+            closed("work", "tertiary", WEEK_MINUTES, MON, 80),
+            {"provider": "codex", "credential": "work", "window": "fable", "windowMinutes": WEEK_MINUTES,
+             "openedAt": iso(MON), "resetsAt": iso(MON + 7 * DAY), "used": 5, "seenAt": iso(MON)}
+        ]});
+        let weeks = weeks(
+            &history,
+            &export(&[], None),
+            &digests(),
+            &TimeZone::UTC,
+            MON + 30 * DAY,
+        );
+        assert_eq!(weeks.iter().map(|w| w.used).collect::<Vec<_>>(), [50]);
+    }
+
+    #[test]
+    fn a_week_before_the_record_starts_or_of_an_unknown_login_says_so() {
+        let history = json!({"closed": [
+            closed("work", "primary", WEEK_MINUTES, MON, 40),
+            closed("gone", "primary", WEEK_MINUTES, MON, 40)
+        ]});
+        let weeks = weeks(
+            &history,
+            &export(&[], Some("2026-10-07")),
+            &digests(),
+            &TimeZone::UTC,
+            MON + 30 * DAY,
+        );
+        assert!(weeks.iter().all(|w| w.partial));
+        let gone = weeks
+            .iter()
+            .find(|w| w.login.as_deref() == Some("gone"))
+            .unwrap();
+        assert_eq!(gone.usd_per_percent, None);
+    }
+}

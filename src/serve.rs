@@ -1895,6 +1895,38 @@ mod tests {
     }
 
     #[test]
+    fn the_value_is_each_login_s_weeks_against_its_spend() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let digest = selvedge::usage::account_digest("u-work");
+        let export = json!({
+            "schemaVersion": 1, "generatedAt": 5, "currency": "USD", "coversFrom": "2026-01-01",
+            "rows": [{"date": "2026-10-06", "provider": "claude", "model": "claude-x",
+                      "login": digest, "source": "cli",
+                      "tokens": {"o": 3}, "usd": {"input": 0.0, "output": 20.0, "cacheWrite": 0.0, "cacheRead": 0.0}}],
+        });
+        std::fs::write(
+            e.tmp.path().join("tokengauge-window-history.json"),
+            json!({"closed": [{"provider": "claude", "credential": "work", "window": "secondary",
+                "windowMinutes": 10080, "openedAt": "2026-10-04T12:00:00Z",
+                "resetsAt": "2026-10-11T12:00:00Z", "used": 40, "seenAt": "2026-10-11T11:00:00Z"}]})
+            .to_string(),
+        )
+        .unwrap();
+        let app = app_with_tokengauge(&e, &format!("echo '{export}'"));
+
+        let (status, body) = call(&app, "POST", "/api/usage/value", json!({}));
+
+        assert_eq!(status, 200, "{body}");
+        let week = &body["weeks"][0];
+        assert_eq!(week["login"], "work");
+        assert_eq!(week["used"], 40);
+        assert_eq!(week["usd"], 20.0);
+        assert_eq!(week["usdPerPercent"], 0.5);
+        assert_eq!(body["logins"][&digest]["name"], "work");
+    }
+
+    #[test]
     fn a_removed_login_keeps_the_last_name_the_ledger_gave_it() {
         use selvedge::usage::ledger::{self, Entry as Line};
         let e = env(&OFFLINE);
