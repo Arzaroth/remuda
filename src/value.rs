@@ -365,6 +365,69 @@ mod tests {
     }
 
     #[test]
+    fn a_login_whose_weekly_window_moved_keeps_its_earlier_weeks() {
+        let later = MON + 7 * DAY;
+        let history = json!({"closed": [
+            closed("work", "secondary", WEEK_MINUTES, MON, 50),
+            closed("work", "primary", 300, MON, 90),
+            closed("work", "primary", WEEK_MINUTES, later, 30),
+            closed("work", "secondary", WEEK_MINUTES, later, 70)
+        ]});
+        let weeks = weeks(
+            &history,
+            &export(&[], None),
+            &digests(),
+            &TimeZone::UTC,
+            MON + 30 * DAY,
+        );
+        assert_eq!(weeks.iter().map(|w| w.used).collect::<Vec<_>>(), [30, 50]);
+    }
+
+    #[test]
+    fn today_counts_as_what_was_spent_so_far() {
+        let now = MON + 3 * DAY + DAY / 4;
+        let history = json!({"trails": [{"provider": "codex", "credential": "work", "window": "primary",
+            "windowMinutes": WEEK_MINUTES, "resetsAt": iso(MON + 7 * DAY), "samples": [[MON, 0], [now, 10]]}]});
+        let rows = export(&[("2026-10-08", Some("d-work"), 12.0)], Some("2026-09-01"));
+        let weeks = weeks(&history, &rows, &digests(), &TimeZone::UTC, now);
+        assert!(close(weeks[0].usd, 12.0), "{}", weeks[0].usd);
+    }
+
+    #[test]
+    fn a_week_with_unpriced_use_of_its_login_says_so() {
+        let history = json!({"closed": [closed("work", "primary", WEEK_MINUTES, MON, 40)]});
+        let mut rows = export(
+            &[
+                ("2026-10-06", Some("d-work"), 1.0),
+                ("2026-10-07", Some("d-perso"), 1.0),
+            ],
+            None,
+        );
+        rows.rows[1].usd = None;
+        rows.rows[1].tokens.output = 5;
+        let priced = weeks(&history, &rows, &digests(), &TimeZone::UTC, MON + 30 * DAY);
+        assert!(!priced[0].unpriced);
+        rows.rows[0].usd = None;
+        rows.rows[0].tokens.output = 5;
+        let unpriced = weeks(&history, &rows, &digests(), &TimeZone::UTC, MON + 30 * DAY);
+        assert!(unpriced[0].unpriced);
+    }
+
+    #[test]
+    fn a_history_that_cannot_be_read_is_an_error_and_a_missing_one_is_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let snapshot = dir.path().join("tokengauge-usage.json");
+        assert_eq!(history(&snapshot).unwrap(), Value::Null);
+        std::fs::write(dir.path().join("tokengauge-window-history.json"), "{nope").unwrap();
+        assert!(
+            history(&snapshot)
+                .unwrap_err()
+                .to_string()
+                .contains("does not parse")
+        );
+    }
+
+    #[test]
     fn a_week_before_the_record_starts_or_of_an_unknown_login_says_so() {
         let history = json!({"closed": [
             closed("work", "primary", WEEK_MINUTES, MON, 40),
