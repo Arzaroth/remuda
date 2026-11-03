@@ -253,7 +253,40 @@ fn window(
         "resetsAt": resets.filter(|_| !elapsed),
         "perHour": per_hour,
         "trail": trail,
+        "forecast": forecast(used.min(100), minutes, reset, per_hour, now),
     }))
+}
+
+/// Where a window lands if its recent burn holds: `fullAt` when it runs out
+/// before its reset, else `ends`, the percent it reaches. Nothing in the first
+/// 3% of a window, as TokenGauge's pace: early numbers are noise.
+fn forecast(
+    used: u64,
+    minutes: Option<u64>,
+    reset: Option<Timestamp>,
+    per_hour: Option<f64>,
+    now: Timestamp,
+) -> Value {
+    const HOUR_MS: f64 = 3_600_000.0;
+    let (Some(minutes), Some(reset), Some(per_hour)) = (minutes, reset, per_hour) else {
+        return Value::Null;
+    };
+    let length = minutes as f64 * 60_000.0;
+    let left = (reset.as_millisecond() - now.as_millisecond()) as f64;
+    if used >= 100 || left <= 0.0 || left > length || length - left < length * 0.03 {
+        return Value::Null;
+    }
+    let used = used as f64;
+    let until_full = if per_hour > 0.0 {
+        (100.0 - used) / per_hour * HOUR_MS
+    } else {
+        f64::INFINITY
+    };
+    if until_full < left {
+        let at = Timestamp::from_millisecond(now.as_millisecond() + until_full as i64);
+        return json!({"fullAt": at.ok().map(|at| at.to_string())});
+    }
+    json!({"ends": (used + per_hour * left / HOUR_MS).round().min(100.0) as u64})
 }
 
 fn span(minutes: u64) -> String {
@@ -564,6 +597,44 @@ mod tests {
             (&windows[0]["perHour"], &windows[0]["trail"]),
             (&json!(12.5), &Value::Null)
         );
+    }
+
+    #[test]
+    fn a_window_forecasts_where_its_recent_burn_takes_it() {
+        let now: Timestamp = "2026-11-03T12:00:00Z".parse().unwrap();
+        let reset = |hours: i64| Some(now + jiff::SignedDuration::from_hours(hours));
+        assert_eq!(
+            forecast(40, Some(300), reset(3), Some(10.0), now),
+            json!({"ends": 70})
+        );
+        assert_eq!(
+            forecast(40, Some(300), reset(3), Some(40.0), now),
+            json!({"fullAt": "2026-11-03T13:30:00Z"})
+        );
+        assert_eq!(
+            forecast(35, Some(300), reset(3), Some(0.0), now),
+            json!({"ends": 35})
+        );
+        assert_eq!(
+            forecast(90, Some(10080), reset(100), Some(0.1), now),
+            json!({"ends": 100}),
+            "full just as it resets is not a run-out"
+        );
+        for (used, minutes, reset, burn) in [
+            (40, Some(300), reset(3), None),
+            (100, Some(300), reset(3), Some(0.0)),
+            (40, None, reset(3), Some(10.0)),
+            (40, Some(300), None, Some(10.0)),
+            (
+                1,
+                Some(300),
+                Some(now + jiff::SignedDuration::from_mins(295)),
+                Some(10.0),
+            ),
+            (40, Some(300), reset(6), Some(10.0)),
+        ] {
+            assert_eq!(forecast(used, minutes, reset, burn, now), Value::Null);
+        }
     }
 
     #[test]
