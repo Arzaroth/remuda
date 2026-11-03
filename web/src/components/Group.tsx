@@ -1,5 +1,6 @@
 import { createSignal, For, Match, onMount, Show, Switch } from 'solid-js';
 import { createConfirm } from '../confirm';
+import { outlook, trace } from '../forecast';
 import { ago, date, DAY, HOUR, plural, span, until, usedTone } from '../format';
 import { openSheet } from '../sheet';
 import { act, now, store } from '../state';
@@ -96,6 +97,21 @@ function WindowCell(props: { w: Window }) {
         </Show>
       </div>
       <Meter fraction={props.w.usedPercent / 100} tone={usedTone(props.w.usedPercent)} />
+      <Show when={trace(props.w, now())}>
+        {(t) => (
+          <svg class="trace" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            <path class="was" d={t().line} />
+            <Show when={t().ahead}>{(ahead) => <path class="ahead" d={ahead()} />}</Show>
+          </svg>
+        )}
+      </Show>
+      <Show when={outlook(props.w, now())}>
+        {(o) => (
+          <div class={`outlook ${o().tone}`} title={o().title}>
+            {o().text}
+          </div>
+        )}
+      </Show>
     </div>
   );
 }

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
@@ -22,6 +23,43 @@ fn load(snapshot: &Path) -> Option<Value> {
         .read_to_string(&mut text)
         .ok()?;
     serde_json::from_str(&text).ok()
+}
+
+/// Each window's trail in TokenGauge's history beside its snapshot, by
+/// provider, credential and window: `[ms, percent]` samples, oldest first.
+type Trails = HashMap<(String, Option<String>, String), Samples>;
+type Samples = Vec<(i64, u64)>;
+
+fn trails(snapshot: &Path, now: Timestamp) -> Trails {
+    let Some(history) = load(&snapshot.with_file_name("tokengauge-window-history.json")) else {
+        return Trails::new();
+    };
+    let text = |t: &Value, key: &str| t.get(key).and_then(Value::as_str).map(str::to_owned);
+    let trails = history.get("trails").and_then(Value::as_array);
+    trails
+        .into_iter()
+        .flatten()
+        .filter(|t| {
+            t.get("resetsAt")
+                .and_then(Value::as_str)
+                .and_then(|at| at.parse::<Timestamp>().ok())
+                .is_some_and(|at| at > now)
+        })
+        .filter_map(|t| {
+            let samples = t.get("samples")?.as_array()?.iter().filter_map(|s| {
+                let [at, used] = s.as_array()?.as_slice() else {
+                    return None;
+                };
+                Some((at.as_i64()?, used.as_u64()?.min(100)))
+            });
+            let key = (
+                text(t, "provider")?,
+                text(t, "credential"),
+                text(t, "window")?,
+            );
+            Some((key, samples.collect()))
+        })
+        .collect()
 }
 
 fn modified_ms(path: &Path) -> Option<i64> {
@@ -61,13 +99,23 @@ pub fn read(snapshot: &Path) -> Option<Value> {
 fn read_at(snapshot: &Path, now: Timestamp) -> Option<Value> {
     let data = load(snapshot)?;
     let payloads = data.get("payloads").unwrap_or(&data).as_array()?;
+    let trails = trails(snapshot, now);
     let mut providers = Map::new();
     for p in payloads {
         let Some(id) = p.get("provider").and_then(Value::as_str) else {
             continue;
         };
+        let credential = p.get("credential").and_then(Value::as_str);
+        let trail = |window: &str| {
+            trails.get(&(
+                id.to_owned(),
+                credential.map(str::to_owned),
+                window.to_owned(),
+            ))
+        };
+        let fields = provider(p, now, &trail);
         let slot = slot(&mut providers, id, p.get("credential"), now);
-        if let (Some(slot), Value::Object(fields)) = (slot.as_object_mut(), provider(p, now)) {
+        if let (Some(slot), Value::Object(fields)) = (slot.as_object_mut(), fields) {
             slot.extend(fields);
         }
     }
@@ -98,7 +146,7 @@ fn slot<'a>(
     now: Timestamp,
 ) -> &'a mut Value {
     let entry = providers.entry(id.to_owned()).or_insert_with(|| {
-        let mut entry = provider(&Value::Null, now);
+        let mut entry = provider(&Value::Null, now, &|_| None);
         entry["accounts"] = json!({});
         entry
     });
@@ -106,7 +154,7 @@ fn slot<'a>(
         Some(name) => {
             let account = &mut entry["accounts"][name];
             if account.is_null() {
-                *account = provider(&Value::Null, now);
+                *account = provider(&Value::Null, now, &|_| None);
             }
             account
         }
@@ -114,11 +162,11 @@ fn slot<'a>(
     }
 }
 
-fn provider(p: &Value, now: Timestamp) -> Value {
+fn provider<'t>(p: &Value, now: Timestamp, trail: &dyn Fn(&str) -> Option<&'t Samples>) -> Value {
     let usage = p.get("usage").unwrap_or(&Value::Null);
     let fixed = ["primary", "secondary", "tertiary"]
         .into_iter()
-        .filter_map(|k| window(None, usage.get(k)?, false, now));
+        .filter_map(|k| window(None, usage.get(k)?, false, now, trail(k)));
     let extra = usage
         .get("extraRateWindows")
         .and_then(Value::as_array)
@@ -130,12 +178,9 @@ fn provider(p: &Value, now: Timestamp) -> Value {
                 .unwrap_or(false)
         })
         .filter_map(|w| {
-            window(
-                w.get("title").and_then(Value::as_str),
-                w.get("window")?,
-                true,
-                now,
-            )
+            let title = w.get("title").and_then(Value::as_str);
+            let name = w.get("id").and_then(Value::as_str).or(title)?;
+            window(title, w.get("window")?, true, now, trail(name))
         });
     json!({
         "stale": p.get("stale").and_then(Value::as_bool).unwrap_or(false),
@@ -169,24 +214,80 @@ fn banked(resets: Option<&Value>) -> Value {
     }
 }
 
-fn window(title: Option<&str>, w: &Value, extra: bool, now: Timestamp) -> Option<Value> {
+fn window(
+    title: Option<&str>,
+    w: &Value,
+    extra: bool,
+    now: Timestamp,
+    trail: Option<&Samples>,
+) -> Option<Value> {
     let used = w.get("usedPercent")?.as_u64()?;
     let title = match (title, w.get("windowMinutes").and_then(Value::as_u64)) {
         (Some(t), _) => t.to_owned(),
         (None, Some(m)) => span(m),
         (None, None) => "Usage".to_owned(),
     };
+    let minutes = w.get("windowMinutes").and_then(Value::as_u64);
     let resets = w.get("resetsAt").and_then(Value::as_str);
-    let elapsed = resets
-        .and_then(|at| at.parse::<Timestamp>().ok())
-        .is_some_and(|at| at <= now);
+    let reset = resets.and_then(|at| at.parse::<Timestamp>().ok());
+    let elapsed = reset.is_some_and(|at| at <= now);
+    let per_hour = w
+        .pointer("/burn/perHour")
+        .and_then(Value::as_f64)
+        .filter(|r| r.is_finite() && *r >= 0.0 && !elapsed);
+    let opened = reset.zip(minutes).map(|(at, m)| {
+        let span = i64::try_from(m).unwrap_or(i64::MAX).saturating_mul(60_000);
+        at.as_millisecond().saturating_sub(span)
+    });
+    let trail = trail.filter(|_| !elapsed).map(|samples| {
+        samples
+            .iter()
+            .filter(|(at, _)| opened.is_none_or(|o| *at >= o))
+            .map(|(at, used)| json!([at, used]))
+            .collect::<Vec<_>>()
+    });
     Some(json!({
         "title": title,
-        "minutes": w.get("windowMinutes").and_then(Value::as_u64),
+        "minutes": minutes,
         "extra": extra,
         "usedPercent": if elapsed { 0 } else { used.min(100) },
         "resetsAt": resets.filter(|_| !elapsed),
+        "perHour": per_hour,
+        "trail": trail,
+        "forecast": forecast(used.min(100), minutes, reset, per_hour, now),
     }))
+}
+
+/// Where a window lands if its recent burn holds: `fullAt` when it runs out
+/// before its reset, else `ends`, the percent it reaches. Nothing in the first
+/// 3% of a window, as TokenGauge's pace: early numbers are noise.
+fn forecast(
+    used: u64,
+    minutes: Option<u64>,
+    reset: Option<Timestamp>,
+    per_hour: Option<f64>,
+    now: Timestamp,
+) -> Value {
+    const HOUR_MS: f64 = 3_600_000.0;
+    let (Some(minutes), Some(reset), Some(per_hour)) = (minutes, reset, per_hour) else {
+        return Value::Null;
+    };
+    let length = minutes as f64 * 60_000.0;
+    let left = (reset.as_millisecond() - now.as_millisecond()) as f64;
+    if used >= 100 || left <= 0.0 || left > length || length - left < length * 0.03 {
+        return Value::Null;
+    }
+    let used = used as f64;
+    let until_full = if per_hour > 0.0 {
+        (100.0 - used) / per_hour * HOUR_MS
+    } else {
+        f64::INFINITY
+    };
+    if until_full < left {
+        let at = Timestamp::from_millisecond(now.as_millisecond() + until_full as i64);
+        return json!({"fullAt": at.ok().map(|at| at.to_string())});
+    }
+    json!({"ends": (used + per_hour * left / HOUR_MS).round().min(100.0) as u64})
 }
 
 fn span(minutes: u64) -> String {
@@ -426,6 +527,124 @@ mod tests {
 
         std::fs::write(&file, "{ torn").unwrap();
         assert!(read(&file).is_none());
+    }
+
+    #[test]
+    fn each_window_carries_its_burn_and_its_trail_since_it_opened() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("tokengauge-usage.json");
+        let five = json!({"usedPercent": 40, "resetsAt": "2026-11-03T15:00:00Z", "windowMinutes": 300,
+                          "burn": {"perHour": 12.5, "overMinutes": 60}});
+        let fable =
+            json!({"usedPercent": 3, "resetsAt": "2026-11-08T00:00:00Z", "windowMinutes": 10080});
+        std::fs::write(
+            &file,
+            json!({"payloads": [{"provider": "claude", "credential": "work", "usage": {
+                "primary": five,
+                "extraRateWindows": [{"title": "Fable only", "window": fable}]
+            }}]})
+            .to_string(),
+        )
+        .unwrap();
+        let ms = |at: &str| at.parse::<Timestamp>().unwrap().as_millisecond();
+        let trail = |window: &str, resets: &str, samples: Value| {
+            json!({"provider": "claude", "credential": "work", "window": window,
+                   "windowMinutes": 300, "resetsAt": resets, "samples": samples})
+        };
+        std::fs::write(
+            tmp.path().join("tokengauge-window-history.json"),
+            json!({"trails": [
+                trail("primary", "2026-11-03T15:00:00Z", json!([
+                    [ms("2026-11-03T09:30:00Z"), 90],
+                    [ms("2026-11-03T10:30:00Z"), 5],
+                    [ms("2026-11-03T12:00:00Z"), 40],
+                    ["odd", 3]
+                ])),
+                trail("Fable only", "2026-11-08T00:00:00Z", json!([[ms("2026-11-03T08:00:00Z"), 3]])),
+                trail("secondary", "2026-11-03T01:00:00Z", json!([[1, 1]])),
+            ]})
+            .to_string(),
+        )
+        .unwrap();
+
+        let usage = read_at(&file, "2026-11-03T12:30:00Z".parse().unwrap()).unwrap();
+        let windows = &usage["providers"]["claude"]["accounts"]["work"]["windows"];
+        assert_eq!(windows[0]["perHour"], 12.5);
+        assert_eq!(
+            windows[0]["trail"],
+            json!([
+                [ms("2026-11-03T10:30:00Z"), 5],
+                [ms("2026-11-03T12:00:00Z"), 40]
+            ]),
+            "the sample from before the window opened is the last instance's"
+        );
+        assert_eq!(windows[1]["perHour"], Value::Null);
+        assert_eq!(
+            windows[1]["trail"],
+            json!([[ms("2026-11-03T08:00:00Z"), 3]])
+        );
+
+        let later = read_at(&file, "2026-11-03T16:00:00Z".parse().unwrap()).unwrap();
+        let reset = &later["providers"]["claude"]["accounts"]["work"]["windows"][0];
+        assert_eq!(
+            (&reset["perHour"], &reset["trail"]),
+            (&Value::Null, &Value::Null)
+        );
+
+        std::fs::remove_file(tmp.path().join("tokengauge-window-history.json")).unwrap();
+        let bare = read_at(&file, "2026-11-03T12:30:00Z".parse().unwrap()).unwrap();
+        let windows = &bare["providers"]["claude"]["accounts"]["work"]["windows"];
+        assert_eq!(
+            (&windows[0]["perHour"], &windows[0]["trail"]),
+            (&json!(12.5), &Value::Null)
+        );
+    }
+
+    #[test]
+    fn a_window_forecasts_where_its_recent_burn_takes_it() {
+        let now: Timestamp = "2026-11-03T12:00:00Z".parse().unwrap();
+        let reset = |hours: i64| Some(now + jiff::SignedDuration::from_hours(hours));
+        assert_eq!(
+            forecast(40, Some(300), reset(3), Some(10.0), now),
+            json!({"ends": 70})
+        );
+        assert_eq!(
+            forecast(40, Some(300), reset(3), Some(40.0), now),
+            json!({"fullAt": "2026-11-03T13:30:00Z"})
+        );
+        assert_eq!(
+            forecast(35, Some(300), reset(3), Some(0.0), now),
+            json!({"ends": 35})
+        );
+        assert_eq!(
+            forecast(90, Some(10080), reset(100), Some(0.1), now),
+            json!({"ends": 100}),
+            "full just as it resets is not a run-out"
+        );
+        for (used, minutes, reset, burn) in [
+            (40, Some(300), reset(3), None),
+            (100, Some(300), reset(3), Some(0.0)),
+            (40, None, reset(3), Some(10.0)),
+            (40, Some(300), None, Some(10.0)),
+            (
+                1,
+                Some(300),
+                Some(now + jiff::SignedDuration::from_mins(295)),
+                Some(10.0),
+            ),
+            (40, Some(300), reset(6), Some(10.0)),
+        ] {
+            assert_eq!(forecast(used, minutes, reset, burn, now), Value::Null);
+        }
+    }
+
+    #[test]
+    fn a_window_of_absurd_length_keeps_its_whole_trail() {
+        let now: Timestamp = "2026-11-03T12:00:00Z".parse().unwrap();
+        let samples = vec![(now.as_millisecond() - 60_000, 30)];
+        let w = json!({"usedPercent": 30, "resetsAt": "2026-11-03T13:00:00Z", "windowMinutes": u64::MAX / 2});
+        let shown = window(None, &w, false, now, Some(&samples)).unwrap();
+        assert_eq!(shown["trail"], json!([[now.as_millisecond() - 60_000, 30]]));
     }
 
     #[test]
