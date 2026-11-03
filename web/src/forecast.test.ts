@@ -20,6 +20,7 @@ describe('outlook', () => {
       title: 'At 12% an hour lately',
     });
     expect(outlook(win({ forecast: { ends: 35 }, perHour: 0 }), now)?.title).toBe('At 0.0% an hour lately');
+    expect(outlook(win({ forecast: { ends: 25 }, perHour: 0.04 }), now)?.title).toBe('At 0.04% an hour lately');
   });
 
   it('says when a window runs out, in the alarm tone', () => {

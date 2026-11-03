@@ -15,7 +15,7 @@ const clock = (ms: number, now: number) => {
 export function outlook(w: Window, now: number): Outlook | null {
   const f = w.forecast;
   if (!f) return null;
-  const rate = w.perHour != null ? `${w.perHour < 10 ? w.perHour.toFixed(1) : Math.round(w.perHour)}% an hour lately` : 'its recent burn';
+  const rate = w.perHour != null ? `${w.perHour >= 10 ? Math.round(w.perHour) : w.perHour.toFixed(w.perHour > 0 && w.perHour < 0.1 ? 2 : 1)}% an hour lately` : 'its recent burn';
   if ('fullAt' in f) {
     const at = Date.parse(f.fullAt);
     if (!Number.isFinite(at)) return null;
