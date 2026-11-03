@@ -636,16 +636,25 @@ impl App {
             return json!({ "unavailable": spent.get("unavailable") });
         };
         let logins = spent.get("logins").cloned().unwrap_or(Value::Null);
-        let digests = logins
-            .as_object()
-            .into_iter()
-            .flatten()
-            .filter_map(|(digest, l)| {
-                let provider = l.get("provider")?.as_str()?.to_owned();
-                let name = l.get("name")?.as_str()?.to_owned();
-                Some(((provider, name), digest.clone()))
-            })
-            .collect();
+        let named = logins.as_object().into_iter().flatten();
+        let known = named.clone().map(|(digest, _)| digest.clone()).collect();
+        let mut digests = std::collections::HashMap::new();
+        for removed in [false, true] {
+            for (digest, l) in named.clone() {
+                let gone = l.get("removed").and_then(Value::as_bool).unwrap_or(false);
+                let (Some(provider), Some(name)) = (
+                    l.get("provider").and_then(Value::as_str),
+                    l.get("name").and_then(Value::as_str),
+                ) else {
+                    continue;
+                };
+                if gone == removed {
+                    digests
+                        .entry((provider.to_owned(), name.to_owned()))
+                        .or_insert_with(|| digest.clone());
+                }
+            }
+        }
         let history = match crate::value::history(&self.places.snapshot) {
             Ok(history) => history,
             Err(e) => return json!({ "unavailable": format!("{e:#}") }),
@@ -654,6 +663,7 @@ impl App {
             &history,
             &export,
             &digests,
+            &known,
             &jiff::tz::TimeZone::system(),
             crate::fsx::now_ms(),
         );

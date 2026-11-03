@@ -11,9 +11,10 @@
 //! A login's week is its first weekly window of the three fixed ones at the
 //! time: an extra or later weekly window counts one model's use, and a week's
 //! spend is every model's. A login whose weekly window moved to another slot
-//! keeps its weeks from before the move.
+//! keeps the weeks that ended before the move; a week the move cut through
+//! is not counted, since its percent covers the whole of it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use jiff::Timestamp;
@@ -53,6 +54,7 @@ pub struct Week {
 struct Span {
     provider: String,
     login: Option<String>,
+    digest: Option<String>,
     window: String,
     opened: i64,
     resets: i64,
@@ -94,6 +96,7 @@ fn spans(history: &Value, now: i64) -> Vec<Span> {
         out.push(Span {
             provider,
             login: text(c, "credential"),
+            digest: text(c, "accountDigest"),
             window,
             opened,
             resets,
@@ -119,6 +122,7 @@ fn spans(history: &Value, now: i64) -> Vec<Span> {
         out.push(Span {
             provider,
             login: text(t, "credential"),
+            digest: text(t, "accountDigest"),
             window,
             opened: resets - WEEK_MINUTES as i64 * 60_000,
             resets,
@@ -129,12 +133,15 @@ fn spans(history: &Value, now: i64) -> Vec<Span> {
     out
 }
 
-/// The weeks of every login, newest first. `digests` names each login's
-/// digest by provider and name, as the export's rows carry it.
+/// The weeks of every login, newest first. A week's login is the account
+/// digest TokenGauge recorded with it when `known` holds it, else the one
+/// `digests` gives its provider and name: a name the store reused for another
+/// account names the stored one.
 pub fn weeks(
     history: &Value,
     export: &UsageExport,
     digests: &HashMap<(String, String), String>,
+    known: &HashSet<String>,
     tz: &TimeZone,
     now: i64,
 ) -> Vec<Week> {
@@ -188,9 +195,14 @@ pub fn weeks(
             next.map_or(s.resets, |n| n.min(s.resets))
         };
         let digest = s
-            .login
+            .digest
             .as_ref()
-            .and_then(|name| digests.get(&(s.provider.clone(), name.clone())));
+            .filter(|d| known.contains(*d))
+            .or_else(|| {
+                s.login
+                    .as_ref()
+                    .and_then(|name| digests.get(&(s.provider.clone(), name.clone())))
+            });
         let (mut usd, mut unattributed, mut unpriced) = (0.0, 0.0, false);
         for (row, day) in export.rows.iter().zip(&days) {
             let Some((start, end)) = *day else {
@@ -285,6 +297,10 @@ mod tests {
         ])
     }
 
+    fn known() -> HashSet<String> {
+        digests().into_values().collect()
+    }
+
     fn close(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9
     }
@@ -305,7 +321,14 @@ mod tests {
             ],
             Some("2026-09-01"),
         );
-        let weeks = weeks(&history, &rows, &digests(), &TimeZone::UTC, MON + 30 * DAY);
+        let weeks = weeks(
+            &history,
+            &rows,
+            &digests(),
+            &known(),
+            &TimeZone::UTC,
+            MON + 30 * DAY,
+        );
         assert_eq!(weeks.len(), 1);
         let w = &weeks[0];
         assert!(close(w.usd, 5.0 + 30.0 + 10.0), "{}", w.usd);
@@ -336,7 +359,7 @@ mod tests {
             ],
             Some("2026-09-01"),
         );
-        let weeks = weeks(&history, &rows, &digests(), &TimeZone::UTC, now);
+        let weeks = weeks(&history, &rows, &digests(), &known(), &TimeZone::UTC, now);
         assert_eq!(weeks.len(), 2);
         let (open, shut) = (&weeks[0], &weeks[1]);
         assert!(open.open && open.used == 12 && open.ends_at == now);
@@ -358,6 +381,7 @@ mod tests {
             &history,
             &export(&[], None),
             &digests(),
+            &known(),
             &TimeZone::UTC,
             MON + 30 * DAY,
         );
@@ -377,6 +401,7 @@ mod tests {
             &history,
             &export(&[], None),
             &digests(),
+            &known(),
             &TimeZone::UTC,
             MON + 30 * DAY,
         );
@@ -389,7 +414,7 @@ mod tests {
         let history = json!({"trails": [{"provider": "codex", "credential": "work", "window": "primary",
             "windowMinutes": WEEK_MINUTES, "resetsAt": iso(MON + 7 * DAY), "samples": [[MON, 0], [now, 10]]}]});
         let rows = export(&[("2026-10-08", Some("d-work"), 12.0)], Some("2026-09-01"));
-        let weeks = weeks(&history, &rows, &digests(), &TimeZone::UTC, now);
+        let weeks = weeks(&history, &rows, &digests(), &known(), &TimeZone::UTC, now);
         assert!(close(weeks[0].usd, 12.0), "{}", weeks[0].usd);
     }
 
@@ -405,11 +430,25 @@ mod tests {
         );
         rows.rows[1].usd = None;
         rows.rows[1].tokens.output = 5;
-        let priced = weeks(&history, &rows, &digests(), &TimeZone::UTC, MON + 30 * DAY);
+        let priced = weeks(
+            &history,
+            &rows,
+            &digests(),
+            &known(),
+            &TimeZone::UTC,
+            MON + 30 * DAY,
+        );
         assert!(!priced[0].unpriced);
         rows.rows[0].usd = None;
         rows.rows[0].tokens.output = 5;
-        let unpriced = weeks(&history, &rows, &digests(), &TimeZone::UTC, MON + 30 * DAY);
+        let unpriced = weeks(
+            &history,
+            &rows,
+            &digests(),
+            &known(),
+            &TimeZone::UTC,
+            MON + 30 * DAY,
+        );
         assert!(unpriced[0].unpriced);
     }
 
@@ -437,6 +476,7 @@ mod tests {
             &history,
             &export(&[], Some("2026-10-07")),
             &digests(),
+            &known(),
             &TimeZone::UTC,
             MON + 30 * DAY,
         );
