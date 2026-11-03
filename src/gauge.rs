@@ -236,7 +236,8 @@ fn window(
         .and_then(Value::as_f64)
         .filter(|r| r.is_finite() && *r >= 0.0 && !elapsed);
     let opened = reset.zip(minutes).map(|(at, m)| {
-        at.as_millisecond() - i64::try_from(m).unwrap_or(i64::MAX / 60_000) * 60_000
+        let span = i64::try_from(m).unwrap_or(i64::MAX).saturating_mul(60_000);
+        at.as_millisecond().saturating_sub(span)
     });
     let trail = trail.filter(|_| !elapsed).map(|samples| {
         samples
@@ -635,6 +636,15 @@ mod tests {
         ] {
             assert_eq!(forecast(used, minutes, reset, burn, now), Value::Null);
         }
+    }
+
+    #[test]
+    fn a_window_of_absurd_length_keeps_its_whole_trail() {
+        let now: Timestamp = "2026-11-03T12:00:00Z".parse().unwrap();
+        let samples = vec![(now.as_millisecond() - 60_000, 30)];
+        let w = json!({"usedPercent": 30, "resetsAt": "2026-11-03T13:00:00Z", "windowMinutes": u64::MAX / 2});
+        let shown = window(None, &w, false, now, Some(&samples)).unwrap();
+        assert_eq!(shown["trail"], json!([[now.as_millisecond() - 60_000, 30]]));
     }
 
     #[test]
