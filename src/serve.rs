@@ -626,6 +626,36 @@ impl App {
         answer
     }
 
+    /// What a week of each login bought: its weekly windows, from
+    /// TokenGauge's history, against the spend of the last 400 days.
+    fn value(&self) -> Value {
+        let spent = self.spend(400);
+        let Some(export) = spent.get("export").and_then(|e| {
+            serde_json::from_value::<selvedge::usage::export::UsageExport>(e.clone()).ok()
+        }) else {
+            return json!({ "unavailable": spent.get("unavailable") });
+        };
+        let logins = spent.get("logins").cloned().unwrap_or(Value::Null);
+        let digests = logins
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter_map(|(digest, l)| {
+                let provider = l.get("provider")?.as_str()?.to_owned();
+                let name = l.get("name")?.as_str()?.to_owned();
+                Some(((provider, name), digest.clone()))
+            })
+            .collect();
+        let weeks = crate::value::weeks(
+            &crate::value::history(&self.places.snapshot),
+            &export,
+            &digests,
+            &jiff::tz::TimeZone::system(),
+            crate::fsx::now_ms(),
+        );
+        json!({ "weeks": weeks, "logins": logins })
+    }
+
     fn versions(&self, force: bool) -> Result<Value> {
         if !force
             && let Ok(versions) = self.versions.lock()
@@ -692,6 +722,7 @@ impl App {
                 .map_or(30, |d| d.clamp(1, 400)) as u32;
             return match view {
                 "spend" => Ok(self.spend(days)),
+                "value" => Ok(self.value()),
                 "requests" => {
                     let keys = self
                         .proxy_file()
