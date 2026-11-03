@@ -33,9 +33,9 @@ export function plans(weeks: Week[]): Plan[] {
 
 // How the latest closed week's dollars per percent compare with the closed
 // weeks before it (four at most): 2 is twice as much, 0.5 half. Null without
-// two closed weeks that both have a figure.
+// two closed weeks with a whole, priced figure.
 export function change(weeks: Week[]): number | null {
-  const closed = weeks.filter((w) => !w.open && w.usdPerPercent != null && !w.partial);
+  const closed = weeks.filter((w) => !w.open && w.usdPerPercent != null && !w.partial && !w.unpriced);
   if (closed.length < 2) return null;
   const last = closed[closed.length - 1].usdPerPercent!;
   const before = closed.slice(-5, -1).map((w) => w.usdPerPercent!);

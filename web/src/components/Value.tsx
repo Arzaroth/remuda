@@ -41,7 +41,7 @@ export function Value(props: { answer: ValueAnswer; provider: string | null; log
         <For each={shown()}>
           {(p) => {
             const ratio = () => change(p.weeks);
-            const charted = () => p.weeks.filter((w) => !w.open && !w.partial && w.usdPerPercent != null);
+            const charted = () => p.weeks.filter((w) => !w.open && !w.partial && !w.unpriced && w.usdPerPercent != null);
             return (
               <section class="u-card">
                 <h3 class="u-plan">
