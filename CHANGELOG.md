@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-11-03
+
 ### Added
 
 - A login's details draw each usage window's trail since it opened and say
