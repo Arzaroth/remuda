@@ -626,6 +626,50 @@ impl App {
         answer
     }
 
+    /// What a week of each login bought: its weekly windows, from
+    /// TokenGauge's history, against the spend of the last 400 days.
+    fn value(&self) -> Value {
+        let spent = self.spend(400);
+        let Some(export) = spent.get("export").and_then(|e| {
+            serde_json::from_value::<selvedge::usage::export::UsageExport>(e.clone()).ok()
+        }) else {
+            return json!({ "unavailable": spent.get("unavailable") });
+        };
+        let logins = spent.get("logins").cloned().unwrap_or(Value::Null);
+        let named = logins.as_object().into_iter().flatten();
+        let known = named.clone().map(|(digest, _)| digest.clone()).collect();
+        let mut digests = std::collections::HashMap::new();
+        for removed in [false, true] {
+            for (digest, l) in named.clone() {
+                let gone = l.get("removed").and_then(Value::as_bool).unwrap_or(false);
+                let (Some(provider), Some(name)) = (
+                    l.get("provider").and_then(Value::as_str),
+                    l.get("name").and_then(Value::as_str),
+                ) else {
+                    continue;
+                };
+                if gone == removed {
+                    digests
+                        .entry((provider.to_owned(), name.to_owned()))
+                        .or_insert_with(|| digest.clone());
+                }
+            }
+        }
+        let history = match crate::value::history(&self.places.snapshot) {
+            Ok(history) => history,
+            Err(e) => return json!({ "unavailable": format!("{e:#}") }),
+        };
+        let weeks = crate::value::weeks(
+            &history,
+            &export,
+            &digests,
+            &known,
+            &jiff::tz::TimeZone::system(),
+            crate::fsx::now_ms(),
+        );
+        json!({ "weeks": weeks, "logins": logins })
+    }
+
     fn versions(&self, force: bool) -> Result<Value> {
         if !force
             && let Ok(versions) = self.versions.lock()
@@ -692,6 +736,7 @@ impl App {
                 .map_or(30, |d| d.clamp(1, 400)) as u32;
             return match view {
                 "spend" => Ok(self.spend(days)),
+                "value" => Ok(self.value()),
                 "requests" => {
                     let keys = self
                         .proxy_file()
@@ -1861,6 +1906,38 @@ mod tests {
         let digest = selvedge::usage::account_digest("u-work");
         assert_eq!(body["logins"][&digest]["name"], "work");
         assert_eq!(body["logins"][&digest]["provider"], "claude");
+    }
+
+    #[test]
+    fn the_value_is_each_login_s_weeks_against_its_spend() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let digest = selvedge::usage::account_digest("u-work");
+        let export = json!({
+            "schemaVersion": 1, "generatedAt": 5, "currency": "USD", "coversFrom": "2026-01-01",
+            "rows": [{"date": "2026-10-06", "provider": "claude", "model": "claude-x",
+                      "login": digest, "source": "cli",
+                      "tokens": {"o": 3}, "usd": {"input": 0.0, "output": 20.0, "cacheWrite": 0.0, "cacheRead": 0.0}}],
+        });
+        std::fs::write(
+            e.tmp.path().join("tokengauge-window-history.json"),
+            json!({"closed": [{"provider": "claude", "credential": "work", "window": "secondary",
+                "windowMinutes": 10080, "openedAt": "2026-10-04T12:00:00Z",
+                "resetsAt": "2026-10-11T12:00:00Z", "used": 40, "seenAt": "2026-10-11T11:00:00Z"}]})
+            .to_string(),
+        )
+        .unwrap();
+        let app = app_with_tokengauge(&e, &format!("echo '{export}'"));
+
+        let (status, body) = call(&app, "POST", "/api/usage/value", json!({}));
+
+        assert_eq!(status, 200, "{body}");
+        let week = &body["weeks"][0];
+        assert_eq!(week["login"], "work");
+        assert_eq!(week["used"], 40);
+        assert_eq!(week["usd"], 20.0);
+        assert_eq!(week["usdPerPercent"], 0.5);
+        assert_eq!(body["logins"][&digest]["name"], "work");
     }
 
     #[test]

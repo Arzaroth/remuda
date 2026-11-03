@@ -33,6 +33,7 @@ mod shown;
 mod store;
 mod units;
 mod usage;
+mod value;
 mod versions;
 mod warm;
 

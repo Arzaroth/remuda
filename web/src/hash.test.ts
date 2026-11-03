@@ -9,6 +9,7 @@ describe('routes', () => {
       { page: 'cli', id: 'codex', tab: 'automation' },
       { page: 'usage', tab: 'spend' },
       { page: 'usage', tab: 'requests' },
+      { page: 'usage', tab: 'value' },
       { page: 'proxy' },
       { page: 'log' },
       { page: 'status' },

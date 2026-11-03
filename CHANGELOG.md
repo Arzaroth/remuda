@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- The Usage tab has a Value view: what a week of each login bought, in API
+  dollars per percent of its weekly allowance, week by week, and how the last
+  week compares with the ones before. A subscription whose limits were cut or
+  raised shows up as a step. Needs TokenGauge 0.56 or later, which records
+  each week as it closes; until a week has closed, only the current one shows.
+
 ## [0.31.1] - 2026-11-03
 
 ### Fixed
