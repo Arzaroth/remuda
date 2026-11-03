@@ -548,11 +548,12 @@ const KEEP_FOR: Duration = Duration::from_secs(3600);
 type Asked = HashMap<PathBuf, (Option<SystemTime>, Instant, Option<String>)>;
 
 /// Asked once per binary and kept an hour, so the page can ask on every state.
+/// Kept by the path found rather than where it links: version managers link
+/// every CLI to one launcher that answers by the name it was run as.
 fn installed_version(bin: &Path) -> Option<String> {
     static ASKED: Mutex<Option<Asked>> = Mutex::new(None);
-    let real = std::fs::canonicalize(bin).unwrap_or_else(|_| bin.to_owned());
-    let modified = real.metadata().and_then(|m| m.modified()).ok();
-    if let Some((m, at, v)) = ASKED.lock().unwrap().get_or_insert_default().get(&real)
+    let modified = bin.metadata().and_then(|m| m.modified()).ok();
+    if let Some((m, at, v)) = ASKED.lock().unwrap().get_or_insert_default().get(bin)
         && *m == modified
         && at.elapsed() < KEEP_FOR
     {
@@ -563,7 +564,7 @@ fn installed_version(bin: &Path) -> Option<String> {
         .lock()
         .unwrap()
         .get_or_insert_default()
-        .insert(real, (modified, Instant::now(), version.clone()));
+        .insert(bin.to_owned(), (modified, Instant::now(), version.clone()));
     version
 }
 
