@@ -998,6 +998,29 @@ mod tests {
     }
 
     #[test]
+    fn clis_that_link_to_one_launcher_each_say_their_own_version() {
+        let tmp = tempfile::tempdir().unwrap();
+        let launcher = tmp.path().join("launcher");
+        std::fs::write(
+            &launcher,
+            "#!/bin/sh\ncase \"${0##*/}\" in claude) echo '2.1.314 (Claude Code)';; *) echo 'codex-cli 0.166.0';; esac\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&launcher, std::fs::Permissions::from_mode(0o755)).unwrap();
+        for name in ["claude", "codex"] {
+            std::os::unix::fs::symlink(&launcher, tmp.path().join(name)).unwrap();
+        }
+        assert_eq!(
+            installed_version(&tmp.path().join("claude")).as_deref(),
+            Some("2.1.314")
+        );
+        assert_eq!(
+            installed_version(&tmp.path().join("codex")).as_deref(),
+            Some("0.166.0")
+        );
+    }
+
+    #[test]
     fn an_untrusted_pin_file_here_is_reported_until_allowed() {
         let e = env(&OFFLINE);
         let s = setup(&e);
