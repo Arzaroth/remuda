@@ -28,6 +28,7 @@ describe('value', () => {
     const weeks = [0.5, 1, 1, 1, 1, 2].map((v, n) => week(n, { usdPerPercent: v }));
     expect(change([...weeks, week(6, { open: true, usdPerPercent: 9 })])).toBe(2);
     expect(change([week(0), week(1, { partial: true })])).toBeNull();
+    expect(change([week(0), week(1, { unpriced: true, usdPerPercent: 0 })])).toBeNull();
     expect(change([week(0)])).toBeNull();
   });
 

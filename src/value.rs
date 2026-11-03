@@ -409,6 +409,42 @@ mod tests {
     }
 
     #[test]
+    fn a_week_counts_the_account_it_was_recorded_for_when_the_name_moved_on() {
+        let mut old = closed("work", "primary", WEEK_MINUTES, MON, 40);
+        old["accountDigest"] = json!("d-gone");
+        let mut stranger = closed("perso", "primary", WEEK_MINUTES, MON, 40);
+        stranger["accountDigest"] = json!("d-unknown");
+        let history = json!({"closed": [old, stranger]});
+        let rows = export(
+            &[
+                ("2026-10-06", Some("d-gone"), 8.0),
+                ("2026-10-06", Some("d-work"), 100.0),
+                ("2026-10-06", Some("d-perso"), 4.0),
+            ],
+            None,
+        );
+        let mut known = known();
+        known.insert("d-gone".into());
+        let weeks = weeks(
+            &history,
+            &rows,
+            &digests(),
+            &known,
+            &TimeZone::UTC,
+            MON + 30 * DAY,
+        );
+        let of = |login: &str| {
+            weeks
+                .iter()
+                .find(|w| w.login.as_deref() == Some(login))
+                .unwrap()
+                .usd
+        };
+        assert!(close(of("work"), 8.0));
+        assert!(close(of("perso"), 4.0));
+    }
+
+    #[test]
     fn today_counts_as_what_was_spent_so_far() {
         let now = MON + 3 * DAY + DAY / 4;
         let history = json!({"trails": [{"provider": "codex", "credential": "work", "window": "primary",
