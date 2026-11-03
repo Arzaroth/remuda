@@ -548,11 +548,12 @@ const KEEP_FOR: Duration = Duration::from_secs(3600);
 type Asked = HashMap<PathBuf, (Option<SystemTime>, Instant, Option<String>)>;
 
 /// Asked once per binary and kept an hour, so the page can ask on every state.
+/// Kept by the path found rather than where it links: version managers link
+/// every CLI to one launcher that answers by the name it was run as.
 fn installed_version(bin: &Path) -> Option<String> {
     static ASKED: Mutex<Option<Asked>> = Mutex::new(None);
-    let real = std::fs::canonicalize(bin).unwrap_or_else(|_| bin.to_owned());
-    let modified = real.metadata().and_then(|m| m.modified()).ok();
-    if let Some((m, at, v)) = ASKED.lock().unwrap().get_or_insert_default().get(&real)
+    let modified = bin.metadata().and_then(|m| m.modified()).ok();
+    if let Some((m, at, v)) = ASKED.lock().unwrap().get_or_insert_default().get(bin)
         && *m == modified
         && at.elapsed() < KEEP_FOR
     {
@@ -563,7 +564,7 @@ fn installed_version(bin: &Path) -> Option<String> {
         .lock()
         .unwrap()
         .get_or_insert_default()
-        .insert(real, (modified, Instant::now(), version.clone()));
+        .insert(bin.to_owned(), (modified, Instant::now(), version.clone()));
     version
 }
 
@@ -994,6 +995,29 @@ mod tests {
         );
 
         assert!(version(e.tmp.path().join("nowhere").as_os_str()).is_empty());
+    }
+
+    #[test]
+    fn clis_that_link_to_one_launcher_each_say_their_own_version() {
+        let tmp = tempfile::tempdir().unwrap();
+        let launcher = tmp.path().join("launcher");
+        std::fs::write(
+            &launcher,
+            "#!/bin/sh\ncase \"${0##*/}\" in claude) echo '2.1.314 (Claude Code)';; *) echo 'codex-cli 0.166.0';; esac\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&launcher, std::fs::Permissions::from_mode(0o755)).unwrap();
+        for name in ["claude", "codex"] {
+            std::os::unix::fs::symlink(&launcher, tmp.path().join(name)).unwrap();
+        }
+        assert_eq!(
+            installed_version(&tmp.path().join("claude")).as_deref(),
+            Some("2.1.314")
+        );
+        assert_eq!(
+            installed_version(&tmp.path().join("codex")).as_deref(),
+            Some("0.166.0")
+        );
     }
 
     #[test]
