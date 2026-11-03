@@ -129,7 +129,7 @@ access to anything, and it ends when they stop.
 | `GET /api/versions` | `{tools, checkedAt}`: for remuda and TokenGauge, `installed`, `current` (null for a TokenGauge that does not answer `--version`), `latest`, `available`, `held` (why the page cannot update it), `url`, `releases` (`{version, published, url, notes}`) and `error` when GitHub could not be asked; the answer is kept 15 minutes ([../features/web-page.md](../features/web-page.md)) |
 | `POST /api/versions` `{force?}` | The same, asking GitHub again when `force` |
 | `POST /api/versions/update` `{tool}` | `{message, restarting}`: update `remuda` or `tokengauge` |
-| `POST /api/usage/value` | `{weeks, logins}`: each login's weekly windows, newest first, as `{provider, login, openedAt, endsAt, open, used, usd, usdPerPercent, unattributedUsd, partial}` (times in ms), against the spend of the last 400 days; or `{unavailable}` ([../features/web-page.md](../features/web-page.md#usage)) |
+| `POST /api/usage/value` | `{weeks, logins}`: each login's weekly windows, newest first, as `{provider, login, openedAt, endsAt, open, used, usd, usdPerPercent, unattributedUsd, partial, unpriced}` (times in ms), against the spend of the last 400 days; or `{unavailable}` when TokenGauge does not export or its window history cannot be read ([../features/web-page.md](../features/web-page.md#usage)) |
 | `POST /api/usage/requests` `{days}` | `{since, rows}`: the proxy's request log over the range, summed per quarter hour (every time zone splits its days on one), provider, model, login, key name and outcome |
 
 Pending sign-ins live in memory, one per provider; starting another cancels the

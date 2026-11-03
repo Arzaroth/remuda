@@ -198,19 +198,23 @@ Three tabs, each filtered by a CLI and a login, the first two by a range (7,
   requests per minute, tokens per day per model, outcomes and the models that
   failed most, requests per day by outcome, and the split by login.
 - **Value** is what a week of each login bought: the API dollars it spent per
-  percent of its weekly allowance, week by week, with a chart once there are
-  two weeks and how the last closed week compares with the four before it.
-  `value::weeks` joins TokenGauge's window history (the weeks it recorded as
-  they closed, TokenGauge 0.56 or later, and the one still open) with the
-  spend export of the last 400 days by login. A login's week is its first
-  weekly window of the three fixed ones, since a model's own window counts one
-  model and the spend is every model's. A day the week covers in part counts
-  in proportion, a week reset early ends where the next one opened, and the
-  open week runs to now ("so far"). Spend no record attributes is shown beside
-  the week, a week from before the usage record starts is marked, and a week
-  of a login the store no longer names has no figure. Use the export cannot
-  see (the web, the desktop apps, a machine without TokenGauge) makes a week
-  look worth less than it was, and the tab says so.
+  percent of its weekly allowance, week by week, with a chart of the whole
+  closed weeks once there are two and how the last closed week compares with
+  the four before it. `value::weeks` joins TokenGauge's window history (the
+  weeks it recorded as they closed, TokenGauge 0.56 or later, and the one
+  still open) with the spend export of the last 400 days by login. A login's
+  week is its first weekly window of the three fixed ones at the time, since a
+  model's own window counts one model and the spend is every model's; a login
+  whose weekly window moved to another slot keeps its weeks from before. A day
+  the week covers in part counts in proportion, today's row as spent so far, a
+  week reset early ends where the next one opened, and the open week runs to
+  now ("so far"). Spend no record attributes is shown beside the week, a week
+  with unpriced use of its login or from before the usage record starts is
+  marked, and a week of a login neither the store nor the attribution ledger
+  names has no figure. An unreadable window history says so rather than
+  showing no weeks. Use the export cannot see (the web, the desktop apps, a
+  machine without TokenGauge) makes a week look worth less than it was, and
+  the tab says so.
 
 Charts are inline SVG (`Charts.tsx`) with a hover readout; models and token
 rates take a fixed categorical palette (`--c1` to `--c7`, validated for both
