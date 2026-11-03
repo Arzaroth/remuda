@@ -34,6 +34,8 @@ import {
 } from '../requests';
 import { Legend, LineChart, SplitBar, StackedBars, type Series } from './Charts';
 import { ProviderIcon } from './ProviderIcon';
+import { Value } from './Value';
+import type { ValueAnswer } from '../value';
 
 const RANGES = [
   [7, '7 days'],
@@ -439,13 +441,14 @@ function Requests(props: { answer: RequestsAnswer; days: number; provider: strin
   );
 }
 
-export function Usage(props: { tab: 'spend' | 'requests' }) {
+export function Usage(props: { tab: 'spend' | 'requests' | 'value' }) {
   const [days, setDays] = createSignal(30);
   const [provider, setProvider] = createSignal<string | null>(null);
   const [login, setLogin] = createSignal<string | null>(null);
   const [key, setKey] = createSignal<string | null>(null);
   const [spend, setSpend] = createSignal<SpendAnswer | null>(null);
   const [requests, setRequests] = createSignal<RequestsAnswer | null>(null);
+  const [value, setValue] = createSignal<ValueAnswer | null>(null);
   const [error, setError] = createSignal<string | null>(null);
   let fetches = 0;
   createEffect(on(() => props.tab, () => setLogin(null), { defer: true }));
@@ -455,6 +458,7 @@ export function Usage(props: { tab: 'spend' | 'requests' }) {
       const done = (e: unknown) => seq === fetches && setError((e as Error).message);
       if (tab === 'spend')
         api<SpendAnswer>('/api/usage/spend', { days: d }).then((r) => seq === fetches && (setSpend(r), setError(null)), done);
+      else if (tab === 'value') api<ValueAnswer>('/api/usage/value', {}).then((r) => seq === fetches && (setValue(r), setError(null)), done);
       else
         api<RequestsAnswer>('/api/usage/requests', { days: d }).then((r) => seq === fetches && (setRequests(r), setError(null)), done);
     }),
@@ -463,6 +467,7 @@ export function Usage(props: { tab: 'spend' | 'requests' }) {
     const ids = new Set<string>();
     for (const r of spend()?.export?.rows ?? []) ids.add(r.provider);
     for (const r of requests()?.rows ?? []) ids.add(r.provider);
+    for (const w of value()?.weeks ?? []) ids.add(w.provider);
     return [...ids];
   });
   const keys = createMemo(() => [...new Set((requests()?.rows ?? []).map((r) => r.key ?? ''))].sort());
@@ -470,6 +475,8 @@ export function Usage(props: { tab: 'spend' | 'requests' }) {
     const seen = new Map<string, string>();
     if (props.tab === 'spend') {
       for (const r of spend()?.export?.rows ?? []) seen.set(r.login ?? '', loginName(r.login, spend()?.logins));
+    } else if (props.tab === 'value') {
+      for (const w of value()?.weeks ?? []) if (w.login) seen.set(w.login, w.login);
     } else {
       for (const r of requests()?.rows ?? []) seen.set(r.login ?? '', r.login ?? 'Not a stored login');
     }
@@ -490,9 +497,14 @@ export function Usage(props: { tab: 'spend' | 'requests' }) {
         <a aria-current={props.tab === 'requests' ? 'page' : undefined} href={href({ page: 'usage', tab: 'requests' })}>
           Proxy requests
         </a>
+        <a aria-current={props.tab === 'value' ? 'page' : undefined} href={href({ page: 'usage', tab: 'value' })}>
+          Value
+        </a>
       </nav>
       <div class="u-filters">
-        <Chips label="Range" value={days()} options={RANGES} onPick={setDays} />
+        <Show when={props.tab !== 'value'}>
+          <Chips label="Range" value={days()} options={RANGES} onPick={setDays} />
+        </Show>
         <Show when={providerIds().length > 1}>
           <Chips
             label="CLI"
@@ -532,6 +544,15 @@ export function Usage(props: { tab: 'spend' | 'requests' }) {
       </Show>
       <Show when={props.tab === 'requests'}>
         <Show when={requests()}>{(a) => <Requests answer={a()} days={days()} provider={provider()} login={login()} key={key()} />}</Show>
+      </Show>
+      <Show when={props.tab === 'value'}>
+        <Show when={value()} fallback={<p class="note">Asking TokenGauge…</p>}>
+          {(a) => (
+            <Show when={a().weeks} fallback={<p class="note">No value to show: {a().unavailable}.</p>}>
+              <Value answer={a()} provider={provider()} login={login()} />
+            </Show>
+          )}
+        </Show>
       </Show>
     </div>
   );
