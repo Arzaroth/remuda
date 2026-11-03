@@ -28,6 +28,7 @@ running.
 | `attribution.rs` | The ledger lines that say which login each CLI spent, for TokenGauge |
 | `gauge.rs` | Reads TokenGauge's usage snapshot for the page |
 | `usage.rs` | The Usage tab's data: TokenGauge's spend export, and the proxy's requests summed |
+| `value.rs` | The Usage tab's Value view: each login's weeks from TokenGauge's window history, against its spend |
 | `child.rs` | Running another program with a deadline, reading its output to an end |
 | `fsx.rs` | Atomic 0600 writes, compare-and-swap JSON edits, the file lock, timestamps |
 | `auto.rs` | Auto mode's decision: schedules, tiers, reservations, the score |
