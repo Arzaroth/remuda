@@ -646,8 +646,12 @@ impl App {
                 Some(((provider, name), digest.clone()))
             })
             .collect();
+        let history = match crate::value::history(&self.places.snapshot) {
+            Ok(history) => history,
+            Err(e) => return json!({ "unavailable": format!("{e:#}") }),
+        };
         let weeks = crate::value::weeks(
-            &crate::value::history(&self.places.snapshot),
+            &history,
             &export,
             &digests,
             &jiff::tz::TimeZone::system(),

@@ -8,9 +8,10 @@
 //! remuda's ledger, from a machine without remuda) is shown beside it rather
 //! than guessed at, since it may be this login's.
 //!
-//! A login's week is its first weekly window of the three fixed ones: an
-//! extra or later weekly window counts one model's use, and a week's spend is
-//! every model's.
+//! A login's week is its first weekly window of the three fixed ones at the
+//! time: an extra or later weekly window counts one model's use, and a week's
+//! spend is every model's. A login whose weekly window moved to another slot
+//! keeps its weeks from before the move.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -44,6 +45,8 @@ pub struct Week {
     pub unattributed_usd: f64,
     /// The usage record starts after the week opened.
     pub partial: bool,
+    /// Some of the login's usage in the week had no price, so `usd` is short.
+    pub unpriced: bool,
 }
 
 /// One weekly window instance as the history file has it.
@@ -137,14 +140,19 @@ pub fn weeks(
 ) -> Vec<Week> {
     let mut spans = spans(history, now);
     let slot = |w: &str| FIXED.iter().position(|f| *f == w).unwrap_or(FIXED.len());
-    let mut first: HashMap<(String, Option<String>), usize> = HashMap::new();
-    for s in &spans {
-        let at = first
-            .entry((s.provider.clone(), s.login.clone()))
-            .or_insert(FIXED.len());
-        *at = (*at).min(slot(&s.window));
-    }
-    spans.retain(|s| first.get(&(s.provider.clone(), s.login.clone())) == Some(&slot(&s.window)));
+    let shadowed: Vec<bool> = spans
+        .iter()
+        .map(|s| {
+            spans.iter().any(|t| {
+                (&t.provider, &t.login) == (&s.provider, &s.login)
+                    && slot(&t.window) < slot(&s.window)
+                    && t.opened < s.resets
+                    && s.opened < t.resets
+            })
+        })
+        .collect();
+    let mut shadowed = shadowed.into_iter();
+    spans.retain(|_| !shadowed.next().unwrap_or(false));
     spans.sort_by(|a, b| {
         (&a.provider, &a.login, &a.window, a.opened).cmp(&(
             &b.provider,
@@ -183,19 +191,26 @@ pub fn weeks(
             .login
             .as_ref()
             .and_then(|name| digests.get(&(s.provider.clone(), name.clone())));
-        let (mut usd, mut unattributed) = (0.0, 0.0);
+        let (mut usd, mut unattributed, mut unpriced) = (0.0, 0.0, false);
         for (row, day) in export.rows.iter().zip(&days) {
-            let (Some((start, end)), Some(cost)) = (day, row.usd) else {
+            let Some((start, end)) = *day else {
                 continue;
             };
             if row.provider != s.provider {
                 continue;
             }
-            let overlap = (end.min(&ends) - start.max(&s.opened)).max(0);
+            let overlap = (end.min(ends) - start.max(s.opened)).max(0);
             if overlap == 0 {
                 continue;
             }
-            let share = cost.total() * overlap as f64 / (end - start) as f64;
+            let Some(cost) = row.usd else {
+                unpriced |=
+                    row.tokens.total() > 0 && row.login.as_ref() == digest && digest.is_some();
+                continue;
+            };
+            // Today's row holds what was spent so far, not a whole day.
+            let length = end.min(now) - start;
+            let share = cost.total() * overlap as f64 / length.max(overlap) as f64;
             match (&row.login, digest) {
                 (None, _) => unattributed += share,
                 (Some(l), Some(d)) if l == d => usd += share,
@@ -213,18 +228,23 @@ pub fn weeks(
             usd_per_percent: (s.used > 0 && digest.is_some()).then(|| usd / s.used as f64),
             unattributed_usd: unattributed,
             partial: covers_from.is_none_or(|from| from > s.opened),
+            unpriced,
         });
     }
     out.sort_by_key(|w| std::cmp::Reverse(w.opened_at));
     out
 }
 
-/// TokenGauge's window history, beside its snapshot.
-pub fn history(snapshot: &Path) -> Value {
-    std::fs::read_to_string(snapshot.with_file_name("tokengauge-window-history.json"))
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok())
-        .unwrap_or(Value::Null)
+/// TokenGauge's window history, beside its snapshot: `Null` when there is
+/// none yet, an error when it is there and cannot be read.
+pub fn history(snapshot: &Path) -> anyhow::Result<Value> {
+    let path = snapshot.with_file_name("tokengauge-window-history.json");
+    match std::fs::read_to_string(&path) {
+        Ok(text) => serde_json::from_str(&text)
+            .map_err(|e| anyhow::anyhow!("{} does not parse: {e}", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
+        Err(e) => Err(anyhow::anyhow!("{} could not be read: {e}", path.display())),
+    }
 }
 
 #[cfg(test)]
