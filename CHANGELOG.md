@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.31.1] - 2026-11-03
+
 ### Fixed
 
 - `remuda doctor` and the Status page showed Claude Code's version for Codex
