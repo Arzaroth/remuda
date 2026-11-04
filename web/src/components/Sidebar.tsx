@@ -67,79 +67,81 @@ export function Sidebar(props: { onAdd: () => void }) {
         <img src="/favicon.svg" alt="" width="30" height="30" />
         <span>remuda</span>
       </a>
-      <div class="nav-group">
-        <a class="nav-item" href={href({ page: 'overview' })} aria-current={here({ page: 'overview' }) ? 'page' : undefined}>
-          <svg viewBox="0 0 20 20" aria-hidden="true">
-            <path d="M3 3h6v6H3zM11 3h6v6h-6zM3 11h6v6H3zM11 11h6v6h-6z" />
-          </svg>
-          Overview
-        </a>
-      </div>
-      <div class="nav-group nav-clis">
-        <For each={inUse(s())}>{(p) => <CliLink p={p} />}</For>
-      </div>
-      <div class="nav-group">
-        <a class="nav-item" href={href({ page: 'usage', tab: 'spend' })} aria-current={here({ page: 'usage', tab: 'spend' }) ? 'page' : undefined}>
-          <svg viewBox="0 0 20 20" aria-hidden="true">
-            <path d="M3 17V9M8 17V4M13 17v-6M18 17V7" />
-          </svg>
-          Usage
-        </a>
-        <a class="nav-item" href={href({ page: 'quota', id: null })} aria-current={here({ page: 'quota', id: null }) ? 'page' : undefined}>
-          <svg viewBox="0 0 20 20" aria-hidden="true">
-            <path d="M3 4v13h14M5 13l4-4 3 3 5-6" />
-          </svg>
-          Quota
-        </a>
-        <Show when={s().proxy}>
-          <a class="nav-item" href={href({ page: 'proxy' })} aria-current={here({ page: 'proxy' }) ? 'page' : undefined}>
+      <div class="side-menu" id="side-menu">
+        <div class="nav-group">
+          <a class="nav-item" href={href({ page: 'overview' })} aria-current={here({ page: 'overview' }) ? 'page' : undefined}>
             <svg viewBox="0 0 20 20" aria-hidden="true">
-              <path d="M3 7h12l-3-3M17 13H5l3 3" />
+              <path d="M3 3h6v6H3zM11 3h6v6h-6zM3 11h6v6H3zM11 11h6v6h-6z" />
             </svg>
-            API proxy
-            <span class="nav-dot" classList={{ good: !!s().proxy?.enabled }} />
-            <span class="sr">{s().proxy?.enabled ? 'on' : 'off'}</span>
+            Overview
           </a>
-        </Show>
-        <a class="nav-item" href={href({ page: 'log' })} aria-current={here({ page: 'log' }) ? 'page' : undefined}>
-          <svg viewBox="0 0 20 20" aria-hidden="true">
-            <path d="M4 5h12M4 10h12M4 15h8" />
-          </svg>
-          Log
-        </a>
-        <a class="nav-item" href={href({ page: 'status' })} aria-current={here({ page: 'status' }) ? 'page' : undefined}>
-          <svg viewBox="0 0 20 20" aria-hidden="true">
-            <path d="M2 10h4l2-5 4 10 2-5h4" />
-          </svg>
-          Status
-          <span class={`nav-dot ${tone() || 'good'}`} />
-          <span class="sr">{{ '': 'all good', warn: 'needs a look', bad: 'has problems' }[tone()]}</span>
-        </a>
-        <a class="nav-item" href={href({ page: 'versions' })} aria-current={here({ page: 'versions' }) ? 'page' : undefined}>
-          <svg viewBox="0 0 20 20" aria-hidden="true">
-            <path d="M10 15V5M6 9l4-4 4 4M4 17h12" />
-          </svg>
-          Versions
-          <Show when={updates().length}>
-            <span class="nav-dot new" />
-            <span class="sr">{updates().join(' and ')} can be updated</span>
+        </div>
+        <div class="nav-group nav-clis">
+          <For each={inUse(s())}>{(p) => <CliLink p={p} />}</For>
+        </div>
+        <div class="nav-group">
+          <a class="nav-item" href={href({ page: 'usage', tab: 'spend' })} aria-current={here({ page: 'usage', tab: 'spend' }) ? 'page' : undefined}>
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M3 17V9M8 17V4M13 17v-6M18 17V7" />
+            </svg>
+            Usage
+          </a>
+          <a class="nav-item" href={href({ page: 'quota', id: null })} aria-current={here({ page: 'quota', id: null }) ? 'page' : undefined}>
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M3 4v13h14M5 13l4-4 3 3 5-6" />
+            </svg>
+            Quota
+          </a>
+          <Show when={s().proxy}>
+            <a class="nav-item" href={href({ page: 'proxy' })} aria-current={here({ page: 'proxy' }) ? 'page' : undefined}>
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M3 7h12l-3-3M17 13H5l3 3" />
+              </svg>
+              API proxy
+              <span class="nav-dot" classList={{ good: !!s().proxy?.enabled }} />
+              <span class="sr">{s().proxy?.enabled ? 'on' : 'off'}</span>
+            </a>
           </Show>
-        </a>
-      </div>
-      <div class="side-foot">
-        <button class="btn go wide" onClick={() => props.onAdd()}>
-          Add a login
-        </button>
-        <button
-          class="btn wide"
-          title="Refresh the logins not in use whose tokens expire within the hour"
-          onClick={() => act('/api/refresh', {})}
-        >
-          Refresh tokens
-        </button>
-        <div class="switches">
-          <ThemeSwitch />
-          <SkinSwitch />
+          <a class="nav-item" href={href({ page: 'log' })} aria-current={here({ page: 'log' }) ? 'page' : undefined}>
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M4 5h12M4 10h12M4 15h8" />
+            </svg>
+            Log
+          </a>
+          <a class="nav-item" href={href({ page: 'status' })} aria-current={here({ page: 'status' }) ? 'page' : undefined}>
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M2 10h4l2-5 4 10 2-5h4" />
+            </svg>
+            Status
+            <span class={`nav-dot ${tone() || 'good'}`} />
+            <span class="sr">{{ '': 'all good', warn: 'needs a look', bad: 'has problems' }[tone()]}</span>
+          </a>
+          <a class="nav-item" href={href({ page: 'versions' })} aria-current={here({ page: 'versions' }) ? 'page' : undefined}>
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M10 15V5M6 9l4-4 4 4M4 17h12" />
+            </svg>
+            Versions
+            <Show when={updates().length}>
+              <span class="nav-dot new" />
+              <span class="sr">{updates().join(' and ')} can be updated</span>
+            </Show>
+          </a>
+        </div>
+        <div class="side-foot">
+          <button class="btn go wide" onClick={() => props.onAdd()}>
+            Add a login
+          </button>
+          <button
+            class="btn wide"
+            title="Refresh the logins not in use whose tokens expire within the hour"
+            onClick={() => act('/api/refresh', {})}
+          >
+            Refresh tokens
+          </button>
+          <div class="switches">
+            <ThemeSwitch />
+            <SkinSwitch />
+          </div>
         </div>
       </div>
     </nav>
