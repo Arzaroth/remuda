@@ -85,6 +85,12 @@ export function Sidebar(props: { onAdd: () => void }) {
           </svg>
           Usage
         </a>
+        <a class="nav-item" href={href({ page: 'quota', id: null })} aria-current={here({ page: 'quota', id: null }) ? 'page' : undefined}>
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M3 4v13h14M5 13l4-4 3 3 5-6" />
+          </svg>
+          Quota
+        </a>
         <Show when={s().proxy}>
           <a class="nav-item" href={href({ page: 'proxy' })} aria-current={here({ page: 'proxy' }) ? 'page' : undefined}>
             <svg viewBox="0 0 20 20" aria-hidden="true">

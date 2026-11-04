@@ -68,7 +68,7 @@ function typeParts(s: Split, shown: (v: number) => string) {
   return TYPES.map(([k, label, color]) => ({ label, color, value: s[k], shown: shown(s[k]) }));
 }
 
-function Chips<T extends string | number | null>(props: {
+export function Chips<T extends string | number | null>(props: {
   label: string;
   value: T;
   options: readonly (readonly [T, string])[];

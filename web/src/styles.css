@@ -575,6 +575,34 @@ input:hover, select:hover { border-color: var(--muted); }
 .chart .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .chart .area { opacity: 0.1; }
 .chart .bar { stroke: var(--panel); stroke-width: 0; }
+.chart .grid.faint { opacity: 0.45; }
+.chart .line.ahead { stroke-dasharray: 6 5; }
+.chart .now { stroke: var(--muted); stroke-width: 1; }
+.chart .now-dot { stroke: var(--panel); stroke-width: 2; }
+.chart .refill { fill: var(--muted); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.pool-area.ahead { opacity: 0.6; }
+.pool-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.pool-head h3 { margin: 0; }
+.pool-top { display: grid; grid-template-columns: auto repeat(4, minmax(0, 1fr)); grid-template-rows: auto auto auto; column-gap: 28px; margin: 16px 0 20px; }
+.pool-fig { display: grid; grid-row: span 3; grid-template-rows: subgrid; row-gap: 4px; min-width: 0; margin: 0; }
+.pool-fig dt { color: var(--muted); font-size: 13px; }
+.pool-fig dd { margin: 0; min-width: 0; }
+.pool-fig .fig-value { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; align-self: end; font-size: 22px; font-weight: 760; line-height: 1.1; font-variant-numeric: tabular-nums; font-stretch: var(--head-stretch); }
+.pool-fig .fig-note { color: var(--muted); font-size: 13px; line-height: 1.35; }
+.pool-fig.lead .fig-value { font-size: 52px; font-weight: 800; line-height: 0.95; }
+.pool-fig.lead { padding-right: 8px; }
+.pool-range { display: flex; align-items: center; gap: 6px; margin-left: auto; color: var(--muted); font-size: 14px; }
+.pool-range span { margin-right: 6px; font-variant-numeric: tabular-nums; }
+.u-label { color: var(--muted); font-size: 14px; margin-right: 8px; }
+.pool-legend .solid, .pool-legend .dashed { width: 18px; height: 0; border-radius: 0; background: none; border-top: 2px solid var(--brand); }
+.pool-legend .dashed { border-top-style: dashed; }
+@media (max-width: 720px) {
+  .pool-top { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: none; gap: 16px 18px; }
+  .pool-fig { grid-row: auto; grid-template-rows: none; }
+  .pool-fig.lead { grid-column: 1 / -1; }
+  .pool-fig.lead .fig-value { font-size: 44px; }
+  .pool-range { margin-left: 0; }
+}
 .chart .cross { stroke: var(--rule-strong); stroke-width: 1; }
 .chart-tip { position: absolute; top: 0; transform: translateX(-50%); pointer-events: none; z-index: 2; min-width: 140px; max-width: 260px;
   background: var(--panel); color: var(--ink); border-radius: var(--r-s); box-shadow: 0 2px 10px var(--lift-tint), inset 0 0 0 1px var(--rule-strong); padding: 8px 10px; font-size: 12px; display: grid; gap: 3px; }

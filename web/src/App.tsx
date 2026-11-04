@@ -10,6 +10,7 @@ import { Logins } from './components/Group';
 import { Health } from './components/Health';
 import { Log } from './components/Log';
 import { Proxy } from './components/Proxy';
+import { Quota } from './components/Quota';
 import { ProviderIcon } from './components/ProviderIcon';
 import { Sidebar } from './components/Sidebar';
 import { Strip, Tile } from './components/Strip';
@@ -91,6 +92,10 @@ export function App() {
     const r = route();
     return r.page === 'usage' ? r : null;
   };
+  const quota = () => {
+    const r = route();
+    return r.page === 'quota' ? r : null;
+  };
   const openAdd = () => {
     const r = route();
     openSheet({ provider: r.page === 'cli' ? r.id : providers()[0]?.id });
@@ -122,6 +127,7 @@ export function App() {
               <Switch>
                 <Match when={cli()}>{(c) => <CliPage p={c().p} tab={c().tab} />}</Match>
                 <Match when={usage()}>{(r) => <Usage tab={r().tab} />}</Match>
+                <Match when={quota()}>{(r) => <Quota id={r().id} />}</Match>
                 <Match when={route().page === 'proxy' && store.s!.proxy}>
                   <div class="page">
                     <Proxy />
