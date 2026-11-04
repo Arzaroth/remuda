@@ -359,8 +359,10 @@ const IMPORTED_AUTH_JSON: &str = "%_import_legacy_credentials";
 /// opencode's database, or None when there is none or opencode has not yet
 /// imported `auth.json` into it, which leaves the file the one it reads.
 fn open_db(path: &std::path::Path, flags: OpenFlags) -> Result<Option<Connection>> {
-    if !path.exists() {
-        return Ok(None);
+    match std::fs::metadata(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e).with_context(|| format!("could not read {}", path.display())),
+        Ok(_) => {}
     }
     let read = || -> rusqlite::Result<Option<Connection>> {
         let conn = Connection::open_with_flags(path, flags | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
