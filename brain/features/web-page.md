@@ -14,9 +14,9 @@ API proxy, with an on/off dot; Status, with a dot that turns amber when a
 vital is a warning and red when one is bad (`healthTone`,
 [doctor.md](doctor.md)); Versions, with a blue dot while remuda or TokenGauge
 has a newer release (`updates.ts`: the sidebar asks `/api/versions` when the
-page opens and every 30 minutes, which costs GitHub at most one check per
-quarter hour since the server keeps its answer that long, and the Versions
-view sets it from every check and update it makes). Its foot holds Add a login, Refresh tokens,
+page opens and every 30 minutes, answered from the server's 15-minute cache
+of GitHub's reply, and the Versions view sets it from every check and update
+it makes). Its foot holds Add a login, Refresh tokens,
 the theme switch and the look switch. On a narrow screen it becomes a bar
 along the top, with Add a login first; Refresh tokens and the two switches
 move to the foot of the Status page. Each CLI is shown by its own logo, in its own colour, both shared with
