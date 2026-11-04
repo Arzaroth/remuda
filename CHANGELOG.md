@@ -13,6 +13,12 @@
   gives back. It says when the pool runs dry, the first login to, the next
   reset and the burn, and can chart the burn itself.
 
+### Changed
+
+- On a phone, the page's places no longer scroll sideways along the top: a
+  menu button opens them as a panel of tiles, with Add a login, Refresh tokens
+  and the theme and look switches, which leave the Status page.
+
 ### Removed
 
 - A login's details no longer draw each window's trail or say "Full Thu 14:00

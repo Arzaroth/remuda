@@ -18,8 +18,10 @@ page opens and every 30 minutes, answered from the server's 15-minute cache
 of GitHub's reply, and the Versions view sets it from every check and update
 it makes). Its foot holds Add a login, Refresh tokens,
 the theme switch and the look switch. On a narrow screen it becomes a bar
-along the top, with Add a login first; Refresh tokens and the two switches
-move to the foot of the Status page. Each CLI is shown by its own logo, in its own colour, both shared with
+along the top with the logo, the page's name and a menu button, which opens
+every place as a panel of tiles under it: the CLIs first, then Overview and
+the rest, with the foot below them. Picking a place, tapping outside or
+Escape closes it. Each CLI is shown by its own logo, in its own colour, both shared with
 TokenGauge through selvedge (`icons.ts`), in the sidebar, the page heads, the overview, the proxy and
 Add a login.
 
