@@ -149,6 +149,7 @@ main { min-width: 0; padding: 34px clamp(20px, 4vw, 52px) 120px; }
 .nav-dot.good { background: var(--good); }
 .nav-dot.warn { background: var(--warn); }
 .nav-dot.bad { background: var(--bad); }
+.nav-dot.new { background: var(--focus); }
 .side-foot { margin-top: auto; display: grid; gap: 8px; }
 .switches { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 :root[data-skin='instrument'] .side .theme { background: #142333; }
