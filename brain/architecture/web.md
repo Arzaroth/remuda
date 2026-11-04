@@ -11,7 +11,11 @@ to a private window when the default browser allows it.
 
 The page reads the token from the fragment (fragments never reach a server log
 or a `Referer`), keeps it in `sessionStorage`, strips it from the address bar,
-and sends it as `X-Remuda-Token`.
+and sends it as `X-Remuda-Token`. A tab opened from one of the page's links
+starts without it, so before its first request it asks the other tabs over the
+BroadcastChannel `remuda-token` (same origin only, so only this server's
+page), and waits a second for an answer before giving up; every tab holding
+the token answers (`web/src/token.ts`).
 
 ## Finding a running page (`served.rs`)
 

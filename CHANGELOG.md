@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- A page link opened in a new tab works: the new tab takes the token from
+  a tab already open instead of asking for the link remuda printed.
+
 ## [0.33.0] - 2026-11-05
 
 ### Added
