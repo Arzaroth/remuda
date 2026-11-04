@@ -2,7 +2,7 @@ import { createEffect, Match, Show, Switch } from 'solid-js';
 import { store } from './state';
 import { go, href, route } from './route';
 import type { Provider } from './types';
-import { autoOn, inUse } from './windows';
+import { autoOn, inUse, loginsOf } from './windows';
 import { AddAccount } from './components/AddAccount';
 import { closeSheet, openSheet, sheet } from './sheet';
 import { AutoMode, dirty } from './components/AutoMode';
@@ -29,7 +29,7 @@ function AutoBadge(props: { p: Provider }) {
 
 function CliPage(props: { p: Provider; tab: 'logins' | 'automation' }) {
   const active = () => store.s!.credentials.find((c) => c.provider === props.p.id && c.active);
-  const count = () => store.s!.credentials.filter((c) => c.provider === props.p.id).length;
+  const count = () => loginsOf(store.s!, props.p.id).length;
   return (
     <div class="page">
       <header class="page-head">
