@@ -84,7 +84,15 @@ export function Sidebar(props: { onAdd: () => void }) {
   window.addEventListener('keydown', escape);
   onCleanup(() => window.removeEventListener('keydown', escape));
   return (
-    <nav class="side" classList={{ open: open() }} aria-label="remuda">
+    <nav
+      class="side"
+      classList={{ open: open() }}
+      aria-label="remuda"
+      onClick={(e) => {
+        const at = e.target as Element;
+        if (open() && !at.closest('.menu-btn') && (!at.closest('.side-menu') || at.closest('a'))) setOpen(false);
+      }}
+    >
       <a class="side-brand" href={href({ page: 'overview' })}>
         <img src="/favicon.svg" alt="" width="30" height="30" />
         <span>remuda</span>
@@ -102,7 +110,7 @@ export function Sidebar(props: { onAdd: () => void }) {
         </svg>
       </button>
       <Show when={open()}>
-        <div class="menu-scrim" onClick={() => setOpen(false)} />
+        <div class="menu-scrim" />
       </Show>
       <div class="side-menu" id="side-menu">
         <div class="nav-group">
