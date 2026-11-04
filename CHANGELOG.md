@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- The page's sidebar puts a dot on Versions while remuda or TokenGauge has a
+  newer release, so an update shows without opening the view.
+
 ## [0.32.0] - 2026-11-04
 
 ### Added

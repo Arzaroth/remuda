@@ -1,4 +1,4 @@
-import { For, Show } from 'solid-js';
+import { For, onCleanup, onMount, Show } from 'solid-js';
 import { act, store } from '../state';
 import { href, route, type Route } from '../route';
 import type { Provider } from '../types';
@@ -8,6 +8,8 @@ import { healthTone } from './Health';
 import { Meter } from './Meter';
 import { ProviderIcon } from './ProviderIcon';
 import { lead } from './Strip';
+import { api } from '../api';
+import { noteVersions, updates, type Checked } from '../updates';
 import { SkinSwitch } from './SkinSwitch';
 import { ThemeSwitch } from './ThemeSwitch';
 
@@ -48,6 +50,17 @@ function CliLink(props: { p: Provider }) {
 export function Sidebar(props: { onAdd: () => void }) {
   const s = () => store.s!;
   const tone = () => healthTone(s());
+  // The server keeps GitHub's answer a quarter of an hour, so asking often
+  // costs GitHub nothing more; a failed check leaves the dot as it was.
+  const checkUpdates = () =>
+    api<Checked>('/api/versions')
+      .then(noteVersions)
+      .catch(() => {});
+  onMount(() => {
+    checkUpdates();
+    const every = setInterval(checkUpdates, 30 * 60_000);
+    onCleanup(() => clearInterval(every));
+  });
   return (
     <nav class="side" aria-label="remuda">
       <a class="side-brand" href={href({ page: 'overview' })}>
@@ -101,6 +114,10 @@ export function Sidebar(props: { onAdd: () => void }) {
             <path d="M10 15V5M6 9l4-4 4 4M4 17h12" />
           </svg>
           Versions
+          <Show when={updates().length}>
+            <span class="nav-dot new" />
+            <span class="sr">{updates().join(' and ')} can be updated</span>
+          </Show>
         </a>
       </div>
       <div class="side-foot">

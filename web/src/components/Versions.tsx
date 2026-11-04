@@ -3,6 +3,7 @@ import { api } from '../api';
 import { ago } from '../format';
 import { sections, type Span } from '../notes';
 import { now, toast } from '../state';
+import { noteVersions } from '../updates';
 
 type Release = { version: string; published: string | null; url: string; notes: string };
 
@@ -168,7 +169,9 @@ export function Versions() {
   const fetchVersions = async (force: boolean) => {
     setChecking(true);
     try {
-      setV(await (force ? api<Versions>('/api/versions', { force: true }) : api<Versions>('/api/versions')));
+      const got = await (force ? api<Versions>('/api/versions', { force: true }) : api<Versions>('/api/versions'));
+      setV(got);
+      noteVersions(got);
       setError(null);
     } catch (e) {
       setError((e as Error).message);
