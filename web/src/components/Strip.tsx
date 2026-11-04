@@ -24,7 +24,7 @@ export function Strip() {
   );
 }
 
-const windows = (id: string) => {
+export const windows = (id: string) => {
   const s = store.s!;
   const weighted = (s.shown?.[id]?.weighable ?? false) && modes[id] !== 'absolute';
   return s.shown?.[id]?.[weighted ? 'weighted' : 'absolute'] ?? [];

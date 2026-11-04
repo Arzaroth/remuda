@@ -2,14 +2,14 @@
 
 `remuda serve` opens a page with a sidebar of places and one page for each,
 picked by the address's hash (`#/`, `#/cli/<id>`, `#/cli/<id>/automation`,
-`#/usage`, `#/usage/requests`, `#/proxy`, `#/status`; `route.ts`), so the
+`#/usage`, `#/usage/requests`, `#/quota`, `#/quota/<id>`, `#/proxy`, `#/status`; `route.ts`), so the
 browser's back button and a
 bookmark work. The token, which also travels in the hash, is read only from
 a hash that does not start with `#/`.
 
 The sidebar lists, top to bottom: Overview; one link per CLI in use, with
 its icon, the login in use (or "signed out"), the share used of its tile's
-window over a small meter, and an "auto" tag when auto mode is on; Usage; the
+window over a small meter, and an "auto" tag when auto mode is on; Usage; Quota; the
 API proxy, with an on/off dot; Status, with a dot that turns amber when a
 vital is a warning and red when one is bad (`healthTone`,
 [doctor.md](doctor.md)); Versions, with a blue dot while remuda or TokenGauge
@@ -18,8 +18,10 @@ page opens and every 30 minutes, answered from the server's 15-minute cache
 of GitHub's reply, and the Versions view sets it from every check and update
 it makes). Its foot holds Add a login, Refresh tokens,
 the theme switch and the look switch. On a narrow screen it becomes a bar
-along the top, with Add a login first; Refresh tokens and the two switches
-move to the foot of the Status page. Each CLI is shown by its own logo, in its own colour, both shared with
+along the top with the logo, the page's name and a menu button, which opens
+every place as a panel of tiles under it: the CLIs first, then Overview and
+the rest, with the foot below them. Picking a place, tapping outside or
+Escape closes it. Each CLI is shown by its own logo, in its own colour, both shared with
 TokenGauge through selvedge (`icons.ts`), in the sidebar, the page heads, the overview, the proxy and
 Add a login.
 
@@ -63,11 +65,7 @@ Add a login.
   small meter per usage window, how long its access token has left, Use (or
   "In use" on the one in use, which also has a green edge), and a chevron
   that opens its details in place: a row per usage window (its title,
-  percentage and reset over a bar; under the bar the window's trail since it
-  opened, a step line on the window's whole length with the forecast dashed
-  on from now, and "Full Thu 14:00 at this pace" or "Ends ~60% at this pace",
-  toned like a meter, with the recent rate on hover, `forecast.ts`; neither
-  when TokenGauge has no history or burn for the window; then "Figures from N minutes ago" when
+  percentage and reset over a bar; then "Figures from N minutes ago" when
   TokenGauge carried them from an earlier ask than its snapshot, `windows.ts`
   `carriedSince`), a Claude login's banked usage-limit resets and when they
   expire, with a Reset limits button that asks for a second click before it
@@ -231,6 +229,41 @@ rates take a fixed categorical palette (`--c1` to `--c7`, validated for both
 themes), CLIs their brand colour, outcomes the status colours, each with a
 legend or labelled values.
 
+## Quota
+
+Every login of a CLI pooled into one allowance, a card per CLI (or the one
+picked by its chip), for the window shown: the longest one the logins report
+unless the card's picker chose another. The logins add up as the overview's
+tile does, weighted or absolute by the same switch, in units of the largest
+plan (`quota.ts`). The card says what is left of how much ("85% of 161%"),
+when the pool runs dry or that it does not over the projection, the first
+login to run dry and when, the next reset with what it gives back and whose
+it is, and the burn.
+
+- **Recorded** is the pool from TokenGauge's trails (the samples of each
+  login's current window, [architecture/web.md](../architecture/web.md)),
+  up to the snapshot's time, from the latest of the logins' first samples,
+  since before that one of them is unknown; a login's figure falling is a
+  reset, labelled with what it gave back. A closed window keeps no trail, so
+  the record reaches back to when the window shown opened at most, and the
+  range two weeks earlier than the default at most.
+- **Burn** is what the logins' figures rose by over the last 1, 3 or 6 hours
+  (no less than a quarter hour on record), a fall from a reset not counted and
+  a rise sampled across the start counted for the part inside it.
+- **Projected** spends that burn, times the Future usage pick (same, half,
+  double, none), from now on, always from the login that resets soonest while
+  it has any left; each reset fills its login back up, and a window that has
+  not opened, or has just reset, opens when it is first spent from, so such a
+  login is spent last. It is the best case the pool allows, since what a login
+  has left at its reset is lost. With no burn on record the figures that need
+  one say so.
+- **Drain rate** charts the burn instead, hour by hour over the record, and
+  flat at the projected rate ahead.
+
+The range is two weeks from three days before today, moved a week at a time.
+The view, the burn's hours, the future usage and each CLI's window are kept in
+`localStorage` (`remuda-quota`).
+
 ## Auto mode
 
 While auto mode is on, the Automation tab opens with what its last round decided
@@ -264,7 +297,8 @@ refused.
   the settings in [AutoMode.tsx](../../web/src/components/AutoMode.tsx) and
   [config.ts](../../web/src/config.ts)
 - [src/serve.rs](../../src/serve.rs)
-- [src/gauge.rs](../../src/gauge.rs), [web/src/forecast.ts](../../web/src/forecast.ts)
+- [src/gauge.rs](../../src/gauge.rs)
+- [web/src/quota.ts](../../web/src/quota.ts), [web/src/components/Quota.tsx](../../web/src/components/Quota.tsx)
 - [src/runs.rs](../../src/runs.rs)
 - [src/versions.rs](../../src/versions.rs), [web/src/components/Versions.tsx](../../web/src/components/Versions.tsx),
   [web/src/notes.ts](../../web/src/notes.ts)

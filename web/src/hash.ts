@@ -2,6 +2,7 @@ export type Route =
   | { page: 'overview' }
   | { page: 'cli'; id: string; tab: 'logins' | 'automation' }
   | { page: 'usage'; tab: 'spend' | 'requests' | 'value' }
+  | { page: 'quota'; id: string | null }
   | { page: 'proxy' }
   | { page: 'log' }
   | { page: 'status' }
@@ -15,6 +16,7 @@ export function parse(hash: string): Route {
   if (!isRoute(hash)) return { page: 'overview' };
   const [page, id, tab] = hash.slice(2).split('/');
   if (page === 'cli' && id) return { page: 'cli', id, tab: tab === 'automation' ? 'automation' : 'logins' };
+  if (page === 'quota') return { page, id: id || null };
   if (page === 'usage') return { page, tab: id === 'requests' || id === 'value' ? id : 'spend' };
   if (page === 'proxy' || page === 'log' || page === 'status' || page === 'versions') return { page };
   return { page: 'overview' };
@@ -26,6 +28,8 @@ export function href(r: Route): string {
       return `#/cli/${r.id}${r.tab === 'automation' ? '/automation' : ''}`;
     case 'usage':
       return r.tab === 'spend' ? '#/usage' : `#/usage/${r.tab}`;
+    case 'quota':
+      return r.id ? `#/quota/${r.id}` : '#/quota';
     case 'overview':
       return '#/';
     default:

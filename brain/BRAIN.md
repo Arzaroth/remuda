@@ -30,6 +30,7 @@ shared.
 | Where are remuda's settings, and how does the page edit them? | [architecture/config.md](architecture/config.md) |
 | Why did auto mode switch, or not? | [features/auto-mode.md](features/auto-mode.md) |
 | Why was a login pinged, or not? | [features/keep-warm.md](features/keep-warm.md) |
+| How long will a CLI's logins last at this pace? | [features/web-page.md](features/web-page.md#quota) |
 | Who switched this CLI, when, and why? | [features/log.md](features/log.md) |
 | Which login spent a request, for TokenGauge? | [features/switching.md](features/switching.md#whose-spend-it-is) |
 | Why is the Status dot amber, and what does `remuda doctor` check? | [features/doctor.md](features/doctor.md) |

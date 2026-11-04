@@ -1,5 +1,5 @@
 import { createEffect, Match, Show, Switch } from 'solid-js';
-import { act, store } from './state';
+import { store } from './state';
 import { go, href, route } from './route';
 import type { Provider } from './types';
 import { autoOn, inUse } from './windows';
@@ -10,11 +10,10 @@ import { Logins } from './components/Group';
 import { Health } from './components/Health';
 import { Log } from './components/Log';
 import { Proxy } from './components/Proxy';
+import { Quota } from './components/Quota';
 import { ProviderIcon } from './components/ProviderIcon';
 import { Sidebar } from './components/Sidebar';
 import { Strip, Tile } from './components/Strip';
-import { SkinSwitch } from './components/SkinSwitch';
-import { ThemeSwitch } from './components/ThemeSwitch';
 import { Toast } from './components/Toast';
 import { Usage } from './components/Usage';
 import { Versions } from './components/Versions';
@@ -91,9 +90,14 @@ export function App() {
     const r = route();
     return r.page === 'usage' ? r : null;
   };
+  const quota = () => {
+    const r = route();
+    return r.page === 'quota' ? r : null;
+  };
   const openAdd = () => {
     const r = route();
-    openSheet({ provider: r.page === 'cli' ? r.id : providers()[0]?.id });
+    const id = r.page === 'cli' || r.page === 'quota' ? r.id : null;
+    openSheet({ provider: providers().find((p) => p.id === id)?.id ?? providers()[0]?.id });
   };
   createEffect(() => {
     const s = sheet();
@@ -106,6 +110,7 @@ export function App() {
   createEffect(() => {
     const r = route();
     if (r.page === 'cli' && store.s && !store.s.providers.some((p) => p.id === r.id)) go({ page: 'overview' });
+    if (r.page === 'quota' && r.id && store.s && !store.s.providers.some((p) => p.id === r.id)) go({ page: 'quota', id: null });
   });
   return (
     <>
@@ -122,6 +127,7 @@ export function App() {
               <Switch>
                 <Match when={cli()}>{(c) => <CliPage p={c().p} tab={c().tab} />}</Match>
                 <Match when={usage()}>{(r) => <Usage tab={r().tab} />}</Match>
+                <Match when={quota()}>{(r) => <Quota id={r().id} />}</Match>
                 <Match when={route().page === 'proxy' && store.s!.proxy}>
                   <div class="page">
                     <Proxy />
@@ -144,19 +150,6 @@ export function App() {
                       </div>
                     </header>
                     <Health state={store.s!} />
-                    <div class="phone-only">
-                      <button
-                        class="btn"
-                        title="Refresh the logins not in use whose tokens expire within the hour"
-                        onClick={() => act('/api/refresh', {})}
-                      >
-                        Refresh tokens
-                      </button>
-                      <div class="switches">
-                        <ThemeSwitch />
-                        <SkinSwitch />
-                      </div>
-                    </div>
                   </div>
                 </Match>
                 <Match when={true}>

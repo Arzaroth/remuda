@@ -10,6 +10,8 @@ describe('routes', () => {
       { page: 'usage', tab: 'spend' },
       { page: 'usage', tab: 'requests' },
       { page: 'usage', tab: 'value' },
+      { page: 'quota', id: null },
+      { page: 'quota', id: 'claude' },
       { page: 'proxy' },
       { page: 'log' },
       { page: 'status' },

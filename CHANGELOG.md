@@ -6,6 +6,23 @@
 
 - The page's sidebar puts a dot on Versions while remuda or TokenGauge has a
   newer release, so an update shows without opening the view.
+- A Quota page pools every login of a CLI into one allowance and charts it
+  over two weeks: what was left, as TokenGauge recorded it, and where it is
+  heading if the burn of the last 1, 3 or 6 hours holds (or half, double or
+  none of it), each reset filling its login back up and labelled with what it
+  gives back. It says when the pool runs dry, the first login to, the next
+  reset and the burn, and can chart the burn itself.
+
+### Changed
+
+- On a phone, the page's places no longer scroll sideways along the top: a
+  menu button opens them as a panel of tiles, with Add a login, Refresh tokens
+  and the theme and look switches, which leave the Status page.
+
+### Removed
+
+- A login's details no longer draw each window's trail or say "Full Thu 14:00
+  at this pace": the Quota page projects the whole pool instead.
 
 ## [0.32.0] - 2026-11-04
 
