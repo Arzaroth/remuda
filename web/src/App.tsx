@@ -96,7 +96,8 @@ export function App() {
   };
   const openAdd = () => {
     const r = route();
-    openSheet({ provider: r.page === 'cli' ? r.id : providers()[0]?.id });
+    const id = r.page === 'cli' || r.page === 'quota' ? r.id : null;
+    openSheet({ provider: providers().find((p) => p.id === id)?.id ?? providers()[0]?.id });
   };
   createEffect(() => {
     const s = sheet();
@@ -109,6 +110,7 @@ export function App() {
   createEffect(() => {
     const r = route();
     if (r.page === 'cli' && store.s && !store.s.providers.some((p) => p.id === r.id)) go({ page: 'overview' });
+    if (r.page === 'quota' && r.id && store.s && !store.s.providers.some((p) => p.id === r.id)) go({ page: 'quota', id: null });
   });
   return (
     <>

@@ -97,7 +97,8 @@ function PoolChart(props: {
   const clip = `pool-${Math.random().toString(36).slice(2)}`;
   const days = () => {
     const out: number[] = [];
-    for (let d = midnight(props.from) + DAY; d < props.to; d += DAY) out.push(d);
+    const d = new Date(midnight(props.from));
+    for (d.setDate(d.getDate() + 1); d.getTime() < props.to; d.setDate(d.getDate() + 1)) out.push(d.getTime());
     return out;
   };
   const every = () => Math.max(1, Math.ceil(days().length / Math.max(1, Math.floor(plotW() / 56))));
@@ -278,13 +279,13 @@ function Pool(props: { id: string; name: string; prefs: Prefs; offset: number; s
           <Fig label="Remaining" value={pct(remaining(ls()))} note={`of ${pct(cap())}`} lead />
           <Fig
             label="Pool empty"
-            value={ahead().poolEmpty ? when(ahead().poolEmpty!) : 'Never'}
-            note={ahead().poolEmpty ? 'at this pace' : `through ${shortDay(horizon())}`}
+            value={ahead().poolEmpty ? when(ahead().poolEmpty!) : spent() === null ? '-' : 'Never'}
+            note={ahead().poolEmpty ? 'at this pace' : spent() === null ? 'no burn yet' : `through ${shortDay(horizon())}`}
           />
           <Fig
             label="First empty"
-            value={ahead().firstEmpty ? ahead().firstEmpty!.name : 'None'}
-            note={ahead().firstEmpty ? when(ahead().firstEmpty!.at) : 'before a reset'}
+            value={spent() === null ? '-' : ahead().firstEmpty ? ahead().firstEmpty!.name : 'None'}
+            note={spent() === null ? 'no burn yet' : ahead().firstEmpty ? when(ahead().firstEmpty!.at) : 'before a reset'}
           />
           <Fig
             label="Next reset"
