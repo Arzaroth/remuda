@@ -25,16 +25,12 @@ export type Live = {
   email?: string | null;
 };
 
-export type Forecast = { fullAt: string } | { ends: number };
-
 export type Window = {
   title: string;
   minutes?: number | null;
   usedPercent: number;
   resetsAt: string | null;
-  perHour?: number | null;
   trail?: [number, number][] | null;
-  forecast?: Forecast | null;
 };
 
 export type Usage = {

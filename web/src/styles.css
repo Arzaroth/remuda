@@ -267,13 +267,6 @@ main { min-width: 0; padding: 34px clamp(20px, 4vw, 52px) 120px; }
 .win-head .what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .win-head b { font-weight: 720; font-size: 14px; }
 .win-head .when { color: var(--muted); font-size: 12px; white-space: nowrap; min-width: 8.5ch; text-align: right; }
-.trace { display: block; width: 100%; height: 28px; margin-top: 6px; overflow: visible; }
-.trace path { fill: none; stroke-width: 1.5; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
-.trace .was { stroke: var(--meter); }
-.trace .ahead { stroke: var(--muted); stroke-dasharray: 3 3; }
-.outlook { color: var(--muted); font-size: 12px; margin-top: 4px; }
-.outlook.warn { color: var(--warn); }
-.outlook.bad { color: var(--bad); }
 .aside { color: var(--muted); font-size: 13px; }
 .aside + .aside, .windows + .aside { margin-top: 8px; }
 .banked { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; }
