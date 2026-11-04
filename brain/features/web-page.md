@@ -2,14 +2,14 @@
 
 `remuda serve` opens a page with a sidebar of places and one page for each,
 picked by the address's hash (`#/`, `#/cli/<id>`, `#/cli/<id>/automation`,
-`#/usage`, `#/usage/requests`, `#/proxy`, `#/status`; `route.ts`), so the
+`#/usage`, `#/usage/requests`, `#/quota`, `#/quota/<id>`, `#/proxy`, `#/status`; `route.ts`), so the
 browser's back button and a
 bookmark work. The token, which also travels in the hash, is read only from
 a hash that does not start with `#/`.
 
 The sidebar lists, top to bottom: Overview; one link per CLI in use, with
 its icon, the login in use (or "signed out"), the share used of its tile's
-window over a small meter, and an "auto" tag when auto mode is on; Usage; the
+window over a small meter, and an "auto" tag when auto mode is on; Usage; Quota; the
 API proxy, with an on/off dot; Status, with a dot that turns amber when a
 vital is a warning and red when one is bad (`healthTone`,
 [doctor.md](doctor.md)); Versions, with a blue dot while remuda or TokenGauge
@@ -63,11 +63,7 @@ Add a login.
   small meter per usage window, how long its access token has left, Use (or
   "In use" on the one in use, which also has a green edge), and a chevron
   that opens its details in place: a row per usage window (its title,
-  percentage and reset over a bar; under the bar the window's trail since it
-  opened, a step line on the window's whole length with the forecast dashed
-  on from now, and "Full Thu 14:00 at this pace" or "Ends ~60% at this pace",
-  toned like a meter, with the recent rate on hover, `forecast.ts`; neither
-  when TokenGauge has no history or burn for the window; then "Figures from N minutes ago" when
+  percentage and reset over a bar; then "Figures from N minutes ago" when
   TokenGauge carried them from an earlier ask than its snapshot, `windows.ts`
   `carriedSince`), a Claude login's banked usage-limit resets and when they
   expire, with a Reset limits button that asks for a second click before it
@@ -231,6 +227,37 @@ rates take a fixed categorical palette (`--c1` to `--c7`, validated for both
 themes), CLIs their brand colour, outcomes the status colours, each with a
 legend or labelled values.
 
+## Quota
+
+Every login of a CLI pooled into one allowance, a card per CLI (or the one
+picked by its chip), for the window shown: the longest one the logins report
+unless the card's picker chose another. The logins add up as the overview's
+tile does, weighted or absolute by the same switch, in units of the largest
+plan (`quota.ts`). The card says what is left of how much ("85% of 161%"),
+when the pool runs dry or that it does not over the projection, the first
+login to run dry and when, the next reset with what it gives back and whose
+it is, and the burn.
+
+- **Recorded** is the pool from TokenGauge's trails (the samples of each
+  login's current window, [architecture/web.md](../architecture/web.md)),
+  from the latest of the logins' first samples, since before that one of them
+  is unknown; a login's figure falling is a reset, labelled with what it gave
+  back. A closed window keeps no trail, so the record reaches back a week at
+  most, and the range two weeks earlier than the default at most.
+- **Burn** is what the logins' figures rose by over the last 1, 3 or 6 hours
+  (no less than a quarter hour on record), a fall from a reset not counted.
+- **Projected** spends that burn, times the Future usage pick (same, half,
+  double, none), from now on, always from the login that resets soonest while
+  it has any left; each reset fills its login back up and its window starts
+  again. It is the best case the pool allows, since what a login has left at
+  its reset is lost.
+- **Drain rate** charts the burn instead, hour by hour over the record, and
+  flat at the projected rate ahead.
+
+The range is two weeks from three days before today, moved a week at a time.
+The view, the burn's hours, the future usage and each CLI's window are kept in
+`localStorage` (`remuda-quota`).
+
 ## Auto mode
 
 While auto mode is on, the Automation tab opens with what its last round decided
@@ -264,7 +291,8 @@ refused.
   the settings in [AutoMode.tsx](../../web/src/components/AutoMode.tsx) and
   [config.ts](../../web/src/config.ts)
 - [src/serve.rs](../../src/serve.rs)
-- [src/gauge.rs](../../src/gauge.rs), [web/src/forecast.ts](../../web/src/forecast.ts)
+- [src/gauge.rs](../../src/gauge.rs)
+- [web/src/quota.ts](../../web/src/quota.ts), [web/src/components/Quota.tsx](../../web/src/components/Quota.tsx)
 - [src/runs.rs](../../src/runs.rs)
 - [src/versions.rs](../../src/versions.rs), [web/src/components/Versions.tsx](../../web/src/components/Versions.tsx),
   [web/src/notes.ts](../../web/src/notes.ts)

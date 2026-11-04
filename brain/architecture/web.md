@@ -180,21 +180,16 @@ read only when it is a regular file, and at most 4 MiB of it. `usage` holds
 asks, so it can be older than `updatedAt`), `error` (from the
 snapshot's top-level `errors`, where TokenGauge files a fetch that failed with
 nothing cached), `credentialState`, `planWeight` (TokenGauge's nominal plan multiplier, when it knows one: any positive number, since a Claude Team seat is 1.25 or 6.25), `plan` (the snapshot's `usage.loginMethod`, the plan as TokenGauge names it, such as Grok's tier, which no credential file holds), `windows` (`title`, `usedPercent`,
-`resetsAt`, `perHour`, `trail`, `forecast`), placeholders dropped, a window whose `resetsAt` has passed
+`resetsAt`, `trail`), placeholders dropped, a window whose `resetsAt` has passed
 shown at 0% with no `resetsAt` (TokenGauge keeps a login's figures while it
 cannot fetch, so they can predate a reset; auto mode reads them the same way),
-and no `perHour`, `trail` or `forecast`. `perHour` is the window's
-`burn.perHour` (TokenGauge 0.54: the percent spent per hour over the window's
-last seventh, an hour at least). `trail` is the window's `[ms, percent]`
+and no `trail`. `trail` is the window's `[ms, percent]`
 samples from `tokengauge-window-history.json` beside the snapshot (its trail
 for the same provider, credential and window: `primary`, `secondary`,
 `tertiary`, or an extra window's id, else title), from the window's opening
 on; null when the file or the trail is missing, or its `resetsAt` has passed.
-`forecast` is `{fullAt}` when the window runs out before its reset at
-`perHour`, `{ends}` with the percent it reaches otherwise, and null with no
-`perHour`, a full window, or under 3% of the window gone (`gauge::forecast`,
-as TokenGauge's own pace). A TokenGauge before 0.54 gives none of the three,
-and the page shows the meters as before.
+The Quota page draws its pools from these trails
+([web-page.md](../features/web-page.md#quota)).
 `bankedResets` (`available`, `expiresAt`:
 the Claude resets TokenGauge counts usable, null when none are left), and `accounts`: the same fields per stored
 credential name. TokenGauge 0.37 (snapshot schema 2) names the credential a

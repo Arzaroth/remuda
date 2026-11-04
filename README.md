@@ -172,8 +172,10 @@ service, the refresh timer and its last run, the logins that need signing in
 again), and, when
 [TokenGauge](https://github.com/Arzaroth/TokenGauge) is installed, each login's
 usage, read from TokenGauge's snapshot (only the login in use before
-TokenGauge 0.37), with each window's trail and where its recent pace takes it
-(TokenGauge 0.54 or later). A Versions view sets the installed remuda and
+TokenGauge 0.37). A Quota view pools every login of a CLI into one
+allowance and charts it over two weeks: what was left as TokenGauge recorded
+it (0.54 or later), and where it heads at the burn of the last 1, 3 or 6
+hours, each reset filling its login back up. A Versions view sets the installed remuda and
 TokenGauge beside their latest releases and updates either. It keeps itself current: a change made from the CLI, by the
 refresh timer or by a TokenGauge fetch shows within a couple of seconds.
 
