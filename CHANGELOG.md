@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-11-04
+
 ### Added
 
 - The Usage tab has a Value view: what a week of each login bought, in API
