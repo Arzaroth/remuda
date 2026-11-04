@@ -230,7 +230,7 @@ function Pool(props: { id: string; name: string; prefs: Prefs; offset: number; s
   const all = () => windows(props.id);
   const c = createMemo(() => pick(all(), props.prefs.windows[props.id]));
   const t = () => now();
-  const ls = createMemo((): Login[] => (c() ? logins(c()!, t()) : []));
+  const ls = createMemo((): Login[] => (c() ? logins(c()!, t(), store.s?.usage?.updatedAt ?? null) : []));
   const from = () => midnight(t() - LEAD) + props.offset * 7 * DAY;
   const to = () => from() + SPAN;
   const spent = () => burn(ls(), t(), props.prefs.hours);

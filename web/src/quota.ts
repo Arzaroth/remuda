@@ -13,11 +13,12 @@ export type Login = {
 export type Point = [number, number];
 export type Refill = { at: number; gain: number; name: string };
 
-export function logins(c: Combined, now: number): Login[] {
+export function logins(c: Combined, now: number, written: number | null = null): Login[] {
   const top = Math.max(...c.parts.map((p) => p.weight), 0) || 1;
+  const until = Math.min(now, written ?? now);
   return c.parts.map((p) => {
     const at = p.window.resetsAt ? Date.parse(p.window.resetsAt) : NaN;
-    const trail = (p.window.trail ?? []).filter(([t]) => t <= now);
+    const trail = (p.window.trail ?? []).filter(([t]) => t <= until);
     return {
       name: p.name,
       weight: p.weight / top,
@@ -36,10 +37,10 @@ export const remaining = (ls: Login[]) => ls.reduce((a, l) => a + l.weight * (10
 export const knownFrom = (ls: Login[]) => Math.max(...ls.map((l) => l.samples[0][0]));
 
 function usedAt(l: Login, t: number): number {
-  let used = l.samples[0][1];
+  let [was, used] = l.samples[0];
   for (const [at, u] of l.samples) {
-    if (at > t) break;
-    used = u;
+    if (at > t) return u > used && at > was ? used + ((u - used) * Math.max(0, t - was)) / (at - was) : used;
+    [was, used] = [at, u];
   }
   return used;
 }
@@ -49,13 +50,17 @@ export function recorded(ls: Login[]): { points: Point[]; refills: Refill[] } {
   const start = knownFrom(ls);
   const times = [...new Set(ls.flatMap((l) => l.samples.map(([t]) => t)).filter((t) => t >= start))].sort((a, b) => a - b);
   const refills: Refill[] = [];
+  const seen = ls.map(() => 0);
+  const used = ls.map((l) => l.samples[0][1]);
   const points = times.map((t): Point => {
-    for (const l of ls) {
-      const i = l.samples.findIndex(([at]) => at === t);
-      if (i > 0 && t > start && l.samples[i][1] < l.samples[i - 1][1])
-        refills.push({ at: t, gain: l.weight * (l.samples[i - 1][1] - l.samples[i][1]), name: l.name });
-    }
-    return [t, ls.reduce((a, l) => a + l.weight * (100 - usedAt(l, t)), 0)];
+    ls.forEach((l, i) => {
+      while (seen[i] + 1 < l.samples.length && l.samples[seen[i] + 1][0] <= t) {
+        const [at, u] = l.samples[++seen[i]];
+        if (at > start && u < used[i]) refills.push({ at, gain: l.weight * (used[i] - u), name: l.name });
+        used[i] = u;
+      }
+    });
+    return [t, ls.reduce((a, l, i) => a + l.weight * (100 - used[i]), 0)];
   });
   return { points, refills };
 }
@@ -91,12 +96,13 @@ export function project(ls: Login[], now: number, rate: number, until: number): 
   const points: Point[] = [[now, pool()]];
   const refills: Refill[] = [];
   let firstEmpty: Projection['firstEmpty'] = null;
-  let poolEmpty: number | null = null;
+  let poolEmpty: number | null = ls.length && pool() === 0 ? now : null;
   let t = now;
   for (let guard = 0; t < until && guard < 10_000; guard++) {
-    const soonest = Math.min(...next.map((n) => n ?? Infinity));
     const open = ls.map((_, i) => i).filter((i) => left[i] > 0);
     const d = open.length ? open.reduce((a, i) => ((next[i] ?? Infinity) < (next[a] ?? Infinity) ? i : a)) : null;
+    if (d !== null && rate > 0 && next[d] === null && ls[d].length) next[d] = t + ls[d].length;
+    const soonest = Math.max(t, Math.min(...next.map((n) => n ?? Infinity)));
     const dry = d !== null && rate > 0 ? t + ((left[d] * ls[d].weight) / rate) * HOUR : Infinity;
     const to = Math.min(dry, soonest, until);
     if (d !== null && rate > 0) left[d] = Math.max(0, left[d] - (((to - t) / HOUR) * rate) / ls[d].weight);
@@ -113,7 +119,7 @@ export function project(ls: Login[], now: number, rate: number, until: number): 
       if (n === null || n > t) return;
       if (left[i] < 100) refills.push({ at: t, gain: l.weight * (100 - left[i]), name: l.name });
       left[i] = 100;
-      next[i] = l.length ? n + l.length : null;
+      next[i] = null;
       refilled = true;
     });
     if (refilled) points.push([t, pool()]);
