@@ -53,6 +53,14 @@ describe('logins', () => {
     expect(capacity(ls)).toBeCloseTo(110);
     expect(remaining(ls)).toBeCloseTo(69);
   });
+
+  it('keeps no sample newer than the snapshot it ends on', () => {
+    const ls = logins(combined('Weekly', [['max', win(40, null, [[NOW - 2 * HOUR, 30], [NOW - HOUR, 45]]), 1]]), NOW, NOW - 90 * MIN);
+    expect(ls[0].samples).toEqual([
+      [NOW - 2 * HOUR, 30],
+      [NOW, 40],
+    ]);
+  });
 });
 
 describe('recorded', () => {
@@ -78,7 +86,7 @@ describe('recorded', () => {
 });
 
 describe('burn', () => {
-  it('counts what the figures rose by over the hours asked, never a reset', () => {
+  it('counts what the figures rose by over the hours asked, never a reset, a rise sampled across the start in part', () => {
     const ls = [
       login('a', 10, HOUR, [
         [NOW - 3 * HOUR, 20],
@@ -88,7 +96,7 @@ describe('burn', () => {
       login('b', 30, HOUR, [[NOW - 3 * HOUR, 24]], 0.5),
     ];
     expect(burn(ls, NOW, 3)).toBeCloseTo((30 + 6 + 3) / 3);
-    expect(burn(ls, NOW, 1)).toBeCloseTo(6 + 3);
+    expect(burn(ls, NOW, 1)).toBeCloseTo(6 + 1);
   });
 
   it('measures only the time on record, and nothing under a quarter hour', () => {
@@ -127,6 +135,23 @@ describe('project', () => {
   it('spends a lighter plan faster in its own percent', () => {
     const p = project([login('pro', 0, 100 * HOUR, [], 0.1)], NOW, 1, NOW + 20 * HOUR);
     expect(p.firstEmpty?.at).toBe(NOW + 10 * HOUR);
+  });
+
+  it('opens an unopened window at its first spend', () => {
+    const p = project([login('idle', 0, null)], NOW, 10, NOW + WEEK + HOUR);
+    expect(p.firstEmpty).toEqual({ at: NOW + 10 * HOUR, name: 'idle' });
+    expect(p.refills).toEqual([{ at: NOW + WEEK, gain: 100, name: 'idle' }]);
+  });
+
+  it('refills a reset already past at once, never stepping back', () => {
+    const p = project([login('a', 70, -HOUR)], NOW, 0, NOW + HOUR);
+    expect(p.refills).toEqual([{ at: NOW, gain: 70, name: 'a' }]);
+    expect(p.points.every(([t], i) => !i || t >= p.points[i - 1][0])).toBe(true);
+    expect(p.points.at(-1)).toEqual([NOW + HOUR, 100]);
+  });
+
+  it('says an empty pool is empty now', () => {
+    expect(project([login('a', 100, HOUR)], NOW, 10, NOW + 2 * HOUR).poolEmpty).toBe(NOW);
   });
 
   it('only refills at no burn, and a window starts again after its reset', () => {
