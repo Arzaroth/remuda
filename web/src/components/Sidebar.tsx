@@ -1,4 +1,4 @@
-import { For, onCleanup, onMount, Show } from 'solid-js';
+import { createEffect, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import { act, store } from '../state';
 import { href, route, type Route } from '../route';
 import type { Provider } from '../types';
@@ -47,6 +47,16 @@ function CliLink(props: { p: Provider }) {
   );
 }
 
+const PLACES: Record<Exclude<Route['page'], 'cli'>, string> = {
+  overview: 'Overview',
+  usage: 'Usage',
+  quota: 'Quota',
+  proxy: 'API proxy',
+  log: 'Log',
+  status: 'Status',
+  versions: 'Versions',
+};
+
 export function Sidebar(props: { onAdd: () => void }) {
   const s = () => store.s!;
   const tone = () => healthTone(s());
@@ -61,12 +71,39 @@ export function Sidebar(props: { onAdd: () => void }) {
     const every = setInterval(checkUpdates, 30 * 60_000);
     onCleanup(() => clearInterval(every));
   });
+  const [open, setOpen] = createSignal(false);
+  const place = () => {
+    const r = route();
+    return r.page === 'cli' ? (s().providers.find((p) => p.id === r.id)?.name ?? '') : PLACES[r.page];
+  };
+  createEffect(() => {
+    route();
+    setOpen(false);
+  });
+  const escape = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+  window.addEventListener('keydown', escape);
+  onCleanup(() => window.removeEventListener('keydown', escape));
   return (
-    <nav class="side" aria-label="remuda">
+    <nav class="side" classList={{ open: open() }} aria-label="remuda">
       <a class="side-brand" href={href({ page: 'overview' })}>
         <img src="/favicon.svg" alt="" width="30" height="30" />
         <span>remuda</span>
       </a>
+      <span class="side-here">{place()}</span>
+      <button
+        class="menu-btn"
+        aria-label="Menu"
+        aria-expanded={open()}
+        aria-controls="side-menu"
+        onClick={() => setOpen(!open())}
+      >
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <path d="M3 3h5v5H3zM12 3h5v5h-5zM3 12h5v5H3zM12 12h5v5h-5z" />
+        </svg>
+      </button>
+      <Show when={open()}>
+        <div class="menu-scrim" onClick={() => setOpen(false)} />
+      </Show>
       <div class="side-menu" id="side-menu">
         <div class="nav-group">
           <a class="nav-item" href={href({ page: 'overview' })} aria-current={here({ page: 'overview' }) ? 'page' : undefined}>
@@ -128,7 +165,13 @@ export function Sidebar(props: { onAdd: () => void }) {
           </a>
         </div>
         <div class="side-foot">
-          <button class="btn go wide" onClick={() => props.onAdd()}>
+          <button
+            class="btn go wide"
+            onClick={() => {
+              setOpen(false);
+              props.onAdd();
+            }}
+          >
             Add a login
           </button>
           <button
