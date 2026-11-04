@@ -235,7 +235,9 @@ would download the pinned one, which an offline build cannot. Nothing built
 is committed. `pnpm dev` serves the source with hot reload and
 passes `/api` to a running `remuda serve` on `$REMUDA_PORT` (7429 by
 default), dropping the `Origin` it would refuse; open
-`http://localhost:5173/serve.html#<token>`. The page makes no external
+`http://localhost:5173/serve.html#<token>`. That is harmless only while Vite
+binds localhost: `pnpm dev --host` would let another machine through the
+Origin check, leaving the token as the only guard. The page makes no external
 requests and has a light and a dark theme and two looks; its fonts
 (Archivo and Schibsted Grotesk, Latin subsets, from `@fontsource-variable`)
 and the provider marks and colours (`web/src/icons.ts`) are inlined too.
