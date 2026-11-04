@@ -926,6 +926,33 @@ mod tests {
         assert!(format!("{err:#}").contains("opencode.db"), "{err:#}");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_database_whose_directory_cannot_be_searched_is_an_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("auth.json"),
+            r#"{"opencode-go": {"type": "api", "key": "go"}}"#,
+        )
+        .unwrap();
+        let hidden = tmp.path().join("hidden");
+        std::fs::create_dir(&hidden).unwrap();
+        let mut p = opencode(tmp.path(), None);
+        p.db = Some(KeyDb {
+            path: hidden.join("opencode.db"),
+            integration: "opencode-go",
+        });
+        std::fs::set_permissions(&hidden, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let enforced = std::fs::metadata(hidden.join("opencode.db")).is_err();
+        let live = p.live();
+        std::fs::set_permissions(&hidden, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if enforced {
+            let err = live.unwrap_err();
+            assert!(format!("{err:#}").contains("opencode.db"), "{err:#}");
+        }
+    }
+
     #[test]
     fn glm_is_switched_by_the_shell() {
         let tmp = tempfile::tempdir().unwrap();
