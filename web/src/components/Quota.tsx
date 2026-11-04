@@ -14,8 +14,8 @@ type View = 'remaining' | 'drain';
 type Prefs = { view: View; hours: number; future: number; windows: Record<string, string> };
 
 const DEFAULTS: Prefs = { view: 'remaining', hours: 3, future: 1, windows: {} };
-const SPAN = 14 * DAY;
-const LEAD = 3 * DAY;
+const SPAN = 14;
+const LEAD = 3;
 
 const FUTURES = [
   [1, 'Same as now'],
@@ -26,7 +26,11 @@ const FUTURES = [
 
 const pct = (v: number) => `${Math.round(v)}%`;
 const rate = (v: number) => `${v >= 10 ? Math.round(v) : v.toFixed(1)}%/h`;
-const midnight = (ms: number) => new Date(ms).setHours(0, 0, 0, 0);
+const dayFrom = (ms: number, days: number) => {
+  const d = new Date(ms);
+  d.setDate(d.getDate() + days);
+  return d.setHours(0, 0, 0, 0);
+};
 const shortDay = (ms: number) => new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 const when = (ms: number) => {
   const d = new Date(ms);
@@ -97,8 +101,7 @@ function PoolChart(props: {
   const clip = `pool-${Math.random().toString(36).slice(2)}`;
   const days = () => {
     const out: number[] = [];
-    const d = new Date(midnight(props.from));
-    for (d.setDate(d.getDate() + 1); d.getTime() < props.to; d.setDate(d.getDate() + 1)) out.push(d.getTime());
+    for (let d = dayFrom(props.from, 1); d < props.to; d = dayFrom(d, 1)) out.push(d);
     return out;
   };
   const every = () => Math.max(1, Math.ceil(days().length / Math.max(1, Math.floor(plotW() / 56))));
@@ -232,8 +235,8 @@ function Pool(props: { id: string; name: string; prefs: Prefs; offset: number; s
   const c = createMemo(() => pick(all(), props.prefs.windows[props.id]));
   const t = () => now();
   const ls = createMemo((): Login[] => (c() ? logins(c()!, t(), store.s?.usage?.updatedAt ?? null) : []));
-  const from = () => midnight(t() - LEAD) + props.offset * 7 * DAY;
-  const to = () => from() + SPAN;
+  const from = () => dayFrom(t(), props.offset * 7 - LEAD);
+  const to = () => dayFrom(from(), SPAN);
   const spent = () => burn(ls(), t(), props.prefs.hours);
   const horizon = () => Math.max(to(), t() + 7 * DAY);
   const ahead = createMemo(() => project(ls(), t(), (spent() ?? 0) * props.prefs.future, horizon()));
@@ -357,7 +360,7 @@ export function Quota(props: { id: string | null }) {
   const [offset, setOffset] = createSignal(0);
   const providers = () => inUse(store.s!).filter((p) => windows(p.id).length);
   const shown = () => (props.id ? providers().filter((p) => p.id === props.id) : providers());
-  const from = () => midnight(now() - LEAD) + offset() * 7 * DAY;
+  const from = () => dayFrom(now(), offset() * 7 - LEAD);
   return (
     <div class="page">
       <header class="page-head">
@@ -415,7 +418,7 @@ export function Quota(props: { id: string | null }) {
         </label>
         <div class="pool-range">
           <span>
-            {shortDay(from())} to {shortDay(from() + SPAN - DAY)}
+            {shortDay(from())} to {shortDay(dayFrom(from(), SPAN - 1))}
           </span>
           <button class="btn icon-btn" aria-label="Earlier" disabled={offset() <= -2} onClick={() => setOffset(offset() - 1)}>
             ‹
