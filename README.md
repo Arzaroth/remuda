@@ -182,6 +182,10 @@ TokenGauge (0.52 or later, which remuda runs for it), and what the API proxy
 answered: requests, outcomes, speed, latency and tokens per model, login and
 key. Spend is put to a login from what remuda records as it switches and runs
 CLIs, so it starts from when you install this version.
+Its Value view turns that into what a week of each login bought: API dollars
+per percent of the weekly allowance, week by week, so a plan whose limits were
+raised or cut shows as a step (TokenGauge 0.56 or later, which records each
+week as it closes).
 
 The URL it prints carries an access token in its fragment. Every request must
 send that token back and name this listener in its `Host` and `Origin`, so
