@@ -1,17 +1,33 @@
 import { tokenIn } from './hash';
+import { ask, share } from './token';
 
-export const token = (() => {
-  const fromHash = tokenIn(location.hash);
+const fromHash = tokenIn(location.hash);
+if (fromHash) history.replaceState(null, '', location.pathname);
+
+function keep(t: string) {
   try {
-    if (fromHash) sessionStorage.setItem('remuda-token', fromHash);
-    return fromHash || sessionStorage.getItem('remuda-token') || '';
+    sessionStorage.setItem('remuda-token', t);
+  } catch {}
+}
+
+function kept() {
+  try {
+    return sessionStorage.getItem('remuda-token') ?? '';
   } catch {
-    return fromHash;
+    return '';
   }
-})();
-if (tokenIn(location.hash)) history.replaceState(null, '', location.pathname);
+}
+
+let token = fromHash || kept();
+const channel = new BroadcastChannel('remuda-token');
+const ready = (token ? Promise.resolve() : ask(channel, 1000).then((t) => (token = t))).then(() => {
+  if (!token) return;
+  keep(token);
+  share(channel, token);
+});
 
 export async function api<T = any>(path: string, body?: unknown): Promise<T> {
+  await ready;
   const init: RequestInit & { headers: Record<string, string> } = { headers: { 'X-Remuda-Token': token } };
   if (body !== undefined) {
     init.method = 'POST';
@@ -25,6 +41,7 @@ export async function api<T = any>(path: string, body?: unknown): Promise<T> {
 }
 
 export async function follow(changed: () => void) {
+  await ready;
   let wait = 1000;
   let again = false;
   for (;;) {
