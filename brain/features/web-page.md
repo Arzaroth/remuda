@@ -242,17 +242,21 @@ it is, and the burn.
 
 - **Recorded** is the pool from TokenGauge's trails (the samples of each
   login's current window, [architecture/web.md](../architecture/web.md)),
-  from the latest of the logins' first samples, since before that one of them
-  is unknown; a login's figure falling is a reset, labelled with what it gave
-  back. A closed window keeps no trail, so the record reaches back a week at
-  most, and the range two weeks earlier than the default at most.
+  up to the snapshot's time, from the latest of the logins' first samples,
+  since before that one of them is unknown; a login's figure falling is a
+  reset, labelled with what it gave back. A closed window keeps no trail, so
+  the record reaches back to when the window shown opened at most, and the
+  range two weeks earlier than the default at most.
 - **Burn** is what the logins' figures rose by over the last 1, 3 or 6 hours
-  (no less than a quarter hour on record), a fall from a reset not counted.
+  (no less than a quarter hour on record), a fall from a reset not counted and
+  a rise sampled across the start counted for the part inside it.
 - **Projected** spends that burn, times the Future usage pick (same, half,
   double, none), from now on, always from the login that resets soonest while
-  it has any left; each reset fills its login back up and its window starts
-  again. It is the best case the pool allows, since what a login has left at
-  its reset is lost.
+  it has any left; each reset fills its login back up, and a window that has
+  not opened, or has just reset, opens when it is first spent from, so such a
+  login is spent last. It is the best case the pool allows, since what a login
+  has left at its reset is lost. With no burn on record the figures that need
+  one say so.
 - **Drain rate** charts the burn instead, hour by hour over the record, and
   flat at the projected rate ahead.
 
