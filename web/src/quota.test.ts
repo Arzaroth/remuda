@@ -63,6 +63,11 @@ describe('logins', () => {
     ]);
     expect(burn(ls, NOW, 1)).toBeCloseTo(0);
   });
+
+  it('never backdates a figure that has no trail, such as a window reset since the snapshot', () => {
+    const ls = logins(combined('Weekly', [['max', { ...win(0, null), trail: null }, 1]]), NOW, NOW - 90 * MIN);
+    expect(ls[0].samples).toEqual([[NOW, 0]]);
+  });
 });
 
 describe('recorded', () => {
