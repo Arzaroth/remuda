@@ -679,6 +679,251 @@ mod tests {
         assert_eq!(p.live().unwrap(), Some(json!({"key": "k1"})));
     }
 
+    /// opencode 2's database, past the import of `auth.json` or not yet.
+    fn database(dir: &std::path::Path, imported: bool) -> Connection {
+        let conn = Connection::open(dir.join("opencode.db")).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE migration (id TEXT PRIMARY KEY, time_completed INTEGER NOT NULL);
+             INSERT INTO migration VALUES ('20260611192811_lush_chimera', 1);
+             CREATE TABLE credential (id text PRIMARY KEY, integration_id text, label text NOT NULL,
+               value text NOT NULL, connector_id text, method_id text, active integer,
+               time_created integer NOT NULL, time_updated integer NOT NULL);",
+        )
+        .unwrap();
+        if imported {
+            conn.execute(
+                "INSERT INTO migration VALUES ('20260805200742_import_legacy_credentials', 1)",
+                [],
+            )
+            .unwrap();
+        }
+        conn
+    }
+
+    fn row(conn: &Connection, id: &str, value: Value, active: Option<bool>, created: i64) {
+        conn.execute(
+            "INSERT INTO credential (id, integration_id, label, value, active, time_created, time_updated) \
+             VALUES (?1, 'opencode-go', 'API key', ?2, ?3, ?4, ?4)",
+            rusqlite::params![id, value.to_string(), active, created],
+        )
+        .unwrap();
+    }
+
+    fn rows(conn: &Connection) -> Vec<(String, Value, Option<bool>)> {
+        let mut statement = conn
+            .prepare("SELECT id, value, active FROM credential ORDER BY time_created, id")
+            .unwrap();
+        statement
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    serde_json::from_str(&r.get::<_, String>(1)?).unwrap(),
+                    r.get(2)?,
+                ))
+            })
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    }
+
+    #[test]
+    fn opencode_2_is_switched_in_its_database_and_auth_json_is_left_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = opencode(tmp.path(), None);
+        let db = database(tmp.path(), true);
+        let auth = json!({"opencode-go": {"type": "api", "key": "go-old"}});
+        write_json(&tmp.path().join("auth.json"), &auth).unwrap();
+        row(
+            &db,
+            "cred_1",
+            json!({"type": "key", "key": "go-work", "metadata": {"x": "y"}}),
+            Some(true),
+            1,
+        );
+        save(&store, &p, "work", "go-work");
+        save(&store, &p, "perso", "go-perso");
+
+        assert_eq!(p.live().unwrap(), Some(json!({"key": "go-work"})));
+        assert_eq!(p.live_file(), None);
+        assert_eq!(
+            ops::sync_live(&store, &p).unwrap(),
+            LiveState::Stored {
+                name: "work".into(),
+                synced: true
+            }
+        );
+        ops::switch(&store, &p, "perso", false).unwrap();
+
+        assert_eq!(
+            rows(&db),
+            vec![(
+                "cred_1".to_owned(),
+                json!({"type": "key", "key": "go-perso", "metadata": {"x": "y"}}),
+                Some(true)
+            )]
+        );
+        assert_eq!(
+            read_json(&tmp.path().join("auth.json")).unwrap(),
+            Some(auth)
+        );
+    }
+
+    #[test]
+    fn opencode_uses_the_active_credential_else_the_newest() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = opencode(tmp.path(), None);
+        let db = database(tmp.path(), true);
+        row(
+            &db,
+            "cred_a",
+            json!({"type": "key", "key": "k-old"}),
+            None,
+            1,
+        );
+        row(
+            &db,
+            "cred_b",
+            json!({"type": "key", "key": "k-new"}),
+            None,
+            2,
+        );
+        assert_eq!(p.live().unwrap(), Some(json!({"key": "k-new"})));
+        db.execute("UPDATE credential SET active = 1 WHERE id = 'cred_a'", [])
+            .unwrap();
+        assert_eq!(p.live().unwrap(), Some(json!({"key": "k-old"})));
+    }
+
+    #[test]
+    fn a_key_opencode_already_holds_is_activated_rather_than_added() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = opencode(tmp.path(), None);
+        let db = database(tmp.path(), true);
+        row(
+            &db,
+            "cred_w",
+            json!({"type": "key", "key": "go-work"}),
+            Some(true),
+            1,
+        );
+        row(
+            &db,
+            "cred_p",
+            json!({"type": "key", "key": "go-perso"}),
+            Some(false),
+            2,
+        );
+        save(&store, &p, "work", "go-work");
+        save(&store, &p, "perso", "go-perso");
+
+        ops::switch(&store, &p, "perso", false).unwrap();
+
+        assert_eq!(
+            rows(&db),
+            vec![
+                (
+                    "cred_w".to_owned(),
+                    json!({"type": "key", "key": "go-work"}),
+                    Some(false)
+                ),
+                (
+                    "cred_p".to_owned(),
+                    json!({"type": "key", "key": "go-perso"}),
+                    Some(true)
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_key_goes_in_front_of_an_oauth_login_which_stays() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = opencode(tmp.path(), None);
+        let db = database(tmp.path(), true);
+        let oauth = json!({"type": "oauth", "access": "t", "refresh": "r", "expires": 1});
+        row(&db, "cred_o", oauth.clone(), Some(true), 1);
+        save(&store, &p, "work", "go-work");
+
+        let err = ops::switch(&store, &p, "work", false).unwrap_err();
+        assert!(err.to_string().contains("a login of type oauth"), "{err}");
+        ops::switch(&store, &p, "work", true).unwrap();
+
+        let after = rows(&db);
+        assert_eq!(after.len(), 2);
+        assert_eq!(after[0], ("cred_o".to_owned(), oauth, Some(false)));
+        assert!(after[1].0.starts_with("cred_"), "{}", after[1].0);
+        assert_eq!(after[1].0.len(), "cred_".len() + 26);
+        assert_eq!(after[1].1, json!({"type": "key", "key": "go-work"}));
+        assert_eq!(after[1].2, Some(true));
+        assert_eq!(p.live().unwrap(), Some(json!({"key": "go-work"})));
+    }
+
+    #[test]
+    fn a_key_changed_in_opencode_since_it_was_read_is_not_switched_over() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut db = database(tmp.path(), true);
+        row(
+            &db,
+            "cred_1",
+            json!({"type": "key", "key": "go-new"}),
+            Some(true),
+            1,
+        );
+        let err = install_row(
+            &mut db,
+            "opencode-go",
+            "go-perso",
+            Some(&json!({"key": "go-work"})),
+        )
+        .unwrap_err();
+        assert!(err.is::<Changed>(), "{err:#}");
+        assert_eq!(rows(&db)[0].1["key"], "go-new");
+    }
+
+    #[test]
+    fn until_opencode_imports_auth_json_the_file_is_the_login() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = opencode(tmp.path(), None);
+        let db = database(tmp.path(), false);
+        row(
+            &db,
+            "cred_1",
+            json!({"type": "key", "key": "go-db"}),
+            Some(true),
+            1,
+        );
+        write_json(
+            &tmp.path().join("auth.json"),
+            &json!({"opencode-go": {"type": "api", "key": "go-work"}}),
+        )
+        .unwrap();
+        save(&store, &p, "work", "go-work");
+        save(&store, &p, "perso", "go-perso");
+
+        assert_eq!(p.live().unwrap(), Some(json!({"key": "go-work"})));
+        assert_eq!(p.live_file(), Some(tmp.path().join("auth.json")));
+        ops::switch(&store, &p, "perso", false).unwrap();
+
+        let file = read_json(&tmp.path().join("auth.json")).unwrap().unwrap();
+        assert_eq!(file["opencode-go"]["key"], "go-perso");
+        assert_eq!(rows(&db)[0].1["key"], "go-db");
+    }
+
+    #[test]
+    fn a_database_that_is_not_one_is_an_error_not_a_signed_out_cli() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("opencode.db"),
+            "not sqlite at all, not even close",
+        )
+        .unwrap();
+        let err = opencode(tmp.path(), None).live().unwrap_err();
+        assert!(format!("{err:#}").contains("opencode.db"), "{err:#}");
+    }
+
     #[test]
     fn glm_is_switched_by_the_shell() {
         let tmp = tempfile::tempdir().unwrap();
