@@ -24,6 +24,15 @@
 - A login's details no longer draw each window's trail or say "Full Thu 14:00
   at this pace": the Quota page projects the whole pool instead.
 
+### Fixed
+
+- opencode 2 keys work again. opencode 2 moves its logins out of `auth.json`
+  into its own database and stops reading the file, so remuda saw opencode as
+  signed out and `use` changed nothing. remuda now reads the key opencode
+  uses from that database and switches it there: a key opencode already holds
+  is made the active one, so it also shows in `opencode auth list`. opencode
+  1 still uses `auth.json`.
+
 ## [0.32.0] - 2026-11-04
 
 ### Added

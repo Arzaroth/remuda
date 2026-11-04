@@ -48,8 +48,8 @@ listed. The page reads the same JSON.
 ## `remuda env <name>`
 
 Prints `export VAR='key'` for a stored API key, for a shell to `eval`: GLM
-reads its key from the environment only, and opencode's variable wins over its
-file. Any other provider refuses.
+reads its key from the environment only, and opencode's variable wins over the
+key it stores. Any other provider refuses.
 
 ## `remuda rm <name>`
 
