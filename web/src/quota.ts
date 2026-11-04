@@ -25,7 +25,7 @@ export function logins(c: Combined, now: number, written: number | null = null):
       used: p.window.usedPercent,
       resetsAt: Number.isFinite(at) ? at : null,
       length: p.window.minutes ? p.window.minutes * MIN : null,
-      samples: [...trail, [now, p.window.usedPercent]],
+      samples: [...trail, ...(until < now ? [[until, p.window.usedPercent] as Point] : []), [now, p.window.usedPercent]],
     };
   });
 }

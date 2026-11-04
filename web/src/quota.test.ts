@@ -54,12 +54,14 @@ describe('logins', () => {
     expect(remaining(ls)).toBeCloseTo(69);
   });
 
-  it('keeps no sample newer than the snapshot it ends on', () => {
+  it('keeps no sample newer than the snapshot it ends on, and holds the snapshot from its time', () => {
     const ls = logins(combined('Weekly', [['max', win(40, null, [[NOW - 2 * HOUR, 30], [NOW - HOUR, 45]]), 1]]), NOW, NOW - 90 * MIN);
     expect(ls[0].samples).toEqual([
       [NOW - 2 * HOUR, 30],
+      [NOW - 90 * MIN, 40],
       [NOW, 40],
     ]);
+    expect(burn(ls, NOW, 1)).toBeCloseTo(0);
   });
 });
 
