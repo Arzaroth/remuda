@@ -688,6 +688,17 @@ mod tests {
     }
 
     #[test]
+    fn a_child_forked_meanwhile_does_not_keep_the_session_held() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let (lease, _, home) = start(&e.store, &e.claude, "work").unwrap();
+        let forked = lease._file.try_clone().unwrap();
+        leave(&e.store, &e.claude, lease);
+        assert!(!home.exists());
+        drop(forked);
+    }
+
+    #[test]
     fn a_cli_that_outlives_its_remuda_keeps_the_session_and_a_lockless_one_is_finished() {
         let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);
