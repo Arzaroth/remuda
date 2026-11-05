@@ -194,7 +194,9 @@ nothing cached), `credentialState`, `planWeight` (TokenGauge's nominal plan mult
 shown at 0% with no `resetsAt` (TokenGauge keeps a login's figures while it
 cannot fetch, so they can predate a reset; auto mode reads them the same way),
 and no `trail`. `trail` is the window's `[ms, percent]`
-samples from `tokengauge-window-history.json` beside the snapshot (its trail
+samples from TokenGauge's window history beside the snapshot
+(`value::history_path`: `tokengauge-window-fleet.json`, the fleet's view,
+while TokenGauge's fleet sync keeps one, else `tokengauge-window-history.json`; its trail
 for the same provider, credential and window: `primary`, `secondary`,
 `tertiary`, or an extra window's id, else title), from the window's opening
 on; null when the file or the trail is missing, or its `resetsAt` has passed.
