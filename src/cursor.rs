@@ -449,12 +449,12 @@ mod tests {
         let finished = std::thread::spawn(move || pending.finish(None));
         std::thread::sleep(Duration::from_millis(300));
         waiting.assert();
-        waiting.remove();
         server
             .mock("GET", "/auth/poll")
             .match_query(Matcher::UrlEncoded("uuid".into(), uuid))
             .with_body(json!({"accessToken": token("u7", "a"), "refreshToken": "r7"}).to_string())
             .create();
+        waiting.remove();
         let login = finished.join().unwrap().unwrap();
         assert_eq!(login.identity.account_id, "u7");
         assert_eq!(login.creds["refreshToken"], "r7");

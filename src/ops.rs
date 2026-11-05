@@ -422,11 +422,18 @@ pub mod testing {
     use crate::store::{Entry, Store};
 
     pub const HOUR: i64 = 3_600_000;
-    /// A loopback port nothing listens on: bound once to reserve a number,
-    /// then released, so connecting is refused at once.
+    /// A loopback port nothing listens on: bound for the whole run without
+    /// listening, so connecting is refused at once and no other test's server
+    /// can be given it.
     pub static OFFLINE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
-        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        format!("http://{}", listener.local_addr().unwrap())
+        use socket2::{Domain, Socket, Type};
+        let socket = Socket::new(Domain::IPV4, Type::STREAM, None).unwrap();
+        socket
+            .bind(&std::net::SocketAddr::from(([127, 0, 0, 1], 0)).into())
+            .unwrap();
+        let addr = socket.local_addr().unwrap().as_socket().unwrap();
+        std::mem::forget(socket);
+        format!("http://{addr}")
     });
 
     pub struct Env {
@@ -512,6 +519,12 @@ mod tests {
     use crate::claude::OAUTH_KEY;
     use crate::fsx::read_json;
     use serde_json::json;
+
+    #[test]
+    fn offline_keeps_its_port_for_the_whole_run() {
+        let addr = OFFLINE.trim_start_matches("http://");
+        assert!(std::net::TcpListener::bind(addr).is_err());
+    }
 
     fn confirming(uuid: &str) -> mockito::ServerGuard {
         let mut server = mockito::Server::new();
