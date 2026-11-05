@@ -254,10 +254,21 @@ pub fn weeks(
     out
 }
 
+/// TokenGauge's window history beside its snapshot: the fleet's view of it
+/// while fleet sync keeps one, this machine's own otherwise.
+pub fn history_path(snapshot: &Path) -> std::path::PathBuf {
+    let fleet = snapshot.with_file_name("tokengauge-window-fleet.json");
+    if fleet.exists() {
+        fleet
+    } else {
+        snapshot.with_file_name("tokengauge-window-history.json")
+    }
+}
+
 /// TokenGauge's window history, beside its snapshot: `Null` when there is
 /// none yet, an error when it is there and cannot be read.
 pub fn history(snapshot: &Path) -> anyhow::Result<Value> {
-    let path = snapshot.with_file_name("tokengauge-window-history.json");
+    let path = history_path(snapshot);
     match std::fs::read_to_string(&path) {
         Ok(text) => serde_json::from_str(&text)
             .map_err(|e| anyhow::anyhow!("{} does not parse: {e}", path.display())),

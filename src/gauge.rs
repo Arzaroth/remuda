@@ -31,7 +31,7 @@ type Trails = HashMap<(String, Option<String>, String), Samples>;
 type Samples = Vec<(i64, u64)>;
 
 fn trails(snapshot: &Path, now: Timestamp) -> Trails {
-    let Some(history) = load(&snapshot.with_file_name("tokengauge-window-history.json")) else {
+    let Some(history) = load(&crate::value::history_path(snapshot)) else {
         return Trails::new();
     };
     let text = |t: &Value, key: &str| t.get(key).and_then(Value::as_str).map(str::to_owned);
