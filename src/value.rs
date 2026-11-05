@@ -509,6 +509,19 @@ mod tests {
     }
 
     #[test]
+    fn the_fleets_view_is_read_first_and_this_machines_history_without_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let snapshot = dir.path().join("tokengauge-usage.json");
+        let own = dir.path().join("tokengauge-window-history.json");
+        let fleet = dir.path().join("tokengauge-window-fleet.json");
+        std::fs::write(&own, r#"{"from": "own"}"#).unwrap();
+        std::fs::write(&fleet, r#"{"from": "fleet"}"#).unwrap();
+        assert_eq!(history(&snapshot).unwrap()["from"], "fleet");
+        std::fs::remove_file(&fleet).unwrap();
+        assert_eq!(history(&snapshot).unwrap()["from"], "own");
+    }
+
+    #[test]
     fn a_history_that_cannot_be_read_is_an_error_and_a_missing_one_is_none() {
         let dir = tempfile::tempdir().unwrap();
         let snapshot = dir.path().join("tokengauge-usage.json");

@@ -579,6 +579,21 @@ mod tests {
             "the fleet's view wins while fleet sync keeps one"
         );
 
+        std::fs::write(
+            tmp.path().join("tokengauge-window-fleet.json"),
+            json!({"trails": [trail("primary", "2026-11-03T20:00:00Z", json!([
+                [ms("2026-11-03T12:00:00Z"), 4]
+            ]))]})
+            .to_string(),
+        )
+        .unwrap();
+        let later = read_at(&file, "2026-11-03T12:30:00Z".parse().unwrap()).unwrap();
+        assert_eq!(
+            later["providers"]["claude"]["accounts"]["work"]["windows"][0]["trail"],
+            Value::Null,
+            "another machine's later instance is not this window's"
+        );
+
         std::fs::remove_file(tmp.path().join("tokengauge-window-fleet.json")).unwrap();
         std::fs::remove_file(tmp.path().join("tokengauge-window-history.json")).unwrap();
         let bare = read_at(&file, "2026-11-03T12:30:00Z".parse().unwrap()).unwrap();
