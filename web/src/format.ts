@@ -21,8 +21,8 @@ export function precise(ms: number): string {
 export const until = (ms: number, now = Date.now()) =>
   ms < now ? `${span(ms - now)} ago` : `in ${precise(ms - now)}`;
 export const ago = (ms: number, now = Date.now()) => `${span(now - ms)} ago`;
-export const date = (ms: number) =>
-  new Date(ms).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+export const date = (ms: number, locale?: string) =>
+  new Date(ms).toLocaleString(locale, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 export type Tone = '' | 'warn' | 'bad';
 export const usedTone = (p: number): Tone => (p >= 90 ? 'bad' : p >= 70 ? 'warn' : '');
