@@ -330,9 +330,9 @@ cannot tell which stored Kimi login is live, and `refresh` and `rm` leave Kimi
 alone until it can.
 
 An API key has no account behind it and never expires. opencode 2 keeps
-opencode Go's in its database, `~/.local/share/opencode/opencode.db` (under
-`$XDG_DATA_HOME` when set, or the file `OPENCODE_DB` names), as one of the
-accounts `opencode auth list` shows. A switch makes the stored key the active
+opencode Go's key in its database, `~/.local/share/opencode/opencode.db`
+(under `$XDG_DATA_HOME` when set, or the file `OPENCODE_DB` names), as one of
+the accounts `opencode auth list` shows. A switch makes the stored key the active
 one there, adding it when opencode does not hold it yet, and touches no other
 provider's login. opencode 1, and opencode 2 before it has imported
 `auth.json`, keep it in `auth.json` in opencode's data directory, and a switch
