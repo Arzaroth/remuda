@@ -11,9 +11,10 @@ own logins.
   read `REMUDA_TEST_CLAUDE_API` / `REMUDA_TEST_OPENAI_API` under
   `#[cfg(debug_assertions)]`, which is how `tests/cli.rs` puts a mock in front
   of the built binary. A release build has no way to send a token elsewhere.
-- **Offline is a released ephemeral port** (`ops::testing::OFFLINE`): bound once
-  to reserve a number, then dropped, so connecting is refused at once. It
-  serves the paths that must behave when a confirmation fails.
+- **Offline is a bound port nobody listens on** (`ops::testing::OFFLINE`):
+  bound once and kept for the whole run without listening, so connecting is
+  refused at once and no other test's server can be given the port. It serves
+  the paths that must behave when a confirmation fails.
 - **`ops::testing`** holds the shared fixtures: an `Env` with a temp store and a
   `Claude` pointed at it, `oauth(...)`, `account(...)`, `stored(...)`,
   `sign_in(...)`, and a profile body.

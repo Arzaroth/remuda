@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- A `remuda run` session's lock is let go as soon as remuda is done with it,
+  even when `remuda serve` starts a program at that moment. The session could
+  otherwise look held and be left for a later command to finish.
+
 ## [0.33.1] - 2026-11-05
 
 ### Fixed

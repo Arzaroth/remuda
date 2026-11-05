@@ -40,7 +40,7 @@ fn base(store: &Store, provider: &str, name: &str) -> PathBuf {
 /// lasts while either says it runs: a CLI outlives a remuda that was killed,
 /// and its own children, which may outlive it, hold nothing.
 pub struct Lease {
-    _file: File,
+    _file: Flock,
     cli: Option<PathBuf>,
 }
 
@@ -84,7 +84,25 @@ fn warn(why: &str) {
     let _ = writeln!(std::io::stderr(), "warning: {why}");
 }
 
-fn open_lock(path: &Path, create: bool) -> Result<Option<File>> {
+/// A lock file that unlocks when dropped. A child another thread forks
+/// shares the open file until it execs, so closing it alone can leave the
+/// lock held a while longer.
+struct Flock(File);
+
+impl std::ops::Deref for Flock {
+    type Target = File;
+    fn deref(&self) -> &File {
+        &self.0
+    }
+}
+
+impl Drop for Flock {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+
+fn open_lock(path: &Path, create: bool) -> Result<Option<Flock>> {
     if create && let Some(dir) = path.parent() {
         create_private_dir(dir).with_context(|| format!("failed to create {}", dir.display()))?;
     }
@@ -96,7 +114,7 @@ fn open_lock(path: &Path, create: bool) -> Result<Option<File>> {
         .mode(0o600)
         .open(path)
     {
-        Ok(f) => Ok(Some(f)),
+        Ok(f) => Ok(Some(Flock(f))),
         Err(e) if !create && e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e).with_context(|| format!("failed to open {}", path.display())),
     }
@@ -130,7 +148,7 @@ fn running(place: &Path) -> bool {
 /// The exclusive lock on a session no process runs in any more, for
 /// finishing it. A directory with no lock, left by a process that kept the
 /// session's directory but not its lease, gets one.
-fn idle(place: &Path) -> Result<Option<File>> {
+fn idle(place: &Path) -> Result<Option<Flock>> {
     if clis_alive(place) {
         return Ok(None);
     }
@@ -667,6 +685,17 @@ mod tests {
         assert!(!home.exists());
         assert!(!in_use(&e.store, "claude", "work"));
         assert!(start(&e.store, &e.claude, "ghost").is_err());
+    }
+
+    #[test]
+    fn a_child_forked_meanwhile_does_not_keep_the_session_held() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let (lease, _, home) = start(&e.store, &e.claude, "work").unwrap();
+        let forked = lease._file.try_clone().unwrap();
+        leave(&e.store, &e.claude, lease);
+        assert!(!home.exists());
+        drop(forked);
     }
 
     #[test]
