@@ -145,7 +145,8 @@ Pending sign-ins live in memory, one per provider; starting another cancels the
 previous one. `App::api` takes the store lock once for every route except the
 `/api/login` ones, which lock only to save (`commands::save_login`), and the
 `/api/usage` and `/api/versions` ones, which only read, ask GitHub and run
-TokenGauge or an update, so a slow one holds up nothing else. The name
+TokenGauge or an update, so a slow one holds up nothing else; `/api/token`
+answers before it too. The name
 check before a sign-in and the "stored ..." message are `commands::begin_login`
 and `commands::stored_message`, shared with the CLI.
 
