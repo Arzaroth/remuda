@@ -10,12 +10,10 @@ export function share(channel: Channel, token: string) {
 // each answer is tried before it is taken.
 export function ask(channel: Channel, wait: number, works: (token: string) => Promise<boolean>): Promise<string> {
   return new Promise((done) => {
-    const tried = new Set<string>();
     let over = false;
     const answer = async (e: MessageEvent) => {
       const token = e.data?.token;
-      if (typeof token !== 'string' || tried.has(token)) return;
-      tried.add(token);
+      if (typeof token !== 'string') return;
       if (await works(token)) finish(token);
     };
     const timer = setTimeout(() => finish(''), wait);
