@@ -20,8 +20,8 @@ function kept() {
 
 let token = fromHash || kept();
 const works = (t: string) =>
-  fetch('/api/config', { headers: { 'X-Remuda-Token': t } }).then(
-    (r) => r.status !== 401,
+  fetch('/api/token', { headers: { 'X-Remuda-Token': t } }).then(
+    (r) => r.ok,
     () => false,
   );
 const channel = new BroadcastChannel('remuda-token');
