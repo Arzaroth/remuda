@@ -14,7 +14,7 @@ const [store, setStore] = createStore<{ s: State | null; error: string | null; l
 });
 export { store };
 
-export function keyed(s: State): State {
+function keyed(s: State): State {
   return {
     ...s,
     credentials: s.credentials.map((c) => ({ ...c, id: `${c.provider}/${c.name}` })),

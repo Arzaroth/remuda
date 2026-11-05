@@ -25,6 +25,7 @@ import {
 } from '../config';
 import { ago } from '../format';
 import { now, store, toast } from '../state';
+import { liveOf, loginsOf } from '../windows';
 import type { AutoStatus, Provider } from '../types';
 
 const [saved, setSaved] = createSignal<Loaded | null>(null);
@@ -53,8 +54,7 @@ export async function loadConfig() {
   }
 }
 
-const loginsOf = (provider: string) =>
-  store.s!.credentials.filter((c) => c.provider === provider).map((c) => c.name);
+const namesOf = (provider: string) => loginsOf(store.s!, provider).map((c) => c.name);
 
 function Chip(props: { name: string; on?: boolean; onClick: () => void; title?: string; remove?: boolean }) {
   return (
@@ -95,7 +95,7 @@ function RuleCard(props: { provider: string; i: number; count: number; problems:
   const rule = () => draft.c.auto![props.provider].rule![props.i];
   const at = () => `auto.${props.provider}.rule[${props.i + 1}]`;
   const schedules = () => Object.keys(draft.c.schedules ?? {});
-  const free = () => loginsOf(props.provider).filter((n) => !inRule(rule()).includes(n));
+  const free = () => namesOf(props.provider).filter((n) => !inRule(rule()).includes(n));
   const change = (fn: (r: NonNullable<ReturnType<typeof rule>>) => void) =>
     edit((c) => fn(auto(c, props.provider).rule![props.i]));
   const move = (by: number) =>
@@ -216,7 +216,7 @@ function RuleCard(props: { provider: string; i: number; count: number; problems:
 }
 
 function Now(props: { s: AutoStatus; provider: string }) {
-  const active = () => store.s!.live.find((l) => l.provider === props.provider)?.name ?? null;
+  const active = () => liveOf(store.s!, props.provider)?.name ?? null;
   const head = () => headline(props.s, active());
   const d = () => props.s.decision;
   return (
@@ -263,7 +263,7 @@ function LoginCeilings(props: { p: Provider; table: 'ceilings' | 'long_ceilings'
     <div class="pickable">
       <span class="aside">{props.title}</span>
       <div class="ceilings">
-        <For each={loginsOf(props.p.id)}>
+        <For each={namesOf(props.p.id)}>
           {(name) => (
             <label class="kept">
               <span class="spec">{name}</span>
@@ -398,7 +398,7 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
       <div class="pickable">
         <span class="aside">Logins it may pick when no rule is in force</span>
         <div class="chips">
-          <For each={loginsOf(props.p.id)} fallback={<span class="aside">No stored logins</span>}>
+          <For each={namesOf(props.p.id)} fallback={<span class="aside">No stored logins</span>}>
             {(name) => (
               <Chip
                 name={name}
@@ -416,7 +416,7 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
           </For>
         </div>
       </div>
-      <Show when={loginsOf(props.p.id).length}>
+      <Show when={namesOf(props.p.id).length}>
         <LoginCeilings
           p={props.p}
           table="ceilings"
@@ -446,8 +446,8 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
             }}
           >
             <option value="">stay where it is</option>
-            <For each={loginsOf(props.p.id)}>{(n) => <option value={n}>go to {n}</option>}</For>
-            <Show when={a().fallback && !loginsOf(props.p.id).includes(a().fallback!)}>
+            <For each={namesOf(props.p.id)}>{(n) => <option value={n}>go to {n}</option>}</For>
+            <Show when={a().fallback && !namesOf(props.p.id).includes(a().fallback!)}>
               <option value={a().fallback}>go to {a().fallback} (missing)</option>
             </Show>
           </select>
@@ -486,13 +486,13 @@ function KeepWarm(props: { p: Provider; problems: Problem[] }) {
       <div class="auto-card-head">
         <h2>Keep the 5-hour window open</h2>
       </div>
-      <Show when={props.p.warm && loginsOf(props.p.id).length}>
+      <Show when={props.p.warm && namesOf(props.p.id).length}>
         <p class="aside">
           The moment a picked login's window closes, remuda opens a new one with the smallest request it takes, whether
           auto mode is on or off.
         </p>
         <div class="chips warm-chips">
-          <For each={loginsOf(props.p.id)}>
+          <For each={namesOf(props.p.id)}>
             {(name) => (
               <Chip
                 name={name}
@@ -712,7 +712,7 @@ export function AutoMode(props: { providers: Provider[] }) {
           <div class="auto-side">
             <For each={props.providers}>
               {(p) => (
-                <Show when={(p.warm && loginsOf(p.id).length) || warmProblems(problems(), p.id).length}>
+                <Show when={(p.warm && namesOf(p.id).length) || warmProblems(problems(), p.id).length}>
                   <KeepWarm p={p} problems={problems()} />
                 </Show>
               )}

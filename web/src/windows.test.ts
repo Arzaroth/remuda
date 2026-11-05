@@ -1,6 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import type { Combined, Credential, Live, State } from './types';
-import { autoOn, carriedSince, dropping, dropsLive, inUse, overwrite, planFor, resetsAt, shownFor, taken } from './windows';
+import {
+  autoOn,
+  carriedSince,
+  dropping,
+  dropsLive,
+  inUse,
+  liveOf,
+  loginsOf,
+  overwrite,
+  planFor,
+  providerUsage,
+  resetsAt,
+  shownFor,
+  taken,
+} from './windows';
 
 const cred = (name: string, active = false): Credential => ({
   id: `claude/${name}`,
@@ -138,5 +152,30 @@ describe('autoOn', () => {
     expect(autoOn(s, 'grok')).toBe(false);
     expect(autoOn(s, 'kimi')).toBe(false);
     expect(autoOn({} as State, 'claude')).toBe(false);
+  });
+});
+
+describe('a CLI in the state', () => {
+  const grok = { ...cred('work'), provider: 'grok' };
+  const s = {
+    credentials: [cred('perso', true), grok, cred('team')],
+    live: [{ provider: 'grok', name: 'work' }] as Live[],
+    shown: { claude: { usage: { windows: win(40) } } },
+  } as unknown as State;
+
+  it('has its own logins only', () => {
+    expect(loginsOf(s, 'claude').map((c) => c.name)).toEqual(['perso', 'team']);
+    expect(loginsOf(s, 'kimi')).toEqual([]);
+  });
+
+  it('has its live login, if any', () => {
+    expect(liveOf(s, 'grok')?.name).toBe('work');
+    expect(liveOf(s, 'claude')).toBeUndefined();
+  });
+
+  it('has TokenGauge figures only when the server sent some', () => {
+    expect(providerUsage(s, 'claude')?.windows).toEqual(win(40));
+    expect(providerUsage(s, 'grok')).toBeNull();
+    expect(providerUsage({} as State, 'claude')).toBeNull();
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ago, DAY, HOUR, MIN, span, until, usedTone } from './format';
+import { ago, DAY, date, HOUR, MIN, plural, span, until, usedTone } from './format';
 
 describe('span', () => {
   it('rounds down to the largest unit', () => {
@@ -28,5 +28,17 @@ describe('until', () => {
 describe('usedTone', () => {
   it('warns from 70% and alarms from 90%', () => {
     expect([69, 70, 89, 90].map(usedTone)).toEqual(['', 'warn', 'warn', 'bad']);
+  });
+});
+
+describe('plural', () => {
+  it('adds an s to anything but one', () => {
+    expect([0, 1, 2].map((n) => plural(n, 'login'))).toEqual(['0 logins', '1 login', '2 logins']);
+  });
+});
+
+describe('date', () => {
+  it('gives the month, the day and the time, without the year', () => {
+    expect(date(new Date(2026, 9, 12, 14, 5).getTime(), 'en-US')).toBe('Oct 12, 02:05 PM');
   });
 });

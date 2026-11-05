@@ -66,7 +66,7 @@ export type Health = {
   switchedAt: Record<string, number>;
 };
 
-export type Part = { name: string; active: boolean; window: Window; weight: number };
+type Part = { name: string; active: boolean; window: Window; weight: number };
 
 // A window added up across a CLI's logins, as the server sends it.
 export type Combined = {

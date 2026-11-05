@@ -14,6 +14,12 @@ export function inUse(s: State): Provider[] {
   return used.length ? used : s.providers;
 }
 
+// A CLI's stored logins.
+export const loginsOf = (s: State, id: string): Credential[] => s.credentials.filter((c) => c.provider === id);
+
+// Who a CLI is signed in as, stored or not.
+export const liveOf = (s: State, id: string): Live | undefined => s.live.find((l) => l.provider === id);
+
 // The figures below are the server's (`src/shown.rs`), which adds logins up
 // with `selvedge::plans`, as TokenGauge's panels do; the page only draws them.
 

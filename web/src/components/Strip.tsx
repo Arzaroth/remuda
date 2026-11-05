@@ -5,7 +5,7 @@ import { date, plural, until, usedTone } from '../format';
 import { now, store } from '../state';
 import { remember, remembered } from '../storage';
 import type { Provider } from '../types';
-import { inUse, providerUsage, resetsAt } from '../windows';
+import { inUse, liveOf, loginsOf, providerUsage, resetsAt } from '../windows';
 import { Meter } from './Meter';
 import { ProviderIcon } from './ProviderIcon';
 import { href } from '../route';
@@ -38,9 +38,9 @@ export function lead(id: string) {
 
 export function Tile(props: { p: Provider; link?: boolean; bare?: boolean }) {
   const s = () => store.s!;
-  const creds = () => s().credentials.filter((c) => c.provider === props.p.id);
+  const creds = () => loginsOf(s(), props.p.id);
   const active = () => creds().find((c) => c.active);
-  const live = () => s().live.find((l) => l.provider === props.p.id);
+  const live = () => liveOf(s(), props.p.id);
   const usage = () => providerUsage(s(), props.p.id);
   const canWeigh = () => s().shown?.[props.p.id]?.weighable ?? false;
   const weighted = () => canWeigh() && modes[props.p.id] !== 'absolute';

@@ -2,7 +2,7 @@ import { createEffect, createSignal, For, onCleanup, onMount, Show } from 'solid
 import { act, store } from '../state';
 import { href, route, type Route } from '../route';
 import type { Provider } from '../types';
-import { autoOn, inUse } from '../windows';
+import { autoOn, inUse, liveOf } from '../windows';
 import { usedTone } from '../format';
 import { healthTone } from './Health';
 import { Meter } from './Meter';
@@ -21,7 +21,7 @@ const here = (r: Route) => {
 function CliLink(props: { p: Provider }) {
   const s = () => store.s!;
   const active = () => s().credentials.find((c) => c.provider === props.p.id && c.active);
-  const live = () => s().live.find((l) => l.provider === props.p.id);
+  const live = () => liveOf(s(), props.p.id);
   const w = () => lead(props.p.id);
   const auto = () => autoOn(s(), props.p.id);
   const r: Route = { page: 'cli', id: props.p.id, tab: 'logins' };

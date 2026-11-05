@@ -1,4 +1,5 @@
 import { tokenIn } from './hash';
+import { frames, isChange } from './sse';
 import { ask, share } from './token';
 
 const fromHash = tokenIn(location.hash);
@@ -59,9 +60,9 @@ export async function follow(changed: () => void) {
         again = true;
         const events = r.body.pipeThrough(new TextDecoderStream()).getReader();
         for (let buf = '', chunk; !(chunk = await events.read()).done; ) {
-          const parts = (buf + chunk.value).split('\n\n');
-          buf = parts.pop() ?? '';
-          if (parts.some((e) => e.split('\n').includes('data: changed'))) changed();
+          const { whole, rest } = frames(buf + chunk.value);
+          buf = rest;
+          if (whole.some(isChange)) changed();
         }
       }
     } catch {}
