@@ -749,6 +749,7 @@ impl App {
             };
         }
         match (method, path) {
+            ("GET", "/api/token") => return Ok(json!({})),
             ("GET", "/api/versions") => return self.versions(false),
             ("POST", "/api/versions") => return self.versions(flag("force")),
             ("POST", "/api/versions/update") => {
