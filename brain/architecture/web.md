@@ -11,7 +11,15 @@ to a private window when the default browser allows it.
 
 The page reads the token from the fragment (fragments never reach a server log
 or a `Referer`), keeps it in `sessionStorage`, strips it from the address bar,
-and sends it as `X-Remuda-Token`.
+and sends it as `X-Remuda-Token`. A tab opened from one of the page's links
+starts without it, so before its first request it asks the other tabs over the
+BroadcastChannel `remuda-token` (same origin only, so only this server's
+page), and waits a second for an answer before giving up; every tab holding
+the token answers (`web/src/token.ts`). A tab left from an earlier `serve` on
+the same port answers too, with a token the server no longer takes, so the
+new tab tries each answer on `GET /api/token`, which answers `{}` to a
+request carrying the token, and keeps the first one it takes. Only a 200
+counts: a full server's 503 comes before the token is checked.
 
 ## Finding a running page (`served.rs`)
 
@@ -109,6 +117,7 @@ access to anything, and it ends when they stop.
 
 | Route | Does |
 | --- | --- |
+| `GET /api/token` | `{}`: a new tab checks a token another tab offered |
 | `GET /api/state` | Same JSON as `ls --json`, plus `providers`, `health`, `usage` and `auto` (each CLI's last auto mode round, `{enabled: false}` for one it is off for, or `error` for a config it cannot read) |
 | `GET /api/events` | A server-sent event stream: `data: changed` when the page should reload the state |
 | `GET /api/log` | `{events}`: the log's latest 500 events, oldest first ([../features/log.md](../features/log.md)) |
@@ -136,7 +145,8 @@ Pending sign-ins live in memory, one per provider; starting another cancels the
 previous one. `App::api` takes the store lock once for every route except the
 `/api/login` ones, which lock only to save (`commands::save_login`), and the
 `/api/usage` and `/api/versions` ones, which only read, ask GitHub and run
-TokenGauge or an update, so a slow one holds up nothing else. The name
+TokenGauge or an update, so a slow one holds up nothing else; `/api/token`
+answers before it too. The name
 check before a sign-in and the "stored ..." message are `commands::begin_login`
 and `commands::stored_message`, shared with the CLI.
 
