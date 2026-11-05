@@ -26,12 +26,17 @@ fn load(snapshot: &Path) -> Option<Value> {
 }
 
 /// Each window's trail in TokenGauge's history beside its snapshot, by
-/// provider, credential and window: `[ms, percent]` samples, oldest first.
-type Trails = HashMap<(String, Option<String>, String), Samples>;
+/// provider, credential and window: the instance's reset, and `[ms, percent]`
+/// samples, oldest first.
+type Trails = HashMap<(String, Option<String>, String), Trail>;
+type Trail = (Timestamp, Samples);
 type Samples = Vec<(i64, u64)>;
 
 fn trails(snapshot: &Path, now: Timestamp) -> Trails {
-    let Some(history) = load(&crate::value::history_path(snapshot)) else {
+    let Some(history) = crate::value::history_paths(snapshot)
+        .iter()
+        .find_map(|path| load(path))
+    else {
         return Trails::new();
     };
     let text = |t: &Value, key: &str| t.get(key).and_then(Value::as_str).map(str::to_owned);
@@ -39,13 +44,12 @@ fn trails(snapshot: &Path, now: Timestamp) -> Trails {
     trails
         .into_iter()
         .flatten()
-        .filter(|t| {
-            t.get("resetsAt")
+        .filter_map(|t| {
+            let resets = t
+                .get("resetsAt")
                 .and_then(Value::as_str)
                 .and_then(|at| at.parse::<Timestamp>().ok())
-                .is_some_and(|at| at > now)
-        })
-        .filter_map(|t| {
+                .filter(|at| *at > now)?;
             let samples = t.get("samples")?.as_array()?.iter().filter_map(|s| {
                 let [at, used] = s.as_array()?.as_slice() else {
                     return None;
@@ -57,7 +61,7 @@ fn trails(snapshot: &Path, now: Timestamp) -> Trails {
                 text(t, "credential"),
                 text(t, "window")?,
             );
-            Some((key, samples.collect()))
+            Some((key, (resets, samples.collect())))
         })
         .collect()
 }
@@ -162,7 +166,7 @@ fn slot<'a>(
     }
 }
 
-fn provider<'t>(p: &Value, now: Timestamp, trail: &dyn Fn(&str) -> Option<&'t Samples>) -> Value {
+fn provider<'t>(p: &Value, now: Timestamp, trail: &dyn Fn(&str) -> Option<&'t Trail>) -> Value {
     let usage = p.get("usage").unwrap_or(&Value::Null);
     let fixed = ["primary", "secondary", "tertiary"]
         .into_iter()
@@ -219,7 +223,7 @@ fn window(
     w: &Value,
     extra: bool,
     now: Timestamp,
-    trail: Option<&Samples>,
+    trail: Option<&Trail>,
 ) -> Option<Value> {
     let used = w.get("usedPercent")?.as_u64()?;
     let title = match (title, w.get("windowMinutes").and_then(Value::as_u64)) {
@@ -235,13 +239,21 @@ fn window(
         let span = i64::try_from(m).unwrap_or(i64::MAX).saturating_mul(60_000);
         at.as_millisecond().saturating_sub(span)
     });
-    let trail = trail.filter(|_| !elapsed).map(|samples| {
-        samples
-            .iter()
-            .filter(|(at, _)| opened.is_none_or(|o| *at >= o))
-            .map(|(at, used)| json!([at, used]))
-            .collect::<Vec<_>>()
-    });
+    // The fleet's view can hold another machine's later instance under this
+    // login's name; TokenGauge counts resets this close as one instance.
+    let same = |at: &Timestamp| {
+        let tolerance = minutes.map_or(0, |m| m.saturating_mul(3_000).min(3_600_000));
+        reset.is_some_and(|r| r.as_millisecond().abs_diff(at.as_millisecond()) <= tolerance)
+    };
+    let trail = trail
+        .filter(|(at, _)| !elapsed && same(at))
+        .map(|(_, samples)| {
+            samples
+                .iter()
+                .filter(|(at, _)| opened.is_none_or(|o| *at >= o))
+                .map(|(at, used)| json!([at, used]))
+                .collect::<Vec<_>>()
+        });
     Some(json!({
         "title": title,
         "minutes": minutes,
@@ -579,7 +591,8 @@ mod tests {
         let now: Timestamp = "2026-11-03T12:00:00Z".parse().unwrap();
         let samples = vec![(now.as_millisecond() - 60_000, 30)];
         let w = json!({"usedPercent": 30, "resetsAt": "2026-11-03T13:00:00Z", "windowMinutes": u64::MAX / 2});
-        let shown = window(None, &w, false, now, Some(&samples)).unwrap();
+        let reset = "2026-11-03T13:00:00Z".parse().unwrap();
+        let shown = window(None, &w, false, now, Some(&(reset, samples))).unwrap();
         assert_eq!(shown["trail"], json!([[now.as_millisecond() - 60_000, 30]]));
     }
 
