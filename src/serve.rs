@@ -537,6 +537,7 @@ impl App {
             }
         }
         files.push(self.places.snapshot.clone());
+        files.extend(crate::value::history_paths(&self.places.snapshot));
         files.push(self.places.config.clone());
         let mut seen: Vec<_> = files.into_iter().filter_map(stamp).collect();
         seen.sort();
