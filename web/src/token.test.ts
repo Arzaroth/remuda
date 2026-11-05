@@ -38,4 +38,11 @@ describe('token', () => {
     share(channel(), 'stale');
     expect(await ask(channel(), 50, async () => false)).toBe('');
   });
+
+  it('a check that failed once does not stop the same token from another tab', async () => {
+    share(channel(), 'secret');
+    share(channel(), 'secret');
+    let checks = 0;
+    expect(await ask(channel(), 1000, async () => ++checks > 1)).toBe('secret');
+  });
 });
