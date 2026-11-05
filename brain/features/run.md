@@ -141,6 +141,11 @@ running or ended without being finished. While it holds:
 A lock taken on a file that was removed meanwhile guards nothing, so `still_at`
 checks that the locked file is still the one at that path.
 
+Every session lock is a `Flock`, which unlocks before it closes. A `flock`
+belongs to the open file, and a child another thread forks holds a copy of it
+until it execs, so closing alone could leave the session looking held for a
+moment and `recover` would pass over it.
+
 A Codex run session is not one of the `codex` processes auto mode waits out
 ([auto-mode.md](auto-mode.md)): it is told apart by `REMUDA_OUTER_CODEX_HOME`
 in its environment beside a `CODEX_HOME` under `.runs`.
