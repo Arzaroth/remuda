@@ -944,7 +944,8 @@ mod tests {
             integration: "opencode-go",
         });
         std::fs::set_permissions(&hidden, std::fs::Permissions::from_mode(0o000)).unwrap();
-        let enforced = std::fs::metadata(hidden.join("opencode.db")).is_err();
+        let enforced = std::fs::metadata(hidden.join("opencode.db"))
+            .is_err_and(|e| e.kind() == std::io::ErrorKind::PermissionDenied);
         let live = p.live();
         std::fs::set_permissions(&hidden, std::fs::Permissions::from_mode(0o755)).unwrap();
         if enforced {
