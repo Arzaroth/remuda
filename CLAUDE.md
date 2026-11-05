@@ -29,6 +29,9 @@ follow, and each has tests:
   CLI's files alone), never drop tokens a refresh already rotated.
 - Never put a token, state or verifier on a command line; open the browser
   through a private file.
+- opencode 2 reads its logins from `opencode.db` once it has imported
+  `auth.json`, so a switch there goes into the row opencode selects, in one
+  transaction, and never touches another integration's row.
 
 Tests never touch the developer's real files or the network: providers are
 built with `::at(dir, Api::local(url))`, and `tests/cli.rs` points the binary

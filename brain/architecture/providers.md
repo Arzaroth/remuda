@@ -19,7 +19,7 @@ from a CLI. `creds` is always the store's shape for that CLI.
 | `env_line` | The `export` line `remuda env` prints, for a key read from the environment |
 | `begin_login` | Start a sign-in, returning a `PendingLogin` |
 | `redeem_reset` | Spend one of the login's banked usage-limit resets (Claude only; the others refuse) |
-| `live_file` | The file the live login is read from, whose mtime dates a login changed outside remuda in the attribution ledger; none for a key the environment supplies ([../features/switching.md](../features/switching.md#whose-spend-it-is)) |
+| `live_file` | The file the live login is read from, whose mtime dates a login changed outside remuda in the attribution ledger; none for a key the environment supplies or opencode 2's database, which every session writes ([../features/switching.md](../features/switching.md#whose-spend-it-is)) |
 | `run_sessions` | How to read the session id a running CLI process is in, for the ledger's `run` lines: Claude Code's `sessions/<pid>.json` (`claude::session_of`); none for the others |
 | `run_spec`, `relocated` | What `remuda run` starts, the variable that moves the CLI's files and the files a session copies; the provider reading a session's directory ([../features/run.md](../features/run.md)). Claude Code and Codex only |
 | `formats`, `upstream`, `shape` | What the proxy may send a login's inference endpoint, where, and with what ([proxy.md](proxy.md)); none by default, as for Cursor |
@@ -155,10 +155,21 @@ page and takes the pasted key (`asks_for`: "the API key").
 
 - GLM reads `Z_AI_API_KEY` (legacy `ZAI_API_TOKEN`) and nothing else, so
   `install` refuses and points at `remuda env`.
-- opencode Go reads `OPENCODE_API_KEY`, else the `opencode-go` entry of
-  `$XDG_DATA_HOME/opencode/auth.json`, which holds every provider opencode is
-  connected to. `install` rewrites that entry only, compared and swapped on the
-  key it replaces, and refuses when the variable is set, since it would win.
+- opencode Go reads `OPENCODE_API_KEY` or `OPENCODE_GO_API_KEY`, else
+  opencode's own store, and `install` refuses when either is set, since it
+  would win. Which store
+  depends on the database (`KeyDb`, `paths::opencode_db`: `opencode.db` in
+  `$XDG_DATA_HOME/opencode`, or `OPENCODE_DB`). Once its `migration` table
+  holds `*_import_legacy_credentials`, opencode 2 has copied `auth.json` into
+  table `credential` and reads only that, so remuda does too: the
+  `opencode-go` row opencode selects (`active` first, then newest
+  `time_created`, then `id`), `{"type": "key", "key": ...}`. `install` runs in
+  one immediate transaction, compared on the key it replaces: a row already
+  holding the key is activated, else a key row in use is rekeyed in place, else
+  a new `cred_` row goes in front of a login that is not a key (OAuth), which
+  stays. Before that migration, or with no database, the store is the
+  `opencode-go` entry of `auth.json` in the data directory
+  (`paths::opencode_auth`, wherever `OPENCODE_DB` points), rewritten alone.
 
 ## Sign-in by device code
 

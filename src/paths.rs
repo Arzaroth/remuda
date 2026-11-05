@@ -65,11 +65,23 @@ pub fn cursor_auth() -> PathBuf {
         .join("auth.json")
 }
 
-/// opencode's logins, one entry per provider: `$XDG_DATA_HOME/opencode`.
-pub fn opencode_auth() -> PathBuf {
+fn opencode_data() -> PathBuf {
     var_dir("XDG_DATA_HOME")
         .unwrap_or_else(|| home().join(".local/share"))
-        .join("opencode/auth.json")
+        .join("opencode")
+}
+
+/// opencode 1's logins, one entry per provider: `$XDG_DATA_HOME/opencode`.
+pub fn opencode_auth() -> PathBuf {
+    opencode_data().join("auth.json")
+}
+
+/// opencode 2's database beside it, or the one `OPENCODE_DB` names.
+pub fn opencode_db() -> PathBuf {
+    let data = opencode_data();
+    env::var_os("OPENCODE_DB")
+        .filter(|v| !v.is_empty())
+        .map_or_else(|| data.join("opencode.db"), |db| data.join(db))
 }
 
 /// Private per-user scratch space: `$XDG_RUNTIME_DIR/remuda`, else the store.
