@@ -330,15 +330,18 @@ cannot tell which stored Kimi login is live, and `refresh` and `rm` leave Kimi
 alone until it can.
 
 An API key has no account behind it and never expires. opencode 2 keeps
-opencode Go's in its database, `~/.local/share/opencode/opencode.db`, as one of
-the accounts `opencode auth list` shows. A switch makes the stored key the
-active one there, adding it when opencode does not hold it yet, and touches no
-other provider's login. opencode 1 keeps it in `auth.json` beside it, and a
-switch rewrites the `opencode-go` entry there and nothing else.
+opencode Go's in its database, `~/.local/share/opencode/opencode.db` (under
+`$XDG_DATA_HOME` when set, or the file `OPENCODE_DB` names), as one of the
+accounts `opencode auth list` shows. A switch makes the stored key the active
+one there, adding it when opencode does not hold it yet, and touches no other
+provider's login. opencode 1, and opencode 2 before it has imported
+`auth.json`, keep it in `auth.json` in opencode's data directory, and a switch
+rewrites the `opencode-go` entry there and nothing else.
 GLM reads `Z_AI_API_KEY` and nothing else, and a program cannot change a
 running shell's environment, so `use` says to run
 `eval "$(remuda env glm/<name>)"` instead. The same goes for opencode when
-`OPENCODE_API_KEY` is set, since it wins over the stored key.
+`OPENCODE_API_KEY` or `OPENCODE_GO_API_KEY` is set, since it wins over the
+stored key.
 
 Each CLI rotates the refresh token of the account it is signed into, so before
 every command remuda copies the live login back into the credential it belongs

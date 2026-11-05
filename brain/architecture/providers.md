@@ -155,8 +155,9 @@ page and takes the pasted key (`asks_for`: "the API key").
 
 - GLM reads `Z_AI_API_KEY` (legacy `ZAI_API_TOKEN`) and nothing else, so
   `install` refuses and points at `remuda env`.
-- opencode Go reads `OPENCODE_API_KEY`, else opencode's own store, and
-  `install` refuses when the variable is set, since it would win. Which store
+- opencode Go reads `OPENCODE_API_KEY` or `OPENCODE_GO_API_KEY`, else
+  opencode's own store, and `install` refuses when either is set, since it
+  would win. Which store
   depends on the database (`KeyDb`, `paths::opencode_db`: `opencode.db` in
   `$XDG_DATA_HOME/opencode`, or `OPENCODE_DB`). Once its `migration` table
   holds `*_import_legacy_credentials`, opencode 2 has copied `auth.json` into
@@ -167,7 +168,8 @@ page and takes the pasted key (`asks_for`: "the API key").
   holding the key is activated, else a key row in use is rekeyed in place, else
   a new `cred_` row goes in front of a login that is not a key (OAuth), which
   stays. Before that migration, or with no database, the store is the
-  `opencode-go` entry of `auth.json` beside it, rewritten alone.
+  `opencode-go` entry of `auth.json` in the data directory
+  (`paths::opencode_auth`, wherever `OPENCODE_DB` points), rewritten alone.
 
 ## Sign-in by device code
 
