@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- With TokenGauge's fleet sync on, the Quota page's drain chart and the Value
+  view read what the whole fleet saw of each limit
+  (`tokengauge-window-fleet.json`), so a week this machine was off for is
+  drawn from the samples the others took. Without it they read this
+  machine's own history as before.
+
 ## [0.34.0] - 2026-11-05
 
 ### Changed

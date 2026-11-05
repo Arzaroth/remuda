@@ -203,7 +203,8 @@ Three tabs, each filtered by a CLI and a login, the first two by a range (7,
   percent of its weekly allowance, week by week, with a chart of the whole,
   priced closed weeks that saw use once there are two and how the last such
   week compares with the four before it (a week at 0% has no figure per
-  percent). `value::weeks` joins TokenGauge's window history (the
+  percent). `value::weeks` joins TokenGauge's window history (its fleet
+  view when fleet sync keeps one; the
   weeks it recorded as they closed, TokenGauge 0.56 or later, and the one
   still open) with the spend export of the last 400 days by login. A login's
   week is its first weekly window of the three fixed ones at the time, since a

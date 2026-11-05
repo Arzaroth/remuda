@@ -537,6 +537,7 @@ impl App {
             }
         }
         files.push(self.places.snapshot.clone());
+        files.extend(crate::value::history_paths(&self.places.snapshot));
         files.push(self.places.config.clone());
         let mut seen: Vec<_> = files.into_iter().filter_map(stamp).collect();
         seen.sort();
@@ -2616,8 +2617,18 @@ mod tests {
         assert_ne!(labelled, before);
 
         std::fs::write(&places(&e).snapshot, "{}").unwrap();
+        let written = app.fingerprint();
+        assert_ne!(written, labelled);
+
+        let view = places(&e)
+            .snapshot
+            .with_file_name("tokengauge-window-fleet.json");
+        std::fs::write(view, "{}").unwrap();
         let snapshot = app.fingerprint();
-        assert_ne!(snapshot, labelled);
+        assert_ne!(
+            snapshot, written,
+            "a fleet sync cycle rewrites the view alone"
+        );
 
         let backend: &dyn proxy::Backend = &app;
         backend.spent("claude", Some("signed out"));

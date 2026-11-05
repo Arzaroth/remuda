@@ -96,7 +96,7 @@ only a holder of the token gets one), it takes one of 8 stream slots, inside
 the 32 connections, or gets a 503. It sends the head and `: connected`, then
 every 2 s compares `App::fingerprint`, the path, modification time and size
 of the store's `*.json` and `*.jsonl` files (the log included, so a new line also starts a round of auto mode and keep-warm), one directory level down, of TokenGauge's
-snapshot and of `config.toml`, links followed, and sends `data: changed` when it moved. Other files
+snapshot and its two window histories (a fleet sync cycle rewrites the view without the snapshot) and of `config.toml`, links followed, and sends `data: changed` when it moved. Other files
 in the store are left out: the temp files writes go through, and the redirect
 pages kept there when `$XDG_RUNTIME_DIR` is unset. `App::streams` names the
 route; the listener serves it itself, since it outlives one `Response`. After 15 s with nothing
@@ -194,10 +194,15 @@ nothing cached), `credentialState`, `planWeight` (TokenGauge's nominal plan mult
 shown at 0% with no `resetsAt` (TokenGauge keeps a login's figures while it
 cannot fetch, so they can predate a reset; auto mode reads them the same way),
 and no `trail`. `trail` is the window's `[ms, percent]`
-samples from `tokengauge-window-history.json` beside the snapshot (its trail
-for the same provider, credential and window: `primary`, `secondary`,
-`tertiary`, or an extra window's id, else title), from the window's opening
-on; null when the file or the trail is missing, or its `resetsAt` has passed.
+samples from TokenGauge's window history beside the snapshot
+(`value::history_paths`, read in order: `tokengauge-window-fleet.json`, the
+fleet's view, while TokenGauge's fleet sync keeps one, else
+`tokengauge-window-history.json`; its trail for the same provider, credential
+and window: `primary`, `secondary`, `tertiary`, or an extra window's id, else
+title), from the window's opening on; null when the file or the trail is
+missing, its `resetsAt` has passed, or it is not the window's reset (the
+fleet's view can hold another machine's later instance under a login's name;
+resets within a twentieth of the window, an hour at most, are one).
 The Quota page draws its pools from these trails
 ([web-page.md](../features/web-page.md#quota)).
 `bankedResets` (`available`, `expiresAt`:

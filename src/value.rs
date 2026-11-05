@@ -254,16 +254,29 @@ pub fn weeks(
     out
 }
 
+/// TokenGauge's window histories beside its snapshot, in the order to read
+/// them: the fleet's view while fleet sync keeps one, then this machine's own.
+pub fn history_paths(snapshot: &Path) -> [std::path::PathBuf; 2] {
+    [
+        snapshot.with_file_name("tokengauge-window-fleet.json"),
+        snapshot.with_file_name("tokengauge-window-history.json"),
+    ]
+}
+
 /// TokenGauge's window history, beside its snapshot: `Null` when there is
 /// none yet, an error when it is there and cannot be read.
 pub fn history(snapshot: &Path) -> anyhow::Result<Value> {
-    let path = snapshot.with_file_name("tokengauge-window-history.json");
-    match std::fs::read_to_string(&path) {
-        Ok(text) => serde_json::from_str(&text)
-            .map_err(|e| anyhow::anyhow!("{} does not parse: {e}", path.display())),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
-        Err(e) => Err(anyhow::anyhow!("{} could not be read: {e}", path.display())),
+    for path in history_paths(snapshot) {
+        match std::fs::read_to_string(&path) {
+            Ok(text) => {
+                return serde_json::from_str(&text)
+                    .map_err(|e| anyhow::anyhow!("{} does not parse: {e}", path.display()));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(anyhow::anyhow!("{} could not be read: {e}", path.display())),
+        }
     }
+    Ok(Value::Null)
 }
 
 #[cfg(test)]
@@ -493,6 +506,19 @@ mod tests {
             MON + 30 * DAY,
         );
         assert!(unpriced[0].unpriced);
+    }
+
+    #[test]
+    fn the_fleets_view_is_read_first_and_this_machines_history_without_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let snapshot = dir.path().join("tokengauge-usage.json");
+        let own = dir.path().join("tokengauge-window-history.json");
+        let fleet = dir.path().join("tokengauge-window-fleet.json");
+        std::fs::write(&own, r#"{"from": "own"}"#).unwrap();
+        std::fs::write(&fleet, r#"{"from": "fleet"}"#).unwrap();
+        assert_eq!(history(&snapshot).unwrap()["from"], "fleet");
+        std::fs::remove_file(&fleet).unwrap();
+        assert_eq!(history(&snapshot).unwrap()["from"], "own");
     }
 
     #[test]
