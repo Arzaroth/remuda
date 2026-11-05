@@ -6,13 +6,22 @@ export function share(channel: Channel, token: string) {
   });
 }
 
-export function ask(channel: Channel, wait: number): Promise<string> {
+// A tab left over from an earlier server still answers with its token, so
+// each answer is tried before it is taken.
+export function ask(channel: Channel, wait: number, works: (token: string) => Promise<boolean>): Promise<string> {
   return new Promise((done) => {
-    const answer = (e: MessageEvent) => {
-      if (typeof e.data?.token === 'string') finish(e.data.token);
+    const tried = new Set<string>();
+    let over = false;
+    const answer = async (e: MessageEvent) => {
+      const token = e.data?.token;
+      if (typeof token !== 'string' || tried.has(token)) return;
+      tried.add(token);
+      if (await works(token)) finish(token);
     };
     const timer = setTimeout(() => finish(''), wait);
     function finish(token: string) {
+      if (over) return;
+      over = true;
       clearTimeout(timer);
       channel.removeEventListener('message', answer);
       done(token);

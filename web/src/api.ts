@@ -19,8 +19,13 @@ function kept() {
 }
 
 let token = fromHash || kept();
+const works = (t: string) =>
+  fetch('/api/config', { headers: { 'X-Remuda-Token': t } }).then(
+    (r) => r.status !== 401,
+    () => false,
+  );
 const channel = new BroadcastChannel('remuda-token');
-const ready = (token ? Promise.resolve() : ask(channel, 1000).then((t) => (token = t))).then(() => {
+const ready = (token ? Promise.resolve() : ask(channel, 1000, works).then((t) => (token = t))).then(() => {
   if (!token) return;
   keep(token);
   share(channel, token);
