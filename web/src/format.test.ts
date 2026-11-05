@@ -38,11 +38,7 @@ describe('plural', () => {
 });
 
 describe('date', () => {
-  it('gives the day and the time, without the year', () => {
-    const at = new Date(2026, 9, 12, 14, 5).getTime();
-    const shown = date(at);
-    expect(shown).toContain('12');
-    expect(shown).toContain('05');
-    expect(shown).not.toContain('2026');
+  it('gives the month, the day and the time, without the year', () => {
+    expect(date(new Date(2026, 9, 12, 14, 5).getTime(), 'en-US')).toBe('Oct 12, 02:05 PM');
   });
 });
