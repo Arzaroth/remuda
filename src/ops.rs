@@ -520,6 +520,12 @@ mod tests {
     use crate::fsx::read_json;
     use serde_json::json;
 
+    #[test]
+    fn offline_keeps_its_port_for_the_whole_run() {
+        let addr = OFFLINE.trim_start_matches("http://");
+        assert!(std::net::TcpListener::bind(addr).is_err());
+    }
+
     fn confirming(uuid: &str) -> mockito::ServerGuard {
         let mut server = mockito::Server::new();
         server
