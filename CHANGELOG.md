@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.33.1] - 2026-11-05
+
 ### Fixed
 
 - A page link opened in a new tab works: the new tab takes the token from
