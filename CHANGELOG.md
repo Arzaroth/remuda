@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-11-05
+
 ### Changed
 
 - Codex and OpenRouter show their current logos on the page: Codex's cloud
