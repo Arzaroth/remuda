@@ -1255,6 +1255,8 @@ mod tests {
         assert_eq!(status(local, None, None, "/api/state"), 401);
         assert_eq!(status(local, None, Some("nope"), "/api/state"), 401);
         assert_eq!(status(local, None, Some(TOKEN), "/api/state"), 200);
+        assert_eq!(status(local, None, Some("nope"), "/api/token"), 401);
+        assert_eq!(status(local, None, Some(TOKEN), "/api/token"), 200);
         assert_eq!(
             status(
                 Some("rebound.example:7429"),
