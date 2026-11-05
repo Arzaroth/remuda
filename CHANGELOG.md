@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Codex and OpenRouter show their current logos on the page: Codex's cloud
+  with a prompt instead of OpenAI's knot, and OpenRouter's new mark. Codex,
+  Cursor and OpenRouter logos are drawn in the page's ink and keep their colour
+  for accents only.
+
 ## [0.33.2] - 2026-11-05
 
 ### Fixed
