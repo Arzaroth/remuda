@@ -15,7 +15,10 @@ and sends it as `X-Remuda-Token`. A tab opened from one of the page's links
 starts without it, so before its first request it asks the other tabs over the
 BroadcastChannel `remuda-token` (same origin only, so only this server's
 page), and waits a second for an answer before giving up; every tab holding
-the token answers (`web/src/token.ts`).
+the token answers (`web/src/token.ts`). A tab left from an earlier `serve` on
+the same port answers too, with a token the server no longer takes, so the
+new tab tries each answer on `GET /api/config` and keeps the first one not
+refused with a 401.
 
 ## Finding a running page (`served.rs`)
 
