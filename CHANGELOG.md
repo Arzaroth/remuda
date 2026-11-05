@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.33.2] - 2026-11-05
+
 ### Fixed
 
 - A `remuda run` session's lock is let go as soon as remuda is done with it,
