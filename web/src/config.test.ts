@@ -253,3 +253,10 @@ it('takes the long ceiling of a login with one window', () => {
   simplify(a, ['perso'], ['perso']);
   expect(a).toEqual({ ceilings: { perso: 94 }, long_ceilings: { perso: 94 } });
 });
+
+it('counts the CLI ceiling for a login entry left unset when simplifying', () => {
+  const a: Auto = { ceiling: 80, long_ceilings: { IDC: 90 } };
+  simplify(a, ['IDC']);
+  expect(a.ceilings).toEqual({ IDC: 80 });
+  expect(a.long_ceilings).toEqual({ IDC: 80 });
+});

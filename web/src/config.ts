@@ -220,7 +220,7 @@ export function simplify(a: Auto, names: string[], single: string[] = []) {
   for (const n of names)
     if (single.includes(n)) setCeiling(a, ['ceilings', 'long_ceilings'], n, a.long_ceilings?.[n] ?? null);
     else if (oneCeiling(a, n) === null) {
-      const both = [a.ceilings?.[n], a.long_ceilings?.[n]].filter((c): c is number => c !== undefined);
-      setCeiling(a, ['ceilings', 'long_ceilings'], n, Math.min(...both));
+      const cli = a.ceiling ?? 100;
+      setCeiling(a, ['ceilings', 'long_ceilings'], n, Math.min(a.ceilings?.[n] ?? cli, a.long_ceilings?.[n] ?? cli));
     }
 }
