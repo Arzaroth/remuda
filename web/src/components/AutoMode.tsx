@@ -327,7 +327,7 @@ function Order(props: { p: Provider; simple: boolean }) {
                 <input
                   type="checkbox"
                   checked={i() >= 0}
-                  onChange={() => set((x) => toggleLogin(x, name))}
+                  onChange={() => set((x) => toggleLogin(x, name, !!cred(name)))}
                 />
                 <span class="spec">{name}</span>
                 <Show when={!cred(name)}>

@@ -164,16 +164,21 @@ export function moveLogin(a: Auto, name: string, by: number) {
   l.splice(j, 0, ...l.splice(i, 1));
 }
 
-/** Lets auto mode pick a login, last in the order, or stops it. */
-export function toggleLogin(a: Auto, name: string) {
+export type Ceilings = 'ceilings' | 'long_ceilings';
+
+/**
+ * Lets auto mode pick a login, last in the order, or stops it. A login no
+ * longer stored loses its ceilings with it: its row goes, and they would keep
+ * the config from saving.
+ */
+export function toggleLogin(a: Auto, name: string, stored = true) {
   const l = (a.logins ??= []);
   const i = l.indexOf(name);
   if (i >= 0) l.splice(i, 1);
   else l.push(name);
   if (!l.length) delete a.logins;
+  if (i >= 0 && !stored) setCeiling(a, ['ceilings', 'long_ceilings'], name, null);
 }
-
-export type Ceilings = 'ceilings' | 'long_ceilings';
 
 /** Sets a login's own ceiling in `tables`, or drops it with `c` null. */
 export function setCeiling(a: Auto, tables: Ceilings[], name: string, c: number | null) {

@@ -260,3 +260,10 @@ it('counts the CLI ceiling for a login entry left unset when simplifying', () =>
   expect(a.ceilings).toEqual({ IDC: 80 });
   expect(a.long_ceilings).toEqual({ IDC: 80 });
 });
+
+it('drops the ceilings of a login no longer stored with it, and keeps a stored one\'s', () => {
+  const a: Auto = { logins: ['ghost', 'IDC'], ceilings: { ghost: 90, IDC: 93 }, long_ceilings: { ghost: 90 } };
+  toggleLogin(a, 'ghost', false);
+  toggleLogin(a, 'IDC');
+  expect(a).toEqual({ ceilings: { IDC: 93 } });
+});
