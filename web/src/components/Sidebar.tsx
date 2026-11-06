@@ -2,12 +2,11 @@ import { createEffect, createSignal, For, onCleanup, onMount, Show } from 'solid
 import { act, store } from '../state';
 import { href, route, type Route } from '../route';
 import type { Provider } from '../types';
-import { autoOn, inUse, liveOf } from '../windows';
+import { autoOn, inUse, liveOf, tightest } from '../windows';
 import { usedTone } from '../format';
 import { healthTone } from './Health';
 import { Meter } from './Meter';
 import { ProviderIcon } from './ProviderIcon';
-import { lead } from './Strip';
 import { api } from '../api';
 import { noteVersions, updates, type Checked } from '../updates';
 import { SkinSwitch } from './SkinSwitch';
@@ -22,7 +21,10 @@ function CliLink(props: { p: Provider }) {
   const s = () => store.s!;
   const active = () => s().credentials.find((c) => c.provider === props.p.id && c.active);
   const live = () => liveOf(s(), props.p.id);
-  const w = () => lead(props.p.id);
+  const w = () => {
+    const c = active();
+    return c ? tightest(s(), c) : null;
+  };
   const auto = () => autoOn(s(), props.p.id);
   const r: Route = { page: 'cli', id: props.p.id, tab: 'logins' };
   return (
@@ -39,9 +41,11 @@ function CliLink(props: { p: Provider }) {
         </span>
         <span class="nav-sub">
           {active()?.name ?? (live()?.state === 'signed_out' ? 'signed out' : 'no stored login in use')}
-          <Show when={w()}>{(x) => <b>{Math.round((x().used / x().of) * 100)}%</b>}</Show>
+          <Show when={w()}>
+            {(x) => <b title={`${active()!.name}'s ${x().title.toLowerCase()} window`}>{x().usedPercent}%</b>}
+          </Show>
         </span>
-        <Show when={w()}>{(x) => <Meter fraction={x().used / x().of} tone={usedTone((x().used / x().of) * 100)} />}</Show>
+        <Show when={w()}>{(x) => <Meter fraction={x().usedPercent / 100} tone={usedTone(x().usedPercent)} />}</Show>
       </span>
     </a>
   );

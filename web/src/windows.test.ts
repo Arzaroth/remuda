@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { Combined, Credential, Live, State } from './types';
 import {
   autoOn,
+  ownWindows,
+  tightest,
   carriedSince,
   dropping,
   dropsLive,
@@ -177,5 +179,38 @@ describe('a CLI in the state', () => {
     expect(providerUsage(s, 'claude')?.windows).toEqual(win(40));
     expect(providerUsage(s, 'grok')).toBeNull();
     expect(providerUsage({} as State, 'claude')).toBeNull();
+  });
+});
+
+describe('a login\'s own windows', () => {
+  const w = (title: string, minutes: number, usedPercent: number, extra = false) => ({
+    title,
+    minutes,
+    usedPercent,
+    resetsAt: null,
+    extra,
+  });
+  const state = {
+    shown: {
+      claude: {
+        accounts: {
+          IDC: { windows: [w('Weekly', 10080, 83), w('5 hours', 300, 7), w('Fable only', 10080, 90, true)] },
+          perso: { windows: [w('Weekly', 10080, 9), w('Fable only', 10080, 0, true)] },
+          odd: { windows: [w('Fable only', 10080, 12, true)] },
+        },
+      },
+    },
+  } as unknown as State;
+
+  it('leaves out a model\'s own limit, shortest first', () => {
+    expect(ownWindows(state, cred('IDC'))!.map((x) => x.title)).toEqual(['5 hours', 'Weekly']);
+    expect(ownWindows(state, cred('perso'))!.map((x) => x.title)).toEqual(['Weekly']);
+    expect(ownWindows(state, cred('odd'))!.map((x) => x.title)).toEqual(['Fable only']);
+    expect(ownWindows(state, cred('gone'))).toBeNull();
+  });
+
+  it('takes the window closest to full', () => {
+    expect(tightest(state, cred('IDC'))!.usedPercent).toBe(83);
+    expect(tightest(state, cred('gone'))).toBeNull();
   });
 });

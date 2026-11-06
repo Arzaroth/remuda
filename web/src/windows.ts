@@ -1,5 +1,5 @@
 import { MIN } from './format';
-import type { Combined, Credential, Live, Provider, Shown, State } from './types';
+import type { Combined, Credential, Live, Provider, Shown, State, Window } from './types';
 
 // The CLIs worth a card and a tab: one with a stored login, or signed into
 // one (an unstored login is there to import). The rest are noise until an
@@ -74,4 +74,22 @@ export const taken = (creds: Credential[], provider: string, name: string) =>
 export function autoOn(s: State, provider: string): boolean {
   const a = s.auto?.[provider];
   return typeof a === 'object' && a.enabled;
+}
+
+/** A login's own windows: a model's or feature's limit only when it has no other. */
+export function counted(windows: Window[]): Window[] {
+  const own = windows.filter((w) => !w.extra);
+  return own.length ? own : windows;
+}
+
+/** The login's windows when TokenGauge has them, shortest first, or null. */
+export function ownWindows(s: State, c: Credential): Window[] | null {
+  const own = counted(shownFor(s, c)?.windows ?? []);
+  return own.length ? [...own].sort((a, b) => (a.minutes ?? Infinity) - (b.minutes ?? Infinity)) : null;
+}
+
+/** The login's window closest to full, or null without figures. */
+export function tightest(s: State, c: Credential): Window | null {
+  const own = ownWindows(s, c);
+  return own ? own.reduce((a, b) => (b.usedPercent > a.usedPercent ? b : a)) : null;
 }

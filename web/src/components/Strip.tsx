@@ -30,7 +30,7 @@ export const windows = (id: string) => {
   return s.shown?.[id]?.[weighted ? 'weighted' : 'absolute'] ?? [];
 };
 
-export function lead(id: string) {
+function lead(id: string) {
   const all = windows(id);
   if (!all.length) return null;
   return all.find((w) => w.title === picks[id]) || all.reduce((a, b) => (b.pooled > a.pooled ? b : a));

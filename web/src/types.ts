@@ -31,6 +31,7 @@ export type Window = {
   usedPercent: number;
   resetsAt: string | null;
   trail?: [number, number][] | null;
+  extra?: boolean;
 };
 
 export type Usage = {
