@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Auto mode uses logins in the order you list them: the first one under its
+  ceiling wins, and the CLI goes back to an earlier one once it has room.
+  Ranking a tier by the headroom a reset would wipe (the `%/h` score) is now
+  the `balance` option, off by default.
+- A switch held back by the minimum time on a login says which login it would
+  go to and why, and every login auto mode weighs shows its window closest to
+  its ceiling.
+- The Automation tab has a Simple view (logins in order, arrows to move them,
+  one ceiling each) and an Advanced one with the rest. A login shows ceiling
+  fields only for the windows it has.
+- The sidebar shows the login in use's own window closest to full, the figure
+  its card shows, not the total across logins.
+
+### Fixed
+
+- Keep-warm no longer offers logins without a 5-hour window.
+
 ## [0.35.0] - 2026-11-05
 
 ### Added

@@ -248,12 +248,18 @@ snapshot, so auto mode is a thread there rather than a third unit or a run of
 the refresh timer, whose half hour is too coarse for a 5-hour window. The
 price: no `serve`, no auto mode.
 
-## Auto mode spends first what a reset would wipe
+## Auto mode follows the list unless asked to balance
 
-Within a tier the score is the headroom left in the longest window per hour
-until it resets, not the headroom alone: picking the login with the most left
-leaves another's week to expire unspent. The same idea frees a reserved login
-outside its schedule when its window resets before the schedule starts.
+By default auto mode uses logins in the order the user put them, each its own
+step: the first one under its ceiling wins, and the CLI goes back to an
+earlier one once it has room. A ranking the user cannot see coming overrode
+what they set up, so it is opt-in (`balance`).
+
+With `balance`, within a tier the score is the headroom left in the longest
+window per hour until it resets, not the headroom alone: picking the login
+with the most left leaves another's week to expire unspent. The same idea
+frees a reserved login outside its schedule when its window resets before the
+schedule starts, with or without `balance`.
 
 ## Auto mode waits for Codex sessions to end
 

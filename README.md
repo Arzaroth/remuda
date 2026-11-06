@@ -255,10 +255,12 @@ when  = "otherwise"
 order = [["Axeo"], ["perso"]]
 ```
 
-Within a tier, the login with the most headroom to lose at its next reset goes
-first. Unless the login in use is full, a switch waits at least 30 minutes
-after the last one (`dwell`), and one between logins of the same tier needs a
-25% better pick (`margin`). Codex is
+Logins are used in the order listed: the first one under its ceiling wins,
+and the CLI goes back to an earlier one once it has room again. With
+`balance = true`, the logins of a tier are ranked instead by the headroom
+they would lose at their next reset, and a switch between them needs a 25%
+better pick (`margin`). Unless the login in use is full, a switch waits at
+least 30 minutes after the last one (`dwell`). Codex is
 switched only while no Codex session runs. `remuda auto` shows what it would
 do and why.
 
