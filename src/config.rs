@@ -478,6 +478,9 @@ impl Config {
                 if !is_default_dwell(&a.dwell) {
                     t["dwell"] = toml_edit::value(String::from(a.dwell));
                 }
+                if a.balance {
+                    t["balance"] = toml_edit::value(true);
+                }
                 if !is_default_margin(&a.margin) {
                     t["margin"] = toml_edit::value(a.margin);
                 }
@@ -840,6 +843,7 @@ fn keep_defaults(old: &DocumentMut, new: &mut DocumentMut) {
         };
         let defaults = [
             ("enabled", toml_edit::value(false)),
+            ("balance", toml_edit::value(false)),
             ("fallback_when_maxed", toml_edit::value(false)),
             ("dwell", toml_edit::value(String::from(default_dwell()))),
             ("margin", toml_edit::value(default_margin())),
@@ -1203,6 +1207,17 @@ order = [["perso"]]
             out.find("when    = \"otherwise\"").unwrap() < first,
             "{out}"
         );
+    }
+
+    #[test]
+    fn balance_is_written_and_read_back() {
+        let text = "[auto.claude]\nbalance = false # not yet\nlogins = [\"work\"]\n";
+        let mut c: Config = toml_edit::de::from_str(text).unwrap();
+        assert_eq!(written(text, &c), text);
+        c.auto.get_mut("claude").unwrap().balance = true;
+        let out = written(text, &c);
+        let back: Config = toml_edit::de::from_str(&out).unwrap();
+        assert!(back.auto["claude"].balance, "{out}");
     }
 
     #[test]
