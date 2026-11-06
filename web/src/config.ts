@@ -149,9 +149,9 @@ export function toggleWarm(c: Config, provider: string, name: string) {
   if (!list.length) delete all[provider];
 }
 
-/** The logins in the order auto mode tries them, then those it may not pick. */
+/** The logins in the order auto mode tries them, missing ones too, then those it may not pick. */
 export function ordered(a: Auto, names: string[]): string[] {
-  const picked = (a.logins ?? []).filter((n) => names.includes(n));
+  const picked = a.logins ?? [];
   return [...picked, ...names.filter((n) => !picked.includes(n))];
 }
 

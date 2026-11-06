@@ -330,6 +330,9 @@ function Order(props: { p: Provider; simple: boolean }) {
                   onChange={() => set((x) => toggleLogin(x, name))}
                 />
                 <span class="spec">{name}</span>
+                <Show when={!cred(name)}>
+                  <span class="aside"> (missing)</span>
+                </Show>
               </label>
               <span class="order-tools">
                 <button

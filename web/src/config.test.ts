@@ -184,7 +184,7 @@ describe('percent', () => {
 
 describe('the order of logins', () => {
   it('lists the picked logins in their order, then the others', () => {
-    expect(ordered({ logins: ['b', 'gone', 'a'] }, ['a', 'b', 'c'])).toEqual(['b', 'a', 'c']);
+    expect(ordered({ logins: ['b', 'gone', 'a'] }, ['a', 'b', 'c'])).toEqual(['b', 'gone', 'a', 'c']);
   });
 
   it('moves a login within the order and not past its ends', () => {
