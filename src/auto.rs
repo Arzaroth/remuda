@@ -227,7 +227,11 @@ pub fn decide(input: &Input) -> Decision {
         }
         None => return Decision::hold("no rule is in force, and no logins are set for that case"),
     };
+    if !input.auto.balance {
+        tiers = tiers.into_iter().flatten().map(|n| vec![n]).collect();
+    }
 
+    let place: Vec<String> = tiers.iter().flatten().cloned().collect();
     let mut notes: BTreeMap<String, String> = BTreeMap::new();
     let mut kept = Vec::new();
     let mut freed = Vec::new();
@@ -266,7 +270,12 @@ pub fn decide(input: &Input) -> Decision {
 
     if !freed.is_empty() {
         tiers.retain(|t| !t.is_empty());
-        tiers.insert(0, freed);
+        freed.sort_by_key(|n| place.iter().position(|p| p == n));
+        if input.auto.balance {
+            tiers.insert(0, freed);
+        } else {
+            tiers.splice(0..0, freed.into_iter().map(|n| vec![n]));
+        }
     }
 
     let mut logins = Vec::new();
@@ -285,13 +294,24 @@ pub fn decide(input: &Input) -> Decision {
             };
             match figures.get(name) {
                 Some(Figures::Known(w)) if !w.is_empty() => {
-                    seen.score = score(input.auto, name, w, now);
+                    if input.auto.balance {
+                        seen.score = score(input.auto, name, w, now);
+                    }
                     match full(input.auto, name, w) {
                         Some((at, c)) => {
                             seen.maxed = true;
                             seen.note = full_note(at, c);
                         }
-                        None => seen.usable = true,
+                        None => {
+                            seen.usable = true;
+                            if let Some(room) = room_note(input.auto, name, w) {
+                                seen.note = if seen.note.is_empty() {
+                                    room
+                                } else {
+                                    format!("{}; {room}", seen.note)
+                                };
+                            }
+                        }
                     }
                 }
                 Some(Figures::Missing(why)) => seen.note = why.clone(),
@@ -333,6 +353,19 @@ pub fn decide(input: &Input) -> Decision {
         logins,
         action,
     }
+}
+
+/// The window closest to its ceiling, as `weekly at 83%, full at 97%`.
+fn room_note(auto: &Auto, name: &str, windows: &[Window]) -> Option<String> {
+    let (w, c) = counted(windows)
+        .map(|w| (w, cap(auto, name, windows, w)))
+        .min_by_key(|(w, c)| c.saturating_sub(w.used))?;
+    let title = w.title.to_lowercase();
+    Some(if c >= 100 {
+        format!("{title} at {}%", w.used)
+    } else {
+        format!("{title} at {}%, full at {c}%", w.used)
+    })
 }
 
 fn full_note(w: &Window, cap: u64) -> String {
@@ -398,6 +431,10 @@ fn act(
             why: format!("{active} has no figures to compare: {}", c.note),
         };
     }
+    let wanted = against(input, best, current, active);
+    let Action::Switch { to, why } = wanted else {
+        return wanted;
+    };
     let dwell_ms = i64::try_from(input.auto.dwell.0.saturating_mul(1000)).unwrap_or(i64::MAX);
     if let Some(at) = input.switched_at {
         let until = at.as_millisecond().saturating_add(dwell_ms);
@@ -405,11 +442,20 @@ fn act(
             let until = Timestamp::from_millisecond(until)
                 .map(|t| clock(&t.to_zoned(input.now.time_zone().clone())))
                 .unwrap_or_default();
+            let dwell = String::from(input.auto.dwell);
             return Action::Stay {
-                why: format!("stays on {active} until {until}, the least time on a login"),
+                why: format!(
+                    "would switch to {to}: {why}; stays on {active} until {until}, \
+                     {dwell} after the last switch"
+                ),
             };
         }
     }
+    Action::Switch { to, why }
+}
+
+/// What the best pick asks of the active login, the dwell aside.
+fn against(input: &Input, best: &Seen, current: Option<&Seen>, active: &str) -> Action {
     let Some(c) = current.filter(|c| c.tier.is_some()) else {
         return Action::Switch {
             to: best.name.clone(),
@@ -423,6 +469,11 @@ fn act(
         return Action::Switch {
             to: best.name.clone(),
             why: format!("{} comes before {active}", best.name),
+        };
+    }
+    if !input.auto.balance {
+        return Action::Stay {
+            why: format!("{active} and {} share a tier", best.name),
         };
     }
     let (b, a) = (best.score.unwrap_or(0.0), c.score.unwrap_or(0.0));
@@ -939,7 +990,8 @@ reserve = { work = "workday" }
         let mut c = config();
         let a = c.auto.get_mut("claude").unwrap();
         a.rules.clear();
-        a.logins = vec!["a".into(), "b".into()];
+        a.logins = vec!["b".into(), "a".into()];
+        a.balance = true;
         let now = at("10:00");
         let figures = [
             ("a", login(&now, (0, 2), (60, 24))),
@@ -958,11 +1010,106 @@ reserve = { work = "workday" }
     }
 
     #[test]
+    fn without_balance_the_list_order_wins_over_a_better_score() {
+        let mut c = config();
+        let a = c.auto.get_mut("claude").unwrap();
+        a.rules.clear();
+        a.logins = vec!["b".into(), "a".into()];
+        let now = at("10:00");
+        let figures = [
+            ("a", login(&now, (0, 2), (60, 24))),
+            ("b", login(&now, (0, 2), (10, 144))),
+        ];
+        let d = run(&c, &now, Some("a"), None, &figures);
+        assert_eq!(
+            d.action,
+            Action::Switch {
+                to: "b".into(),
+                why: "b comes before a".into()
+            }
+        );
+        assert!(d.logins.iter().all(|s| s.score.is_none()));
+        assert_eq!(
+            d.logins.iter().map(|s| s.tier).collect::<Vec<_>>(),
+            [Some(0), Some(1)]
+        );
+        let b = d.logins.iter().find(|s| s.name == "b").unwrap();
+        assert_eq!(b.note, "weekly at 10%");
+    }
+
+    #[test]
+    fn without_balance_a_rule_tier_goes_in_its_order() {
+        let mut c = config();
+        let a = c.auto.get_mut("claude").unwrap();
+        a.rules[1].order = vec![vec!["b".into(), "a".into()]];
+        a.rules[1].reserve.clear();
+        let now = at("20:00");
+        let figures = [
+            ("a", login(&now, (0, 2), (60, 24))),
+            ("b", login(&now, (0, 2), (10, 144))),
+        ];
+        let d = run(&c, &now, Some("a"), None, &figures);
+        assert_eq!(switch_to(&d), Some("b"));
+    }
+
+    #[test]
+    fn without_balance_freed_reservations_keep_the_rule_order() {
+        let mut c = config();
+        let a = c.auto.get_mut("claude").unwrap();
+        a.rules[1].order = vec![vec!["z".into(), "a".into()], vec!["perso".into()]];
+        a.rules[1].reserve = [
+            ("z".to_string(), "workday".to_string()),
+            ("a".to_string(), "workday".to_string()),
+        ]
+        .into();
+        let now = at("20:00");
+        let figures = [
+            ("z", login(&now, (0, 2), (50, 6))),
+            ("a", login(&now, (0, 2), (50, 6))),
+            ("perso", login(&now, (0, 2), (10, 100))),
+        ];
+        let d = run(&c, &now, Some("a"), None, &figures);
+        assert_eq!(
+            d.action,
+            Action::Switch {
+                to: "z".into(),
+                why: "z comes before a".into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_dwell_says_what_it_holds_back() {
+        let mut c = config();
+        let a = c.auto.get_mut("claude").unwrap();
+        a.rules.clear();
+        a.logins = vec!["perso".into()];
+        a.ceiling = 97;
+        let now = at("10:00");
+        let figures = [
+            ("work", login(&now, (7, 2), (83, 6))),
+            ("perso", login(&now, (0, 2), (9, 135))),
+        ];
+        let d = run(&c, &now, Some("work"), Some(0), &figures);
+        assert_eq!(
+            d.action,
+            Action::Stay {
+                why: "would switch to perso: work is not one it may pick now; \
+                      stays on work until Wed 10:30, 30m after the last switch"
+                    .into()
+            }
+        );
+        let perso = d.logins.iter().find(|s| s.name == "perso").unwrap();
+        assert_eq!(perso.note, "weekly at 9%, full at 97%");
+    }
+
+    #[test]
     fn a_small_gain_or_a_recent_switch_keeps_the_login() {
         let mut c = config();
         let a = c.auto.get_mut("claude").unwrap();
         a.rules.clear();
         a.logins = vec!["a".into(), "b".into()];
+        a.balance = true;
         let now = at("10:00");
         let close = [
             ("a", login(&now, (0, 2), (45, 50))),
@@ -982,7 +1129,9 @@ reserve = { work = "workday" }
         assert_eq!(
             d.action,
             Action::Stay {
-                why: "stays on b until Wed 11:00, the least time on a login".into()
+                why: "would switch to a: a has more to spend before its reset (5.0%/h against 0.6%/h); \
+                      stays on b until Wed 11:00, 1h after the last switch"
+                    .into()
             }
         );
         let d = run(&c, &now, Some("b"), Some(2), &far);
@@ -1359,7 +1508,7 @@ reserve = { work = "workday" }
             "{text}"
         );
         assert!(text.contains("  1  perso"), "{text}");
-        assert!(text.contains("in use\n"), "{text}");
+        assert!(text.contains("in use, 5 hours at 10%\n"), "{text}");
         assert!(text.contains("  -  work"), "{text}");
         assert!(text.ends_with("  stay: perso is the best pick\n"), "{text}");
     }
@@ -1503,6 +1652,7 @@ order = [["IDC"], ["Axeo"], ["perso"]]
         a.logins = vec!["IDC".into(), "Axeo".into()];
         a.ceilings.clear();
         a.ceiling = 50;
+        a.balance = true;
         let now = at("10:00");
         let d = run(
             &c,

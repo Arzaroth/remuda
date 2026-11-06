@@ -4,6 +4,7 @@ export type Rule = { when: string; order: string[][]; reserve?: Record<string, s
 export type Auto = {
   enabled?: boolean;
   dwell?: string;
+  balance?: boolean;
   margin?: number;
   logins?: string[];
   rule?: Rule[];
@@ -146,4 +147,85 @@ export function toggleWarm(c: Config, provider: string, name: string) {
   if (i >= 0) list.splice(i, 1);
   else list.push(name);
   if (!list.length) delete all[provider];
+}
+
+/** The logins in the order auto mode tries them, missing ones too, then those it may not pick. */
+export function ordered(a: Auto, names: string[]): string[] {
+  const picked = a.logins ?? [];
+  return [...picked, ...names.filter((n) => !picked.includes(n))];
+}
+
+/** Moves a picked login `by` places in the order. */
+export function moveLogin(a: Auto, name: string, by: number) {
+  const l = a.logins ?? [];
+  const i = l.indexOf(name);
+  const j = i + by;
+  if (i < 0 || j < 0 || j >= l.length) return;
+  l.splice(j, 0, ...l.splice(i, 1));
+}
+
+export type Ceilings = 'ceilings' | 'long_ceilings';
+
+/**
+ * Lets auto mode pick a login, last in the order, or stops it. A login no
+ * longer stored loses its ceilings with it: its row goes, and they would keep
+ * the config from saving.
+ */
+export function toggleLogin(a: Auto, name: string, stored = true) {
+  const l = (a.logins ??= []);
+  const i = l.indexOf(name);
+  if (i >= 0) l.splice(i, 1);
+  else l.push(name);
+  if (!l.length) delete a.logins;
+  if (i >= 0 && !stored) setCeiling(a, ['ceilings', 'long_ceilings'], name, null);
+}
+
+/** Sets a login's own ceiling in `tables`, or drops it with `c` null. */
+export function setCeiling(a: Auto, tables: Ceilings[], name: string, c: number | null) {
+  for (const t of tables) {
+    if (c !== null) (a[t] ??= {})[name] = c;
+    else if (a[t]) {
+      delete a[t]![name];
+      if (!Object.keys(a[t]!).length) delete a[t];
+    }
+  }
+}
+
+/**
+ * A login's one ceiling for every window, when its two entries agree or it
+ * has one window (`single`), which takes the long entry; else null.
+ */
+export function oneCeiling(a: Auto, name: string, single: string[] = []): number | undefined | null {
+  const short = a.ceilings?.[name];
+  const long = a.long_ceilings?.[name];
+  return single.includes(name) ? long : short === long ? short : null;
+}
+
+/** What only the advanced settings show, in a few words each. */
+export function advancedOnly(a: Auto, names: string[], single: string[] = []): string[] {
+  const out: string[] = [];
+  const rules = a.rule?.length ?? 0;
+  if (rules) out.push(rules === 1 ? 'a rule' : `${rules} rules`);
+  if (a.fallback) out.push(`the fallback to ${a.fallback}`);
+  if (a.balance) out.push('ranking by headroom before a reset');
+  for (const n of names) if (oneCeiling(a, n, single) === null) out.push(`${n}'s two ceilings`);
+  return out;
+}
+
+/**
+ * Drops what simple mode cannot show. A login's two ceilings become the
+ * lower, or the long one for a login with one window.
+ */
+export function simplify(a: Auto, names: string[], single: string[] = []) {
+  delete a.rule;
+  delete a.fallback;
+  delete a.fallback_when_maxed;
+  delete a.balance;
+  delete a.margin;
+  for (const n of names)
+    if (single.includes(n)) setCeiling(a, ['ceilings', 'long_ceilings'], n, a.long_ceilings?.[n] ?? null);
+    else if (oneCeiling(a, n) === null) {
+      const cli = a.ceiling ?? 100;
+      setCeiling(a, ['ceilings', 'long_ceilings'], n, Math.min(a.ceilings?.[n] ?? cli, a.long_ceilings?.[n] ?? cli));
+    }
 }

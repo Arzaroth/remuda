@@ -47,6 +47,9 @@ For each CLI whose auto mode is on (`App::auto_round`), under the store lock:
    `REMUDA_OUTER_CODEX_HOME` in its environment and a `CODEX_HOME` under
    `.runs`, does not count: it is on files of its own ([run.md](run.md)).
 
+Each login the decision weighs carries a note: why it cannot be picked, or
+its window closest to its ceiling (`weekly at 83%, full at 97%`).
+
 What each CLI's round decided, and the last switch auto mode made, are kept in
 memory and sent to the page with the state. The service's log gets a line for
 each switch, each failed switch (once per error), and each change of decision
@@ -62,7 +65,9 @@ each switch, each failed switch (once per error), and each change of decision
    unless its longest window resets before the schedule next starts: then its
    headroom would be lost anyway, so it gets a tier of its own ahead of the
    others and is spent first. Inside its schedule a reservation does nothing.
-3. **Tiers.** The first tier holding a usable login wins. A login is usable
+3. **Tiers.** Without `balance` (the default), every login of the list or of
+   a tier is a tier of its own, in its place: the list is the order. The
+   first tier holding a usable login wins. A login is usable
    when it has figures and none of its account's windows is full. A window is
    full at the CLI's `ceiling` (default 100%), or at the login's own entry,
    lower or higher than the CLI's: its `ceilings` one for the shortest of
@@ -75,7 +80,7 @@ each switch, each failed switch (once per error), and each change of decision
    "Fable only") does not count, unless the login has no other window, as
    Codex's monthly one. A window whose reset has passed since TokenGauge read
    it counts as empty.
-4. **The score**, within a tier: the headroom left in the login's longest
+4. **The score**, with `balance` only, within a tier: the headroom left in the login's longest
    window, up to its ceiling, divided by the hours until it resets (at least
    one). A login close to
    its weekly reset with headroom left beats one whose week has just started.
@@ -84,11 +89,13 @@ each switch, each failed switch (once per error), and each change of decision
    - The active login is full, in the rule or not: switch now, whatever the
      dwell.
    - The active login has no figures: stay, rather than move blind.
-   - Switched less than `dwell` ago (default 30 min): stay.
    - The active login is not one the rule allows now: switch.
    - The best pick is in an earlier tier: switch.
-   - Same tier: switch only when the best pick scores `margin` (default 25%)
-     more.
+   - Same tier: with `balance`, switch only when the best pick scores
+     `margin` (default 25%) more; without, stay.
+   - Any of these three switches waits until `dwell` (default 30 min) has
+     passed since the last switch; meanwhile the decision stays and says
+     which login it would go to and why.
    - No usable login at all: if the active login is full too, or none is
      signed in, go to the `fallback` login, unless it is at 100% on a window
      (with `fallback_when_maxed` it goes all the same, to spare the login

@@ -8,8 +8,9 @@ bookmark work. The token, which also travels in the hash, is read only from
 a hash that does not start with `#/`.
 
 The sidebar lists, top to bottom: Overview; one link per CLI in use, with
-its icon, the login in use (or "signed out"), the share used of its tile's
-window over a small meter, and an "auto" tag when auto mode is on; Usage; Quota; the
+its icon, the login in use (or "signed out"), the share used of that login's
+own window closest to full (a model's own limit only when it has no other)
+over a small meter, the figure its card shows, and an "auto" tag when auto mode is on; Usage; Quota; the
 API proxy, with an on/off dot; Status, with a dot that turns amber when a
 vital is a warning and red when one is bad (`healthTone`,
 [doctor.md](doctor.md)); Versions, with a blue dot while remuda or TokenGauge
@@ -269,19 +270,39 @@ The view, the burn's hours, the future usage and each CLI's window are kept in
 
 While auto mode is on, the Automation tab opens with what its last round decided
 ([auto-mode.md](auto-mode.md)): the rule in force, every login weighed with
-its score and why it was or was not picked, the decision and why, and the last
-switch auto mode made.
+its place, its window closest to its ceiling (and its score, with `balance`)
+and why it was or was not picked, the decision and why, and the last
+switch auto mode made. A switch the dwell holds back says so, and names the
+login it would go to and why.
 
 The Automation tab edits `config.toml`
-([architecture/config.md](../architecture/config.md)): a card with auto
-mode's switch, the minimum time on a login, the margin and the
-ceiling, each login's own ceilings (for its shortest window and for the
-others), the fallback and whether to take it even when maxed, the
-logins it may pick when no rule is in force, and its rules, each with a
-schedule, its tiers and which logins it keeps for a schedule; a card of the
-logins kept warm ([keep-warm.md](keep-warm.md)), apart from auto mode since it
-runs whether auto mode is on or off; and a card of schedules, whose days and
-hours are shared by every CLI. A schedule a rule
+([architecture/config.md](../architecture/config.md)). Auto mode's card has
+its switch and two views, remembered per CLI in `localStorage`
+(`remuda-auto-view`):
+
+- **Simple**: every login in a list, in the order auto mode uses them
+  (`logins`), each with a box to let auto mode pick it, arrows to move it, and
+  one ceiling, written to both of its entries (`ceilings` and
+  `long_ceilings`).
+- **Advanced**: the same list with each login's own ceilings for the windows
+  TokenGauge shows it has (one field for a login with one window, which takes
+  `long_ceilings`), then the minimum time on a login, the CLI's ceiling,
+  `balance` and its margin, the fallback and whether to take it even when
+  maxed, and the rules, each with a schedule, its tiers and which logins it
+  keeps for a schedule.
+
+The card opens on Simple unless the config holds what only Advanced shows
+(`advancedOnly`): a rule, a fallback, `balance`, or a login whose two
+ceilings differ where both apply. Asking for Simple then names what it would
+drop, and a second click drops it (`simplify`), two ceilings becoming the
+lower one, or the long one for a login with one window; Save or Revert
+still decides.
+
+Beside it, a card of the logins kept warm ([keep-warm.md](keep-warm.md)),
+apart from auto mode since it runs whether auto mode is on or off, which
+lists only logins with a 5-hour window (or no figures yet, or already
+picked); and a card of schedules, whose days and hours are shared by every
+CLI. A schedule a rule
 uses cannot be removed, and renaming one renames it in every rule.
 
 Edits stay on the page until Save, and are checked as they are made

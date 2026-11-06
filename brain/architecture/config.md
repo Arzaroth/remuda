@@ -20,8 +20,9 @@ hours = "09:00-18:00"                         # local; none: all day; may wrap m
 [auto.claude]
 enabled = true      # default false
 dwell   = "30m"     # default; h, m, s; 1 minute to 7 days
-margin  = 0.25      # default
-logins  = ["work", "perso"]   # the one tier used when no rule is in force
+balance = true      # rank a tier by headroom before its reset; default false: by list order
+margin  = 0.25      # default; used with balance only
+logins  = ["work", "perso"]   # in order, used when no rule is in force
 ceiling = 97        # a window is full at this %; default 100
 ceilings = { work = 93 }      # per login, for the shortest of several windows
 long_ceilings = { perso = 94 } # per login, for its other windows or its only one

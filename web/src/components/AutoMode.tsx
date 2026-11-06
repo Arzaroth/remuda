@@ -3,6 +3,7 @@ import { createStore, produce, reconcile, unwrap } from 'solid-js/store';
 import { api } from '../api';
 import { brand } from '../brand';
 import {
+  advancedOnly,
   auto,
   canonical,
   type Config,
@@ -13,6 +14,9 @@ import {
   inRule,
   type Loaded,
   minutes,
+  moveLogin,
+  oneCeiling,
+  ordered,
   OTHERWISE,
   percent,
   type Problem,
@@ -20,12 +24,17 @@ import {
   renameSchedule,
   scheduleName,
   scheduleUses,
+  setCeiling,
+  simplify,
   span,
+  toggleLogin,
   toggleWarm,
 } from '../config';
 import { ago } from '../format';
 import { now, store, toast } from '../state';
-import { liveOf, loginsOf } from '../windows';
+import { createConfirm } from '../confirm';
+import { remember, remembered } from '../storage';
+import { liveOf, loginsOf, ownWindows } from '../windows';
 import type { AutoStatus, Provider } from '../types';
 
 const [saved, setSaved] = createSignal<Loaded | null>(null);
@@ -256,44 +265,134 @@ function Now(props: { s: AutoStatus; provider: string }) {
   );
 }
 
-function LoginCeilings(props: { p: Provider; table: 'ceilings' | 'long_ceilings'; title: string; label: string }) {
+type View = 'simple' | 'advanced';
+const [views, setViews] = createStore<Record<string, View>>(remembered('remuda-auto-view') || {});
+
+function CeilingInput(props: {
+  name: string;
+  label: string;
+  value: number | undefined;
+  placeholder: number;
+  onSet: (c: number | null) => void;
+}) {
+  return (
+    <label class="kept">
+      <span class="aside">{props.label}</span>
+      <span class="unit">
+        <input
+          type="number"
+          min="1"
+          max="100"
+          aria-label={`${props.name}: ${props.label}`}
+          placeholder={String(props.placeholder)}
+          value={props.value ?? ''}
+          onChange={(e) => {
+            const c = percent(e.currentTarget.value);
+            e.currentTarget.value = c === null ? '' : String(c);
+            props.onSet(c);
+          }}
+        />
+        %
+      </span>
+    </label>
+  );
+}
+
+/** The logins TokenGauge shows with a single window of their own. */
+const singles = (provider: string) =>
+  loginsOf(store.s!, provider)
+    .filter((c) => ownWindows(store.s!, c)?.length === 1)
+    .map((c) => c.name);
+
+function Order(props: { p: Provider; simple: boolean }) {
   const a = () => draft.c.auto?.[props.p.id] ?? {};
   const set = (fn: (a: ReturnType<typeof auto>) => void) => edit((c) => fn(auto(c, props.p.id)));
+  const picked = () => a().logins ?? [];
+  const rows = () => ordered(a(), namesOf(props.p.id));
+  const cred = (name: string) => loginsOf(store.s!, props.p.id).find((c) => c.name === name);
+  const placeholder = () => a().ceiling ?? 100;
+  const windows = (name: string) => {
+    const c = cred(name);
+    return c ? ownWindows(store.s!, c) : null;
+  };
   return (
-    <div class="pickable">
-      <span class="aside">{props.title}</span>
-      <div class="ceilings">
-        <For each={namesOf(props.p.id)}>
-          {(name) => (
-            <label class="kept">
-              <span class="spec">{name}</span>
-              <span class="unit">
+    <ol class="order">
+      <For each={rows()} fallback={<li class="aside">No stored logins</li>}>
+        {(name) => {
+          const i = () => picked().indexOf(name);
+          return (
+            <li classList={{ off: i() < 0 }}>
+              <span class="aside place">{i() < 0 ? '-' : i() + 1}</span>
+              <label class="check pick">
                 <input
-                  type="number"
-                  min="1"
-                  max="100"
-                  aria-label={`${name}${props.label}`}
-                  placeholder={String(a().ceiling ?? 100)}
-                  value={a()[props.table]?.[name] ?? ''}
-                  onChange={(e) => {
-                    const c = percent(e.currentTarget.value);
-                    e.currentTarget.value = c === null ? '' : String(c);
-                    set((x) => {
-                      if (c !== null) (x[props.table] ??= {})[name] = c;
-                      else if (x[props.table]) {
-                        delete x[props.table]![name];
-                        if (!Object.keys(x[props.table]!).length) delete x[props.table];
-                      }
-                    });
-                  }}
+                  type="checkbox"
+                  checked={i() >= 0}
+                  onChange={() => set((x) => toggleLogin(x, name, !!cred(name)))}
                 />
-                %
+                <span class="spec">{name}</span>
+                <Show when={!cred(name)}>
+                  <span class="aside"> (missing)</span>
+                </Show>
+              </label>
+              <span class="order-tools">
+                <button
+                  class="btn icon"
+                  title={`Use ${name} earlier`}
+                  disabled={i() <= 0}
+                  onClick={() => set((x) => moveLogin(x, name, -1))}
+                >
+                  &uarr;
+                </button>
+                <button
+                  class="btn icon"
+                  title={`Use ${name} later`}
+                  disabled={i() < 0 || i() === picked().length - 1}
+                  onClick={() => set((x) => moveLogin(x, name, 1))}
+                >
+                  &darr;
+                </button>
               </span>
-            </label>
-          )}
-        </For>
-      </div>
-    </div>
+              <span class="order-ceilings">
+                <Show
+                  when={!props.simple}
+                  fallback={
+                    <CeilingInput
+                      name={name}
+                      label="leave it at"
+                      value={oneCeiling(a(), name, singles(props.p.id)) ?? undefined}
+                      placeholder={placeholder()}
+                      onSet={(c) => set((x) => setCeiling(x, ['ceilings', 'long_ceilings'], name, c))}
+                    />
+                  }
+                >
+                  <Show when={(windows(name)?.length ?? 2) > 1}>
+                    <CeilingInput
+                      name={name}
+                      label={`${windows(name)?.[0].title.toLowerCase() ?? 'shortest window'} full at`}
+                      value={a().ceilings?.[name]}
+                      placeholder={placeholder()}
+                      onSet={(c) => set((x) => setCeiling(x, ['ceilings'], name, c))}
+                    />
+                  </Show>
+                  <CeilingInput
+                    name={name}
+                    label={`${
+                      windows(name)
+                        ?.slice(windows(name)!.length > 1 ? 1 : 0)
+                        .map((w) => w.title.toLowerCase())
+                        .join(', ') ?? 'other windows'
+                    } full at`}
+                    value={a().long_ceilings?.[name]}
+                    placeholder={placeholder()}
+                    onSet={(c) => set((x) => setCeiling(x, ['long_ceilings'], name, c))}
+                  />
+                </Show>
+              </span>
+            </li>
+          );
+        }}
+      </For>
+    </ol>
   );
 }
 
@@ -314,6 +413,18 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
     set((x) =>
       (x.rule ??= []).push({ when: Object.keys(draft.c.schedules ?? {})[0] ?? OTHERWISE, order: [[]] }),
     );
+  const hidden = () => advancedOnly(a(), namesOf(props.p.id), singles(props.p.id));
+  const simple = () => !hidden().length && (views[props.p.id] ?? 'simple') === 'simple';
+  const confirm = createConfirm();
+  const view = (v: View) => {
+    if (v === 'simple' && hidden().length) {
+      if (!confirm.ask(`Simple mode drops ${hidden().join(', ')}. Click again to drop them.`, hidden().join())) return;
+      set((x) => simplify(x, namesOf(props.p.id), singles(props.p.id)));
+    }
+    confirm.disarm();
+    setViews(props.p.id, v);
+    remember('remuda-auto-view', { ...views });
+  };
   return (
     <div class="auto-card" style={{ '--brand': brand(props.p.id) }}>
       <div class="auto-card-head">
@@ -330,153 +441,170 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
         </button>
       </div>
       <p class="aside">
-        remuda keeps the CLI on the most suitable login you allow, and moves it off one that is maxed. Within a tier, it
-        spends first the headroom a reset is about to wipe.
+        remuda uses the first login of the list that is under its ceiling, and moves down the list when one fills up. Once
+        an earlier login has room again, it goes back to it.
+        <Show when={!simple() && a().balance}> Within a tier, it spends first the headroom a reset is about to wipe.</Show>
       </p>
       <Show when={status()}>{(s) => <Now s={s()} provider={props.p.id} />}</Show>
       <Show when={props.p.id === 'codex'}>
         <p class="aside">A running Codex session cannot take a new login, so auto mode waits for none to be open.</p>
       </Show>
-      <div class="fields">
-        <label>
-          <span class="aside">Stay at least</span>
-          <span class="unit">
-            <input
-              type="number"
-              min="0"
-              step="5"
-              value={minutes(a().dwell)}
-              onChange={(e) =>
-                set((x) => {
-                  x.dwell = span(Math.max(0, Math.round(+e.currentTarget.value || 0)));
-                  if (x.dwell === '30m') delete x.dwell;
-                })
-              }
-            />
-            min
-          </span>
-        </label>
-        <label>
-          <span class="aside">Leave only for a pick</span>
-          <span class="unit">
-            <input
-              type="number"
-              min="0"
-              step="5"
-              value={Math.round((a().margin ?? 0.25) * 100)}
-              onChange={(e) =>
-                set((x) => {
-                  x.margin = Math.max(0, +e.currentTarget.value || 0) / 100;
-                  if (x.margin === 0.25) delete x.margin;
-                })
-              }
-            />
-            % better
-          </span>
-        </label>
-        <label>
-          <span class="aside">A window is full at</span>
-          <span class="unit">
-            <input
-              type="number"
-              min="1"
-              max="100"
-              value={a().ceiling ?? 100}
-              onChange={(e) => {
-                const c = percent(e.currentTarget.value) ?? 100;
-                e.currentTarget.value = String(c);
-                set((x) => {
-                  x.ceiling = c;
-                  if (c === 100) delete x.ceiling;
-                });
-              }}
-            />
-            %
-          </span>
-        </label>
+      <div class="segmented view" role="group" aria-label="Settings">
+        <button aria-pressed={simple()} onClick={() => view('simple')}>
+          Simple
+        </button>
+        <button aria-pressed={!simple()} onClick={() => view('advanced')}>
+          Advanced
+        </button>
       </div>
+      <Show when={confirm.text()}>
+        <div class="note">{confirm.text()}</div>
+      </Show>
       <div class="pickable">
-        <span class="aside">Logins it may pick when no rule is in force</span>
-        <div class="chips">
-          <For each={namesOf(props.p.id)} fallback={<span class="aside">No stored logins</span>}>
-            {(name) => (
-              <Chip
-                name={name}
-                on={(a().logins ?? []).includes(name)}
-                onClick={() =>
+        <span class="aside">
+          {simple() ? 'Logins, in the order it uses them' : 'Logins it may pick when no rule is in force, in order'}
+        </span>
+        <Order p={props.p} simple={simple()} />
+      </div>
+      <Show when={!simple()}>
+        <div class="fields">
+          <label>
+            <span class="aside">Stay at least</span>
+            <span class="unit">
+              <input
+                type="number"
+                min="0"
+                step="5"
+                value={minutes(a().dwell)}
+                onChange={(e) =>
                   set((x) => {
-                    const l = (x.logins ??= []);
-                    const i = l.indexOf(name);
-                    if (i >= 0) l.splice(i, 1);
-                    else l.push(name);
+                    x.dwell = span(Math.max(0, Math.round(+e.currentTarget.value || 0)));
+                    if (x.dwell === '30m') delete x.dwell;
                   })
                 }
               />
-            )}
-          </For>
+              min
+            </span>
+          </label>
+          <label>
+            <span class="aside">A window is full at</span>
+            <span class="unit">
+              <input
+                type="number"
+                min="1"
+                max="100"
+                value={a().ceiling ?? 100}
+                onChange={(e) => {
+                  const c = percent(e.currentTarget.value) ?? 100;
+                  e.currentTarget.value = String(c);
+                  set((x) => {
+                    x.ceiling = c;
+                    if (c === 100) delete x.ceiling;
+                  });
+                }}
+              />
+              %
+            </span>
+          </label>
         </div>
-      </div>
-      <Show when={namesOf(props.p.id).length}>
-        <LoginCeilings
-          p={props.p}
-          table="ceilings"
-          title="A login's own ceiling for the shortest of its windows (Claude's 5-hour one)"
-          label=" is full at"
-        />
-        <LoginCeilings
-          p={props.p}
-          table="long_ceilings"
-          title="A login's own ceiling for its other windows, or its only one (Claude's weekly one)"
-          label="'s other or only window is full at"
-        />
-        <label class="kept">
-          <span class="aside">When every login it may pick is full</span>
-          <select
-            aria-label="When every login is full"
-            value={a().fallback ?? ''}
-            onChange={(e) => {
-              const f = e.currentTarget.value;
+        <label class="check">
+          <input
+            type="checkbox"
+            checked={!!a().balance}
+            onChange={(e) =>
               set((x) => {
-                if (f) x.fallback = f;
+                if (e.currentTarget.checked) x.balance = true;
                 else {
-                  delete x.fallback;
-                  delete x.fallback_when_maxed;
+                  delete x.balance;
+                  delete x.margin;
                 }
-              });
-            }}
-          >
-            <option value="">stay where it is</option>
-            <For each={namesOf(props.p.id)}>{(n) => <option value={n}>go to {n}</option>}</For>
-            <Show when={a().fallback && !namesOf(props.p.id).includes(a().fallback!)}>
-              <option value={a().fallback}>go to {a().fallback} (missing)</option>
-            </Show>
-          </select>
+              })
+            }
+          />
+          Within a tier, rank logins by the headroom left before their reset, not by their place
         </label>
-        <Show when={a().fallback}>
-          <label class="check">
-            <input
-              type="checkbox"
-              checked={!!a().fallback_when_maxed}
-              onChange={(e) =>
-                set((x) => {
-                  if (e.currentTarget.checked) x.fallback_when_maxed = true;
-                  else delete x.fallback_when_maxed;
-                })
-              }
-            />
-            even when {a().fallback} is maxed
+        <Show when={a().balance}>
+          <label class="kept">
+            <span class="aside">Leave only for a pick</span>
+            <span class="unit">
+              <input
+                type="number"
+                min="0"
+                step="5"
+                value={Math.round((a().margin ?? 0.25) * 100)}
+                onChange={(e) =>
+                  set((x) => {
+                    x.margin = Math.max(0, +e.currentTarget.value || 0) / 100;
+                    if (x.margin === 0.25) delete x.margin;
+                  })
+                }
+              />
+              % better
+            </span>
           </label>
         </Show>
+        <Show when={namesOf(props.p.id).length}>
+          <label class="kept">
+            <span class="aside">When every login it may pick is full</span>
+            <select
+              aria-label="When every login is full"
+              value={a().fallback ?? ''}
+              onChange={(e) => {
+                const f = e.currentTarget.value;
+                set((x) => {
+                  if (f) x.fallback = f;
+                  else {
+                    delete x.fallback;
+                    delete x.fallback_when_maxed;
+                  }
+                });
+              }}
+            >
+              <option value="">stay where it is</option>
+              <For each={namesOf(props.p.id)}>{(n) => <option value={n}>go to {n}</option>}</For>
+              <Show when={a().fallback && !namesOf(props.p.id).includes(a().fallback!)}>
+                <option value={a().fallback}>go to {a().fallback} (missing)</option>
+              </Show>
+            </select>
+          </label>
+          <Show when={a().fallback}>
+            <label class="check">
+              <input
+                type="checkbox"
+                checked={!!a().fallback_when_maxed}
+                onChange={(e) =>
+                  set((x) => {
+                    if (e.currentTarget.checked) x.fallback_when_maxed = true;
+                    else delete x.fallback_when_maxed;
+                  })
+                }
+              />
+              even when {a().fallback} is maxed
+            </label>
+          </Show>
+        </Show>
+        <For each={a().rule ?? []}>
+          {(_, i) => <RuleCard provider={props.p.id} i={i()} count={a().rule!.length} problems={props.problems} />}
+        </For>
+        <button class="btn" onClick={addRule}>
+          Add a rule
+        </button>
       </Show>
-      <For each={a().rule ?? []}>
-        {(_, i) => <RuleCard provider={props.p.id} i={i()} count={a().rule!.length} problems={props.problems} />}
-      </For>
-      <button class="btn" onClick={addRule}>
-        Add a rule
-      </button>
       <Problems list={own()} />
     </div>
   );
+}
+
+const FIVE_HOURS = 300;
+
+/** Logins with a 5-hour window, or no figures to say, and those already kept warm. */
+function warmable(provider: string, warm: string[]) {
+  return loginsOf(store.s!, provider)
+    .filter((c) => {
+      const own = ownWindows(store.s!, c);
+      return !own || own.some((w) => w.minutes === FIVE_HOURS) || warm.includes(c.name);
+    })
+    .map((c) => c.name);
 }
 
 function KeepWarm(props: { p: Provider; problems: Problem[] }) {
@@ -486,13 +614,13 @@ function KeepWarm(props: { p: Provider; problems: Problem[] }) {
       <div class="auto-card-head">
         <h2>Keep the 5-hour window open</h2>
       </div>
-      <Show when={props.p.warm && namesOf(props.p.id).length}>
+      <Show when={props.p.warm && warmable(props.p.id, warm()).length}>
         <p class="aside">
           The moment a picked login's window closes, remuda opens a new one with the smallest request it takes, whether
           auto mode is on or off.
         </p>
         <div class="chips warm-chips">
-          <For each={namesOf(props.p.id)}>
+          <For each={warmable(props.p.id, warm())}>
             {(name) => (
               <Chip
                 name={name}
@@ -712,7 +840,7 @@ export function AutoMode(props: { providers: Provider[] }) {
           <div class="auto-side">
             <For each={props.providers}>
               {(p) => (
-                <Show when={(p.warm && namesOf(p.id).length) || warmProblems(problems(), p.id).length}>
+                <Show when={(p.warm && warmable(p.id, draft.c.warm?.[p.id] ?? []).length) || warmProblems(problems(), p.id).length}>
                   <KeepWarm p={p} problems={problems()} />
                 </Show>
               )}
