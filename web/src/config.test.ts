@@ -1,19 +1,27 @@
 import { describe, expect, it } from 'vitest';
 import {
+  advancedOnly,
   auto,
+  type Auto,
   canonical,
   type Config,
   dropFromRule,
   headline,
   hours,
   minutes,
+  moveLogin,
+  oneCeiling,
+  ordered,
   percent,
   problemsAt,
   renameSchedule,
   scheduleName,
   scheduleUses,
+  setCeiling,
+  simplify,
   span,
   type Status,
+  toggleLogin,
 } from './config';
 
 const sample = (): Config => ({
@@ -172,4 +180,76 @@ describe('percent', () => {
     expect(percent('')).toBeNull();
     expect(percent('abc')).toBeNull();
   });
+});
+
+describe('the order of logins', () => {
+  it('lists the picked logins in their order, then the others', () => {
+    expect(ordered({ logins: ['b', 'gone', 'a'] }, ['a', 'b', 'c'])).toEqual(['b', 'a', 'c']);
+  });
+
+  it('moves a login within the order and not past its ends', () => {
+    const a: Auto = { logins: ['a', 'b', 'c'] };
+    moveLogin(a, 'c', -1);
+    expect(a.logins).toEqual(['a', 'c', 'b']);
+    moveLogin(a, 'a', -1);
+    moveLogin(a, 'b', 1);
+    expect(a.logins).toEqual(['a', 'c', 'b']);
+  });
+
+  it('adds a login last and drops the list once empty', () => {
+    const a: Auto = {};
+    toggleLogin(a, 'a');
+    toggleLogin(a, 'b');
+    expect(a.logins).toEqual(['a', 'b']);
+    toggleLogin(a, 'a');
+    toggleLogin(a, 'b');
+    expect(a.logins).toBeUndefined();
+  });
+});
+
+describe('simple and advanced settings', () => {
+  it('sets one ceiling for both windows and drops it', () => {
+    const a: Auto = {};
+    setCeiling(a, ['ceilings', 'long_ceilings'], 'perso', 90);
+    expect(oneCeiling(a, 'perso')).toBe(90);
+    setCeiling(a, ['long_ceilings'], 'perso', 94);
+    expect(oneCeiling(a, 'perso')).toBeNull();
+    setCeiling(a, ['ceilings', 'long_ceilings'], 'perso', null);
+    expect(a).toEqual({});
+  });
+
+  it('names what only the advanced settings show, and simplify drops it', () => {
+    const a: Auto = {
+      logins: ['IDC', 'perso'],
+      rule: [{ when: 'otherwise', order: [['IDC']] }],
+      fallback: 'perso',
+      fallback_when_maxed: true,
+      balance: true,
+      margin: 0.5,
+      ceilings: { perso: 90 },
+      long_ceilings: { perso: 94, IDC: 97 },
+    };
+    expect(advancedOnly(a, ['IDC', 'perso'])).toEqual([
+      'a rule',
+      'the fallback to perso',
+      'ranking by headroom before a reset',
+      "IDC's two ceilings",
+      "perso's two ceilings",
+    ]);
+    simplify(a, ['IDC', 'perso']);
+    expect(a).toEqual({
+      logins: ['IDC', 'perso'],
+      ceilings: { IDC: 97, perso: 90 },
+      long_ceilings: { IDC: 97, perso: 90 },
+    });
+    expect(advancedOnly(a, ['IDC', 'perso'])).toEqual([]);
+  });
+});
+
+it('takes the long ceiling of a login with one window', () => {
+  const a: Auto = { ceilings: { perso: 90 }, long_ceilings: { perso: 94 } };
+  expect(advancedOnly(a, ['perso'], ['perso'])).toEqual([]);
+  expect(oneCeiling(a, 'perso', ['perso'])).toBe(94);
+  simplify(a, ['perso'], ['perso']);
+  expect(a).toEqual({ ceilings: { perso: 94 }, long_ceilings: { perso: 94 } });
 });
