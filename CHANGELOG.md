@@ -20,6 +20,9 @@
 ### Fixed
 
 - Keep-warm no longer offers logins without a 5-hour window.
+- A login auto mode may pick that is no longer stored shows as missing, and
+  unticking it takes it out with its ceilings. It used to be hidden, while the
+  config check kept Save from working.
 
 ## [0.35.0] - 2026-11-05
 

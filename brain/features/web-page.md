@@ -283,7 +283,8 @@ its switch and two views, remembered per CLI in `localStorage`
 - **Simple**: every login in a list, in the order auto mode uses them
   (`logins`), each with a box to let auto mode pick it, arrows to move it, and
   one ceiling, written to both of its entries (`ceilings` and
-  `long_ceilings`).
+  `long_ceilings`). A login in `logins` that is no longer stored shows as
+  missing, and unticking it takes it out with its ceilings.
 - **Advanced**: the same list with each login's own ceilings for the windows
   TokenGauge shows it has (one field for a login with one window, which takes
   `long_ceilings`), then the minimum time on a login, the CLI's ceiling,
