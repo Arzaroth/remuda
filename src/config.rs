@@ -188,6 +188,10 @@ pub struct Auto {
     pub enabled: bool,
     #[serde(default = "default_dwell", skip_serializing_if = "is_default_dwell")]
     pub dwell: Span,
+    /// Within a tier, rank logins by the headroom left before their reset
+    /// rather than by their place in the list.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub balance: bool,
     #[serde(default = "default_margin", skip_serializing_if = "is_default_margin")]
     pub margin: f64,
     /// One tier, used when no rule is in force.
@@ -220,6 +224,7 @@ impl Default for Auto {
         Auto {
             enabled: false,
             dwell: default_dwell(),
+            balance: false,
             margin: default_margin(),
             logins: Vec::new(),
             rules: Vec::new(),
