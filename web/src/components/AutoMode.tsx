@@ -418,7 +418,7 @@ function ProviderCard(props: { p: Provider; problems: Problem[] }) {
   const confirm = createConfirm();
   const view = (v: View) => {
     if (v === 'simple' && hidden().length) {
-      if (!confirm.ask(`Simple mode drops ${hidden().join(', ')}. Click again to drop them.`, 'simple')) return;
+      if (!confirm.ask(`Simple mode drops ${hidden().join(', ')}. Click again to drop them.`, hidden().join())) return;
       set((x) => simplify(x, namesOf(props.p.id), singles(props.p.id)));
     }
     confirm.disarm();
