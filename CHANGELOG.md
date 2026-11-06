@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-11-06
+
 ### Changed
 
 - Auto mode uses logins in the order you list them: the first one under its
