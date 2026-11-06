@@ -231,6 +231,7 @@ pub fn decide(input: &Input) -> Decision {
         tiers = tiers.into_iter().flatten().map(|n| vec![n]).collect();
     }
 
+    let place: Vec<String> = tiers.iter().flatten().cloned().collect();
     let mut notes: BTreeMap<String, String> = BTreeMap::new();
     let mut kept = Vec::new();
     let mut freed = Vec::new();
@@ -269,7 +270,12 @@ pub fn decide(input: &Input) -> Decision {
 
     if !freed.is_empty() {
         tiers.retain(|t| !t.is_empty());
-        tiers.insert(0, freed);
+        freed.sort_by_key(|n| place.iter().position(|p| p == n));
+        if input.auto.balance {
+            tiers.insert(0, freed);
+        } else {
+            tiers.splice(0..0, freed.into_iter().map(|n| vec![n]));
+        }
     }
 
     let mut logins = Vec::new();
@@ -1029,6 +1035,47 @@ reserve = { work = "workday" }
         );
         let b = d.logins.iter().find(|s| s.name == "b").unwrap();
         assert_eq!(b.note, "weekly at 10%");
+    }
+
+    #[test]
+    fn without_balance_a_rule_tier_goes_in_its_order() {
+        let mut c = config();
+        let a = c.auto.get_mut("claude").unwrap();
+        a.rules[1].order = vec![vec!["b".into(), "a".into()]];
+        a.rules[1].reserve.clear();
+        let now = at("20:00");
+        let figures = [
+            ("a", login(&now, (0, 2), (60, 24))),
+            ("b", login(&now, (0, 2), (10, 144))),
+        ];
+        let d = run(&c, &now, Some("a"), None, &figures);
+        assert_eq!(switch_to(&d), Some("b"));
+    }
+
+    #[test]
+    fn without_balance_freed_reservations_keep_the_rule_order() {
+        let mut c = config();
+        let a = c.auto.get_mut("claude").unwrap();
+        a.rules[1].order = vec![vec!["z".into(), "a".into()], vec!["perso".into()]];
+        a.rules[1].reserve = [
+            ("z".to_string(), "workday".to_string()),
+            ("a".to_string(), "workday".to_string()),
+        ]
+        .into();
+        let now = at("20:00");
+        let figures = [
+            ("z", login(&now, (0, 2), (50, 6))),
+            ("a", login(&now, (0, 2), (50, 6))),
+            ("perso", login(&now, (0, 2), (10, 100))),
+        ];
+        let d = run(&c, &now, Some("a"), None, &figures);
+        assert_eq!(
+            d.action,
+            Action::Switch {
+                to: "z".into(),
+                why: "z comes before a".into()
+            }
+        );
     }
 
     #[test]
