@@ -304,6 +304,40 @@ esac"#,
     }
 
     #[test]
+    fn firewalld_is_asked_in_the_zone_of_the_lan_interface() {
+        let empty = tempfile::tempdir().unwrap();
+        let (_bin, dir) = firewall_cmd(
+            r#"case "$*" in
+--state) echo running ;;
+--get-zone-of-interface=eth0) echo home ;;
+--get-zone-of-interface=*) echo 'no zone'; exit 2 ;;
+"--zone=home --query-port=8317/tcp") echo yes ;;
+*) echo no; exit 1 ;;
+esac"#,
+        );
+        let v = check(empty.path(), Some(dir.as_os_str()), Some("eth0"), 8317).unwrap();
+        assert_eq!(v.open, Some(true));
+        let v = check(empty.path(), Some(dir.as_os_str()), Some("wlan0"), 8317).unwrap();
+        assert_eq!(v.open, Some(false));
+        assert_eq!(
+            v.commands[0],
+            "sudo firewall-cmd --permanent --add-port=8317/tcp"
+        );
+        let (_bin, dir) = firewall_cmd(
+            r#"case "$*" in
+--state) echo running ;;
+--get-zone-of-interface=*) echo work ;;
+*) echo no; exit 1 ;;
+esac"#,
+        );
+        let v = check(empty.path(), Some(dir.as_os_str()), Some("eth0"), 8317).unwrap();
+        assert_eq!(
+            v.commands[0],
+            "sudo firewall-cmd --permanent --zone=work --add-port=8317/tcp"
+        );
+    }
+
+    #[test]
     fn a_stopped_firewalld_is_no_firewall() {
         let empty = tempfile::tempdir().unwrap();
         let (_bin, dir) = firewall_cmd("echo 'not running'; exit 252");

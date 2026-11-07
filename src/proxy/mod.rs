@@ -690,6 +690,23 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
     }
 
     #[test]
+    fn the_default_route_names_its_interface() {
+        let dir = tempfile::tempdir().unwrap();
+        let route = dir.path().join("route");
+        std::fs::write(
+            &route,
+            "Iface\tDestination\tGateway\n\
+             docker0\t000011AC\t00000000\n\
+             eth0\t00000000\t0101A8C0\n",
+        )
+        .unwrap();
+        assert_eq!(default_interface(&route).as_deref(), Some("eth0"));
+        std::fs::write(&route, "Iface\tDestination\n").unwrap();
+        assert_eq!(default_interface(&route), None);
+        assert_eq!(default_interface(&dir.path().join("none")), None);
+    }
+
+    #[test]
     fn an_api_key_goes_to_the_path_its_plan_draws_on() {
         let mut server = mockito::Server::new();
         let chat = server
