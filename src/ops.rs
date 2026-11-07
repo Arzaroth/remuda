@@ -291,6 +291,34 @@ pub fn refresh_entry(store: &Store, p: &dyn Provider, entry: &mut Entry) -> Resu
     Ok(())
 }
 
+fn refuse_to_replace(p: &dyn Provider, live: LiveState, discard: bool) -> Result<()> {
+    match live {
+        LiveState::Stored {
+            synced: false,
+            name: current,
+        } if !discard => {
+            bail!(
+                "the live {} login looks like {current} but could not be confirmed, so switching could lose its newest tokens; retry online or pass --discard",
+                p.name()
+            );
+        }
+        LiveState::Foreign { what } if !discard => {
+            bail!(
+                "{} is signed in with {what}, which remuda cannot store; pass --discard to replace it",
+                p.name()
+            );
+        }
+        LiveState::Unstored { email } if !discard => {
+            let who = email.map(|e| format!(" ({e})")).unwrap_or_default();
+            bail!(
+                "the live {} login{who} is not in the store: `remuda import` it first, or pass --discard to drop it",
+                p.name()
+            );
+        }
+        _ => Ok(()),
+    }
+}
+
 fn guards_live(discard: bool, live: &LiveState) -> bool {
     !discard || matches!(live, LiveState::Stored { synced: true, .. })
 }
@@ -328,34 +356,10 @@ pub fn switch_when(
         .with_context(|| format!("no credential named {}/{name}", p.id()))?;
     let live = sync_live(store, p)?;
     let guarded = guards_live(discard, &live);
-    match live {
-        LiveState::Stored { name: current, .. } if current == name => {
-            return Ok(format!("{} is already active", target.qualified()));
-        }
-        LiveState::Stored {
-            synced: false,
-            name: current,
-        } if !discard => {
-            bail!(
-                "the live {} login looks like {current} but could not be confirmed, so switching could lose its newest tokens; retry online or pass --discard",
-                p.name()
-            );
-        }
-        LiveState::Foreign { what } if !discard => {
-            bail!(
-                "{} is signed in with {what}, which remuda cannot store; pass --discard to replace it",
-                p.name()
-            );
-        }
-        LiveState::Unstored { email } if !discard => {
-            let who = email.map(|e| format!(" ({e})")).unwrap_or_default();
-            bail!(
-                "the live {} login{who} is not in the store: `remuda import` it first, or pass --discard to drop it",
-                p.name()
-            );
-        }
-        _ => {}
+    if live.active_name() == Some(name) {
+        return Ok(format!("{} is already active", target.qualified()));
     }
+    refuse_to_replace(p, live, discard)?;
     target = store
         .get(p.id(), name)?
         .with_context(|| format!("no credential named {}/{name}", p.id()))?;
