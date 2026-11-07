@@ -34,11 +34,15 @@ process is gone, or the pid was reused) or its port no longer answering, and
 the next `serve` overwrites both. Two pages on two ports: the last one started
 wins.
 
-`remuda open [--no-browser]` (`served::find`) takes the URL only when the
+`remuda open [--no-browser] [--add]` (`served::find`) takes the URL only when the
 status passes that check and `serve.url` names its port, then opens it through
 a redirect file like everything else (or prints it). When nothing serves and
 `remuda-serve.service` is found in the user unit search path, it runs
-`systemctl --user start` on it and waits up to 10 s for the page.
+`systemctl --user start` on it and waits up to 10 s for the page. `--add` puts
+`?add` in front of the fragment (`served::adding`); the page keeps that query
+past taking the token and, once the state has loaded, drops it so a reload
+does not open the sheet again, then opens the add-account sheet. TokenGauge's `+`
+button runs this.
 
 ## Under systemd
 

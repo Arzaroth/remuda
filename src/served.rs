@@ -23,6 +23,12 @@ fn status_path(dir: &Path) -> PathBuf {
     dir.join("serve.json")
 }
 
+/// The page's URL, asking it to open the add-account sheet. A query, because
+/// the fragment is the token.
+pub fn adding(url: &str) -> String {
+    url.replacen("/#", "/?add#", 1)
+}
+
 fn url_path(dir: &Path) -> PathBuf {
     dir.join("serve.url")
 }
