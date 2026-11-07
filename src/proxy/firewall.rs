@@ -21,9 +21,15 @@ pub struct Verdict {
 }
 
 /// The firewall in front of `port`, if one is on: ufw from its files under
-/// `etc`, else firewalld through the `firewall-cmd` found on `search`.
-pub fn check(etc: &Path, search: Option<&OsStr>, port: u16) -> Option<Verdict> {
-    ufw(etc, port).or_else(|| firewalld(search?, port))
+/// `etc`, else firewalld through the `firewall-cmd` found on `search`, in the
+/// zone of `interface`, the one LAN traffic comes in on.
+pub fn check(
+    etc: &Path,
+    search: Option<&OsStr>,
+    interface: Option<&str>,
+    port: u16,
+) -> Option<Verdict> {
+    ufw(etc, port).or_else(|| firewalld(search?, interface, port))
 }
 
 fn ufw(etc: &Path, port: u16) -> Option<Verdict> {
@@ -130,14 +136,21 @@ fn covers(range: &str, port: u16) -> bool {
     }
 }
 
-fn firewalld(search: &OsStr, port: u16) -> Option<Verdict> {
+fn firewalld(search: &OsStr, interface: Option<&str>, port: u16) -> Option<Verdict> {
     let program = which("firewall-cmd", search)?;
-    let running = child::run("firewall-cmd", &program, &["--state"], ASK_FOR, 4096).ok()?;
-    if !running.ok {
+    let ask = |arg: &str| child::run("firewall-cmd", &program, &[arg], ASK_FOR, 4096).ok();
+    if !ask("--state")?.ok {
         return None;
     }
-    let query = format!("--query-port={port}/tcp");
-    let open = child::run("firewall-cmd", &program, &[&query], ASK_FOR, 4096)
+    let zone = interface
+        .and_then(|i| ask(&format!("--get-zone-of-interface={i}")))
+        .filter(|r| r.ok)
+        .map(|r| String::from_utf8_lossy(&r.out).trim().to_owned())
+        .filter(|z| !z.is_empty());
+    let zoned = zone.map(|z| format!(" --zone={z}")).unwrap_or_default();
+    let query = format!("{zoned} --query-port={port}/tcp");
+    let args: Vec<&str> = query.split_whitespace().collect();
+    let open = child::run("firewall-cmd", &program, &args, ASK_FOR, 4096)
         .ok()
         .and_then(|r| match String::from_utf8_lossy(&r.out).trim() {
             "yes" => Some(true),
@@ -148,7 +161,7 @@ fn firewalld(search: &OsStr, port: u16) -> Option<Verdict> {
         name: "firewalld",
         open,
         commands: vec![
-            format!("sudo firewall-cmd --permanent --add-port={port}/tcp"),
+            format!("sudo firewall-cmd --permanent{zoned} --add-port={port}/tcp"),
             "sudo firewall-cmd --reload".to_owned(),
         ],
     })
@@ -195,7 +208,7 @@ COMMIT
     }
 
     fn open(etc: &tempfile::TempDir, port: u16) -> Option<bool> {
-        check(etc.path(), None, port).expect("ufw is on").open
+        check(etc.path(), None, None, port).expect("ufw is on").open
     }
 
     #[test]
@@ -206,7 +219,7 @@ COMMIT
         assert_eq!(open(&etc, 9050), Some(true));
         assert_eq!(open(&etc, 6000), Some(false));
         assert_eq!(open(&etc, 8317), Some(false));
-        let v = check(etc.path(), None, 8317).unwrap();
+        let v = check(etc.path(), None, None, 8317).unwrap();
         assert_eq!(v.name, "ufw");
         assert_eq!(v.commands, ["sudo ufw allow 8317/tcp"]);
     }
@@ -239,7 +252,7 @@ COMMIT
     #[test]
     fn a_deny_rule_is_overtaken_rather_than_appended_after() {
         let etc = ufw_at("yes", Some("DROP"), Some(RULES));
-        let v = check(etc.path(), None, 6000).unwrap();
+        let v = check(etc.path(), None, None, 6000).unwrap();
         assert_eq!(v.open, Some(false));
         assert_eq!(v.commands, ["sudo ufw insert 1 allow 6000/tcp"]);
     }
@@ -247,12 +260,12 @@ COMMIT
     #[test]
     fn no_firewall_when_ufw_is_off_and_firewalld_absent() {
         let etc = ufw_at("no", Some("DROP"), Some(RULES));
-        assert_eq!(check(etc.path(), None, 8317), None);
+        assert_eq!(check(etc.path(), None, None, 8317), None);
         let empty = tempfile::tempdir().unwrap();
-        assert_eq!(check(empty.path(), None, 8317), None);
+        assert_eq!(check(empty.path(), None, None, 8317), None);
         let bin = tempfile::tempdir().unwrap();
         assert_eq!(
-            check(empty.path(), Some(bin.path().as_os_str()), 8317),
+            check(empty.path(), Some(bin.path().as_os_str()), None, 8317),
             None
         );
     }
@@ -276,7 +289,7 @@ COMMIT
 --query-port=*) echo yes ;;
 esac"#,
         );
-        let v = check(empty.path(), Some(dir.as_os_str()), 8317).unwrap();
+        let v = check(empty.path(), Some(dir.as_os_str()), None, 8317).unwrap();
         assert_eq!(v.name, "firewalld");
         assert_eq!(v.open, Some(false));
         assert_eq!(
@@ -286,7 +299,7 @@ esac"#,
                 "sudo firewall-cmd --reload"
             ]
         );
-        let v = check(empty.path(), Some(dir.as_os_str()), 9000).unwrap();
+        let v = check(empty.path(), Some(dir.as_os_str()), None, 9000).unwrap();
         assert_eq!(v.open, Some(true));
     }
 
@@ -294,14 +307,14 @@ esac"#,
     fn a_stopped_firewalld_is_no_firewall() {
         let empty = tempfile::tempdir().unwrap();
         let (_bin, dir) = firewall_cmd("echo 'not running'; exit 252");
-        assert_eq!(check(empty.path(), Some(dir.as_os_str()), 8317), None);
+        assert_eq!(check(empty.path(), Some(dir.as_os_str()), None, 8317), None);
     }
 
     #[test]
     fn ufw_wins_over_firewalld() {
         let etc = ufw_at("yes", Some("DROP"), Some(RULES));
         let (_bin, dir) = firewall_cmd("echo running");
-        let v = check(etc.path(), Some(dir.as_os_str()), 8317).unwrap();
+        let v = check(etc.path(), Some(dir.as_os_str()), None, 8317).unwrap();
         assert_eq!(v.name, "ufw");
     }
 }

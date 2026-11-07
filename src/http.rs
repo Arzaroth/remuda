@@ -349,6 +349,7 @@ mod tests {
                 runtime: e.tmp.path().join("run"),
                 search: None,
                 etc: e.tmp.path().join("etc"),
+                route: e.tmp.path().join("route"),
             },
             providers,
             TOKEN.into(),

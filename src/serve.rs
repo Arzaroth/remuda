@@ -52,6 +52,8 @@ pub struct Places {
     pub search: Option<std::ffi::OsString>,
     /// Where the firewall's settings are read from.
     pub etc: PathBuf,
+    /// The kernel's routing table, which says the interface LAN traffic uses.
+    pub route: PathBuf,
 }
 
 impl Places {
@@ -65,6 +67,7 @@ impl Places {
             runtime: paths::runtime_dir(),
             search: std::env::var_os("PATH"),
             etc: PathBuf::from("/etc"),
+            route: PathBuf::from("/proc/net/route"),
         }
     }
 }
@@ -474,7 +477,13 @@ impl App {
         {
             return verdict.clone();
         }
-        let verdict = proxy::firewall::check(&self.places.etc, self.places.search.as_deref(), port);
+        let interface = proxy::default_interface(&self.places.route);
+        let verdict = proxy::firewall::check(
+            &self.places.etc,
+            self.places.search.as_deref(),
+            interface.as_deref(),
+            port,
+        );
         *seen = Some((Instant::now(), port, verdict.clone()));
         verdict
     }
@@ -1125,6 +1134,7 @@ mod tests {
             runtime: e.tmp.path().join("run"),
             search: None,
             etc: e.tmp.path().join("etc"),
+            route: e.tmp.path().join("route"),
         }
     }
 

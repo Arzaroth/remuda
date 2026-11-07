@@ -10,6 +10,7 @@ mod translate;
 pub use ping::ping;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
+use std::path::Path;
 use std::sync::{Mutex, Weak};
 
 use anyhow::Result;
@@ -85,6 +86,17 @@ pub fn lan_address() -> Option<IpAddr> {
     socket.connect((Ipv4Addr::new(192, 0, 2, 1), 9)).ok()?;
     let ip = socket.local_addr().ok()?.ip();
     (!ip.is_unspecified() && !ip.is_loopback()).then_some(ip)
+}
+
+/// The interface the default route leaves by, read from `/proc/net/route`
+/// at `route`.
+pub fn default_interface(route: &Path) -> Option<String> {
+    let table = std::fs::read_to_string(route).ok()?;
+    table.lines().skip(1).find_map(|l| {
+        let mut fields = l.split_whitespace();
+        let name = fields.next()?;
+        (fields.next()? == "00000000").then(|| name.to_owned())
+    })
 }
 
 #[cfg(test)]
