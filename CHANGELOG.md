@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- The API proxy card has a "Reachable from other machines" switch (`lan` in
+  `.proxy.json`): the proxy listens on every interface and its base URLs carry
+  the machine's LAN address. When ufw or firewalld blocks the port, the card
+  shows the commands that open it.
+
 ### Fixed
 
 - The page's dropdowns draw their arrow inside the field, clear of the rounded

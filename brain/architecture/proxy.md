@@ -10,7 +10,7 @@ nothing with it but the providers and a few pieces of `http.rs` (`read_head`,
 `App` holds a `proxy::Control` and a weak reference to itself, set by
 `App::start` once `main` has put it in an `Arc`. `App::apply_proxy` reads
 `<store>/.proxy.json` and hands it to `Control::apply`, which starts, moves or
-stops the listener to match `enabled` and `port`; a port it cannot bind is kept
+stops the listener to match `enabled`, `port` and `lan`; a port it cannot bind is kept
 as the error the page shows, and `/api/proxy/settings` answers it as an error.
 It runs at start, after every `/api/proxy/settings`, and from `serve::watch`
 whenever the store's files change, so a hand edit takes effect within seconds.
@@ -21,7 +21,8 @@ log), which tests implement on their own.
 
 ## The listener (`listen.rs`)
 
-Bound to `127.0.0.1` only. The accept loop polls a stop flag every 50 ms, so
+Bound to `127.0.0.1`, or to `0.0.0.0` when `lan` is set (IPv4 only). The
+key is the guard either way; `lan` adds nothing to it. The accept loop polls a stop flag every 50 ms, so
 turning the proxy off frees the port. At most 32 connections at once; each
 runs on its own thread.
 
@@ -44,6 +45,27 @@ stops reading the answer is dropped after a minute of blocked writes.
 Errors are written in the client's shape: Anthropic's
 `{type: "error", error: {type, message}}` on `/v1/messages`, OpenAI's
 `{error: {message, type, code}}` elsewhere.
+
+## Reaching it from other machines (`mod.rs`, `firewall.rs`)
+
+With `lan` set, the base URLs the page shows use `proxy::lan_address`, the
+source address of the default route, found by connecting a UDP socket, which
+sends nothing; with no route, `127.0.0.1`. `firewall::check` then says
+whether something on this machine keeps other machines out, reading only what
+needs no root:
+
+| Firewall | On when | Port open when | Opened by |
+| --- | --- | --- | --- |
+| ufw | `ENABLED=yes` in `/etc/ufw/ufw.conf` | the first `ufw-user-input` rule in `/etc/ufw/user.rules` for TCP on the port accepts it, else `DEFAULT_INPUT_POLICY` in `/etc/default/ufw` is `ACCEPT` | `sudo ufw allow <port>/tcp` |
+| firewalld | `firewall-cmd --state` succeeds | `firewall-cmd --query-port=<port>/tcp` says `yes` | `sudo firewall-cmd --permanent --add-port=<port>/tcp`, then `--reload` |
+
+ufw is looked at first. `open` is null when ufw's rules cannot be read and its
+policy drops, or when firewall-cmd's answer is neither yes nor no. A port
+another rule opens (a firewalld service, a source-restricted ufw allow) counts
+as whatever the first matching rule says; nftables or iptables set by hand are
+not read. `App` keeps a verdict 10 s, since firewall-cmd is a Python program,
+and asks only while the proxy is on with `lan`. The places are
+`Places::etc` and `Places::search`, a temporary directory and none in tests.
 
 ## Forwarding (`forward.rs`, `route.rs`)
 
@@ -205,5 +227,6 @@ counts as the 5-minute kind.
 - [src/proxy/forward.rs](../../src/proxy/forward.rs)
 - [src/proxy/route.rs](../../src/proxy/route.rs)
 - [src/proxy/settings.rs](../../src/proxy/settings.rs)
+- [src/proxy/firewall.rs](../../src/proxy/firewall.rs)
 - [src/proxy/translate/](../../src/proxy/translate/)
 - [src/provider.rs](../../src/provider.rs)

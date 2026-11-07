@@ -68,10 +68,21 @@ works only on a provider that takes Anthropic requests. A request that Codex get
 
 The card makes keys (`rmd-` and 32 random bytes), shows one masked with a
 button to reveal or copy it, and removes them. With no key, every client is
-refused. Keys, `enabled` and `port` live in `<store>/.proxy.json` (0600),
+refused. Keys, `enabled`, `port` and `lan` live in `<store>/.proxy.json` (0600),
 beside `.last-refresh.json`, outside any provider's directory. Switching the
 proxy on or off, or changing its port, takes effect at once, from the page or
 from a hand edit of the file; a port that cannot be bound is said on the card.
+
+## Other machines
+
+The card's "Reachable from other machines" switch (`lan`) makes the proxy
+listen on every interface instead of `127.0.0.1`, and its base URLs and
+`export` lines then carry this machine's LAN address. Traffic is plain HTTP,
+keys included, so it is meant for a network the user trusts or a tailnet.
+While it is on, the card looks for ufw or firewalld and, when one blocks the
+port or its rules cannot be read without root, shows the commands that open
+it, with a copy button; the settings answer says the same. A machine with
+neither, or with rules set straight in nftables, gets no notice.
 
 ## The request log
 
