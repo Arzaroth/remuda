@@ -34,19 +34,46 @@ fn ufw(etc: &Path, port: u16) -> Option<Verdict> {
     let policy = std::fs::read_to_string(etc.join("default/ufw"))
         .ok()
         .and_then(|d| setting(&d, "DEFAULT_INPUT_POLICY").map(|p| p == "ACCEPT"));
-    let ruled = std::fs::read_to_string(etc.join("ufw/user.rules"))
+    let open = std::fs::read_to_string(etc.join("ufw/user.rules"))
         .ok()
-        .map(|rules| rules.lines().find_map(|l| ufw_rule(l, port)));
-    let open = match ruled {
-        Some(Some(accepts)) => Some(accepts),
-        Some(None) => policy.or(Some(false)),
-        None => policy.filter(|accepts| *accepts),
+        .map(|rules| ufw_rules(&rules, port, policy));
+    let (open, denied) = match open {
+        Some((open, denied)) => (open, denied),
+        None => (None, false),
     };
+    let allow = if denied { "insert 1 allow" } else { "allow" };
     Some(Verdict {
         name: "ufw",
         open,
-        commands: vec![format!("sudo ufw allow {port}/tcp")],
+        commands: vec![format!("sudo ufw {allow} {port}/tcp")],
     })
+}
+
+/// Whether ufw lets any LAN machine in on `port`, `None` when only some
+/// sources are let in, and whether a rule of its own refuses the port, which
+/// an appended allow would come after.
+fn ufw_rules(rules: &str, port: u16, policy: Option<bool>) -> (Option<bool>, bool) {
+    let mut some_sources = false;
+    let mut decided = None;
+    for rule in rules.lines().filter_map(|l| ufw_rule(l, port)) {
+        match rule {
+            Rule {
+                restricted: true,
+                accepts,
+            } => some_sources |= accepts,
+            Rule { accepts, .. } => {
+                decided = Some(accepts);
+                break;
+            }
+        }
+    }
+    let open = decided.or(policy).unwrap_or(false);
+    let verdict = if !open && some_sources {
+        None
+    } else {
+        Some(open)
+    };
+    (verdict, decided == Some(false))
 }
 
 fn setting<'a>(text: &'a str, key: &str) -> Option<&'a str> {
@@ -56,8 +83,14 @@ fn setting<'a>(text: &'a str, key: &str) -> Option<&'a str> {
     })
 }
 
+struct Rule {
+    accepts: bool,
+    /// Limited to some sources, so it decides nothing for the others.
+    restricted: bool,
+}
+
 /// Whether a line of ufw's `user.rules` accepts or refuses TCP on `port`.
-fn ufw_rule(line: &str, port: u16) -> Option<bool> {
+fn ufw_rule(line: &str, port: u16) -> Option<Rule> {
     let words: Vec<&str> = line.split_whitespace().collect();
     if words.get(..2) != Some(&["-A", "ufw-user-input"]) {
         return None;
@@ -76,11 +109,15 @@ fn ufw_rule(line: &str, port: u16) -> Option<bool> {
     {
         return None;
     }
-    match after("-j")? {
-        "ACCEPT" | "ufw-user-limit-accept" => Some(true),
-        "DROP" | "REJECT" => Some(false),
-        _ => None,
-    }
+    let accepts = match after("-j")? {
+        "ACCEPT" | "ufw-user-limit-accept" => true,
+        "DROP" | "REJECT" => false,
+        _ => return None,
+    };
+    Some(Rule {
+        accepts,
+        restricted: after("-s").is_some(),
+    })
 }
 
 fn covers(range: &str, port: u16) -> bool {
@@ -180,11 +217,31 @@ COMMIT
         assert_eq!(open(&etc, 8317), Some(true));
         assert_eq!(open(&etc, 6000), Some(false));
         let etc = ufw_at("yes", Some("ACCEPT"), None);
-        assert_eq!(open(&etc, 8317), Some(true));
+        assert_eq!(open(&etc, 8317), None);
         let etc = ufw_at("yes", Some("DROP"), None);
         assert_eq!(open(&etc, 8317), None);
         let etc = ufw_at("yes", None, Some(""));
         assert_eq!(open(&etc, 8317), Some(false));
+    }
+
+    #[test]
+    fn a_source_limited_rule_decides_nothing_for_other_machines() {
+        let rules = "-A ufw-user-input -p tcp --dport 8317 -s 192.168.1.9 -j ACCEPT
+-A ufw-user-input -p tcp --dport 7000 -s 192.168.1.9 -j DROP
+";
+        let etc = ufw_at("yes", Some("DROP"), Some(rules));
+        assert_eq!(open(&etc, 8317), None);
+        let etc = ufw_at("yes", Some("ACCEPT"), Some(rules));
+        assert_eq!(open(&etc, 8317), Some(true));
+        assert_eq!(open(&etc, 7000), Some(true));
+    }
+
+    #[test]
+    fn a_deny_rule_is_overtaken_rather_than_appended_after() {
+        let etc = ufw_at("yes", Some("DROP"), Some(RULES));
+        let v = check(etc.path(), None, 6000).unwrap();
+        assert_eq!(v.open, Some(false));
+        assert_eq!(v.commands, ["sudo ufw insert 1 allow 6000/tcp"]);
     }
 
     #[test]
