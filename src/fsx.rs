@@ -243,6 +243,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_file_is_removed_only_while_it_holds_what_was_read() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("auth.json");
+        write_json(&path, &serde_json::json!({"v": 2})).unwrap();
+
+        let moved = remove_json_if(&path, &serde_json::json!({"v": 1}));
+        assert!(moved.unwrap_err().is::<Changed>());
+        assert!(path.exists());
+
+        remove_json_if(&path, &serde_json::json!({"v": 2})).unwrap();
+        assert!(!path.exists());
+        remove_json_if(&path, &serde_json::json!({"v": 2})).unwrap();
+    }
+
+    #[test]
+    fn a_linked_file_is_never_removed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let real = tmp.path().join("real.json");
+        let link = tmp.path().join("link.json");
+        write_json(&real, &serde_json::json!({"v": 1})).unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let err = remove_json_if(&link, &serde_json::json!({"v": 1})).unwrap_err();
+
+        assert!(err.to_string().contains("is a link"), "{err}");
+        assert!(real.exists() && link.exists());
+    }
+
+    #[test]
     fn a_symlinked_file_is_written_through_its_link() {
         let tmp = tempfile::tempdir().unwrap();
         let real = tmp.path().join("real.json");

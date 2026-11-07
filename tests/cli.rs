@@ -214,6 +214,33 @@ fn two_accounts_imported_switched_and_removed() {
 }
 
 #[test]
+fn signout_leaves_the_cli_with_no_login_until_one_is_used() {
+    let home = Home::new();
+    home.sign_in("a-work", "r-work", "u-work");
+    home.ok(&["import", "work"]);
+
+    assert_eq!(
+        home.ok(&["signout", "claude"]),
+        "signed Claude Code out of work\n"
+    );
+    let creds = read(&home.creds());
+    assert!(creds.get("claudeAiOauth").is_none());
+    assert_eq!(creds["mcpOAuth"]["srv"]["accessToken"], "mcp");
+    assert!(read(&home.config()).get("oauthAccount").is_none());
+    assert!(home.ok(&["ls"]).contains("signed out"));
+    assert!(
+        home.ok(&["signout", "claude"])
+            .contains("already signed out")
+    );
+
+    home.ok(&["use", "work"]);
+    assert_eq!(
+        read(&home.creds())["claudeAiOauth"]["refreshToken"],
+        "r-work"
+    );
+}
+
+#[test]
 fn a_login_nobody_stored_is_not_switched_away_from_unless_discarded() {
     let home = Home::new();
     home.sign_in("a-work", "r-work", "u-work");

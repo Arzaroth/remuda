@@ -1671,6 +1671,37 @@ mod tests {
     }
 
     #[test]
+    fn the_page_signs_a_cli_out_and_says_when_auto_mode_will_undo_it() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let work = e.store.get("claude", "work").unwrap().unwrap();
+        e.sign_in(work.creds, account("u-work"));
+        std::fs::write(
+            e.tmp.path().join("config.toml"),
+            "[auto.claude]\nenabled = true\nlogins = [\"work\"]\n",
+        )
+        .unwrap();
+        let app = app(&e, &OFFLINE);
+
+        let (_, state) = call(&app, "GET", "/api/state", Value::Null);
+        assert_eq!(state["providers"][0]["signsOut"], true);
+
+        let (status, r) = call(&app, "POST", "/api/signout", json!({"provider": "claude"}));
+
+        assert_eq!(status, 200, "{r}");
+        assert_eq!(
+            r["message"],
+            "signed Claude Code out of work; auto mode is on for Claude Code and will put a login back"
+        );
+        assert_eq!(e.live_refresh_token(), None);
+        let logged = logbook::read(&e.store);
+        assert_eq!(
+            (logged[0].kind, logged[0].subject().as_str(), logged[0].by),
+            (Kind::Switch, "claude/work", Some(By::Page))
+        );
+    }
+
+    #[test]
     fn credentials_are_listed_switched_labelled_renamed_and_removed() {
         let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);

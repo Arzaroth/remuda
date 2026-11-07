@@ -871,6 +871,79 @@ mod tests {
     }
 
     #[test]
+    fn signing_out_syncs_the_login_back_and_takes_only_it_out_of_the_cli() {
+        let server = confirming("u-work");
+        let e = env(&server.url());
+        e.stored("work", "u-work", HOUR);
+        e.sign_in(oauth("a2", "r2", 2 * HOUR), account("u-work"));
+
+        let said = sign_out(&e.store, &e.claude, false, By::Cli).unwrap();
+
+        assert_eq!(said, "signed Claude Code out of work");
+        assert_eq!(e.stored_refresh_token("work").as_deref(), Some("r2"));
+        assert_eq!(e.claude.live().unwrap(), None);
+        let creds = read_json(&e.tmp.path().join(".credentials.json"))
+            .unwrap()
+            .unwrap();
+        assert!(creds.get(OAUTH_KEY).is_none());
+        assert_eq!(creds["mcpOAuth"]["srv"]["t"], 1);
+        let config = read_json(&e.tmp.path().join(".claude.json"))
+            .unwrap()
+            .unwrap();
+        assert!(config.get("oauthAccount").is_none());
+        assert_eq!(config["numStartups"], 7);
+        assert!(crate::runs::switches(&e.store)["claude"] > now_ms() - 60_000);
+        assert_eq!(
+            sync_live(&e.store, &e.claude).unwrap(),
+            LiveState::SignedOut
+        );
+    }
+
+    #[test]
+    fn signing_out_a_login_nobody_stored_needs_discard() {
+        let server = confirming("u-other");
+        let e = env(&server.url());
+        e.stored("work", "u-work", HOUR);
+        e.sign_in(oauth("a9", "r9", HOUR), account("u-other"));
+
+        let err = sign_out(&e.store, &e.claude, false, By::Cli).unwrap_err();
+        assert!(err.to_string().contains("--discard"), "{err}");
+        assert_eq!(e.live_refresh_token().as_deref(), Some("r9"));
+
+        let said = sign_out(&e.store, &e.claude, true, By::Cli).unwrap();
+        assert_eq!(said, "signed Claude Code out, dropping its login");
+        assert_eq!(e.claude.live().unwrap(), None);
+        assert_eq!(e.stored_refresh_token("work").as_deref(), Some("r-work"));
+    }
+
+    #[test]
+    fn signing_out_a_signed_out_cli_changes_nothing() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+
+        let said = sign_out(&e.store, &e.claude, false, By::Cli).unwrap();
+
+        assert_eq!(said, "Claude Code is already signed out");
+        assert!(!e.tmp.path().join(".credentials.json").exists());
+        assert!(!e.tmp.path().join(".claude.json").exists());
+    }
+
+    #[test]
+    fn a_sign_out_refuses_a_live_login_that_moved() {
+        let e = env(&OFFLINE);
+        e.sign_in(oauth("a2", "r2-rotated", HOUR), account("u-work"));
+
+        let err = e.claude.sign_out(&oauth("a1", "r1", HOUR)).unwrap_err();
+
+        assert!(err.is::<crate::fsx::Changed>(), "{err}");
+        assert_eq!(e.live_refresh_token().as_deref(), Some("r2-rotated"));
+        let config = read_json(&e.tmp.path().join(".claude.json"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(config["oauthAccount"]["accountUuid"], "u-work");
+    }
+
+    #[test]
     fn a_corrupt_credentials_file_stops_a_switch_before_anything_is_written() {
         let e = env(&OFFLINE);
         e.stored("perso", "u-perso", HOUR);

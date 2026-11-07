@@ -436,6 +436,24 @@ mod tests {
     }
 
     #[test]
+    fn a_sign_out_leaves_the_files_other_scopes_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let g = grok(tmp.path(), &OFFLINE);
+        let mut live = auth("u-1", "a", "r-a", 1_900_000_000);
+        live["https://accounts.x.ai/sign-in"] = json!({"key": "xai-key"});
+        write_json(&tmp.path().join("auth.json"), &live).unwrap();
+
+        let moved = g.sign_out(&auth("u-1", "a", "r-old", 1_900_000_000));
+        assert!(moved.unwrap_err().is::<crate::fsx::Changed>());
+        g.sign_out(&live).unwrap();
+
+        let file = read_json(&tmp.path().join("auth.json")).unwrap().unwrap();
+        assert_eq!(file["https://accounts.x.ai/sign-in"]["key"], "xai-key");
+        assert!(file.get(format!("{OIDC_SCOPE}u-1")).is_none());
+        assert_eq!(g.live().unwrap(), None);
+    }
+
+    #[test]
     fn a_refresh_rotates_the_tokens_and_keeps_the_rest() {
         let mut server = mockito::Server::new();
         let token = server
