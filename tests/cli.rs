@@ -733,13 +733,17 @@ fn first_line(child: &mut std::process::Child) -> String {
 }
 
 fn get_state(url: &str) -> String {
+    get(url, "/api/state")
+}
+
+fn get(url: &str, path: &str) -> String {
     use std::io::{Read, Write};
     let (base, token) = url.trim().split_once("/#").unwrap();
     let host = base.strip_prefix("http://").unwrap();
     let mut s = std::net::TcpStream::connect(host).unwrap();
     write!(
         s,
-        "GET /api/state HTTP/1.1\r\nHost: {host}\r\nX-Remuda-Token: {token}\r\n\r\n"
+        "GET {path} HTTP/1.1\r\nHost: {host}\r\nX-Remuda-Token: {token}\r\n\r\n"
     )
     .unwrap();
     let mut answer = String::new();
@@ -768,6 +772,13 @@ fn open_finds_the_page_a_running_serve_shows() {
     assert!(get_state(&url).starts_with("HTTP/1.1 200"));
     let adding = home.ok(&["open", "--no-browser", "--add"]);
     assert_eq!(adding.trim(), url.trim().replacen("/#", "/?add#", 1));
+    let page = get(&url, "/?add");
+    assert!(page.starts_with("HTTP/1.1 200"), "{page}");
+    assert!(
+        page.to_ascii_lowercase()
+            .contains("content-type: text/html"),
+        "{page}"
+    );
     let status = read(&home.path(".local/share/remuda/credentials/serve.json"));
     assert!(
         !status
