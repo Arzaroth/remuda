@@ -1239,6 +1239,9 @@ mod tests {
         let proxy = || call(&app, "GET", "/api/state", Value::Null).1["proxy"].clone();
         assert_eq!(proxy()["lan"], false);
         assert_eq!(proxy()["host"], "127.0.0.1");
+        let etc = e.tmp.path().join("etc");
+        std::fs::create_dir_all(etc.join("ufw")).unwrap();
+        std::fs::write(etc.join("ufw/ufw.conf"), "ENABLED=yes\n").unwrap();
 
         let (status, r) = call(
             &app,
@@ -1247,12 +1250,18 @@ mod tests {
             json!({"enabled": true, "port": free_port(), "lan": true}),
         );
         assert_eq!(status, 200, "{r}");
-        assert!(
-            r["message"].as_str().unwrap().contains("other machines"),
-            "{r}"
-        );
+        let message = r["message"].as_str().unwrap();
+        assert!(message.contains("other machines"), "{r}");
+        assert!(message.contains("unless ufw blocks it"), "{r}");
         let state = proxy();
         assert_eq!(state["lan"], true);
+        assert_eq!(state["firewall"]["name"], "ufw");
+        assert_eq!(state["firewall"]["open"], Value::Null);
+        let port = state["running"].as_u64().unwrap();
+        assert_eq!(
+            state["firewall"]["commands"],
+            json!([format!("sudo ufw allow {port}/tcp")])
+        );
         let host = state["host"].as_str().unwrap();
         assert_eq!(
             state["baseUrls"]["claude"],
@@ -1263,6 +1272,7 @@ mod tests {
         assert_eq!(status, 200, "{r}");
         assert!(r["message"].as_str().unwrap().contains("127.0.0.1"), "{r}");
         assert_eq!(proxy()["host"], "127.0.0.1");
+        assert_eq!(proxy()["firewall"], Value::Null);
     }
 
     fn free_port() -> u16 {
