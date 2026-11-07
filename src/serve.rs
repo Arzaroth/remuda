@@ -855,7 +855,7 @@ impl App {
                     .iter()
                     .map(|p| {
                         let warm = crate::proxy::route::cheapest(p.id()).is_some();
-                        json!({"id": p.id(), "name": p.name(), "warm": warm})
+                        json!({"id": p.id(), "name": p.name(), "warm": warm, "signsOut": p.renews()})
                     })
                     .collect();
                 state["health"] = self.health(&lives);
@@ -942,6 +942,16 @@ impl App {
             ("POST", "/api/use") => {
                 let (p, name) = commands::resolve(store, &providers, spec()?)?;
                 let message = ops::switch_by(store, p, &name, flag("discard"), By::Page)?;
+                gauge::nudge(&self.places.snapshot);
+                Ok(json!({ "message": message }))
+            }
+            ("POST", "/api/signout") => {
+                let p = commands::find(
+                    &providers,
+                    text("provider").context("provider is required")?,
+                )?;
+                let message =
+                    commands::sign_out(store, &self.places.config, p, flag("discard"), By::Page)?;
                 gauge::nudge(&self.places.snapshot);
                 Ok(json!({ "message": message }))
             }

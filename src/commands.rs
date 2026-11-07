@@ -22,6 +22,28 @@ pub fn find<'a>(providers: &[&'a dyn Provider], id: &str) -> Result<&'a dyn Prov
         })
 }
 
+/// [`ops::sign_out`], saying when auto mode will put a login back.
+pub fn sign_out(
+    store: &Store,
+    config: &Path,
+    p: &dyn Provider,
+    discard: bool,
+    by: logbook::By,
+) -> Result<String> {
+    let message = ops::sign_out(store, p, discard, by)?;
+    let auto = crate::config::load(config)
+        .ok()
+        .is_some_and(|l| l.config.auto.get(p.id()).is_some_and(|a| a.enabled));
+    Ok(if auto {
+        format!(
+            "{message}; auto mode is on for {} and will put a login back",
+            p.name()
+        )
+    } else {
+        message
+    })
+}
+
 /// `provider/name`, or a bare name stored for exactly one CLI.
 pub fn resolve<'a>(
     store: &Store,

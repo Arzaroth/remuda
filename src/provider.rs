@@ -126,6 +126,12 @@ pub trait Provider: Send + Sync {
     /// `outgoing` (store shape); otherwise fails with [`crate::fsx::Changed`]
     /// and writes nothing. `None` replaces whatever is there.
     fn install(&self, entry: &Entry, outgoing: Option<&Value>) -> Result<()>;
+    /// Takes the login out of the CLI's files and leaves the rest, but only
+    /// while the live login is still `outgoing` (store shape); otherwise fails
+    /// with [`crate::fsx::Changed`] and writes nothing.
+    fn sign_out(&self, _outgoing: &Value) -> Result<()> {
+        anyhow::bail!("remuda does not sign {} out", self.name())
+    }
     /// The file the live login is read from. Its mtime dates a login that
     /// changed outside remuda, which remuda only notices later.
     fn live_file(&self) -> Option<std::path::PathBuf> {

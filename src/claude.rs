@@ -553,6 +553,27 @@ impl Provider for Claude {
         written
     }
 
+    /// The login goes first and the account second, the reverse of
+    /// [`Self::install`], so Claude Code never shows an account it has no
+    /// login for.
+    fn sign_out(&self, outgoing: &Value) -> Result<()> {
+        let expected = outgoing.get(OAUTH_KEY);
+        update_json(&self.creds_path, |file| {
+            if file.get(OAUTH_KEY) != expected {
+                return Err(Changed.into());
+            }
+            file.as_object_mut().map(|f| f.remove(OAUTH_KEY));
+            Ok(())
+        })?;
+        if read_json(&self.config_path)?.is_some_and(|c| c.get("oauthAccount").is_some()) {
+            update_json(&self.config_path, |config| {
+                config.as_object_mut().map(|c| c.remove("oauthAccount"));
+                Ok(())
+            })?;
+        }
+        Ok(())
+    }
+
     fn mirrors(&self) -> Option<&'static str> {
         Some(MIRRORS)
     }

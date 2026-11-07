@@ -174,6 +174,10 @@ impl Provider for Cursor {
         })
     }
 
+    fn sign_out(&self, outgoing: &Value) -> Result<()> {
+        crate::fsx::remove_json_if(&self.auth_path, outgoing)
+    }
+
     /// Cursor usually renews only the access token and keeps the refresh
     /// token; a session it will not renew answers 200 with `shouldLogout`.
     fn refresh(&self, creds: &mut Value) -> Result<Option<String>> {

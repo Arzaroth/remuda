@@ -227,6 +227,10 @@ impl Provider for Codex {
         })
     }
 
+    fn sign_out(&self, outgoing: &Value) -> Result<()> {
+        crate::fsx::remove_json_if(&self.auth_path, outgoing)
+    }
+
     /// Codex never re-reads auth.json while it runs, and a refresh in flight
     /// writes the old account's tokens into the new file.
     fn sessions(&self) -> &'static [&'static str] {

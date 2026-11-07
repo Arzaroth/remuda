@@ -211,6 +211,10 @@ impl Provider for Kimi {
         })
     }
 
+    fn sign_out(&self, outgoing: &Value) -> Result<()> {
+        crate::fsx::remove_json_if(&self.creds_path(), outgoing)
+    }
+
     fn refresh(&self, creds: &mut Value) -> Result<Option<String>> {
         let refresh_token = text(creds, "refresh_token")
             .context("credential has no refresh token")?

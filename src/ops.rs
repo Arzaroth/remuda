@@ -291,6 +291,50 @@ pub fn refresh_entry(store: &Store, p: &dyn Provider, entry: &mut Entry) -> Resu
     Ok(())
 }
 
+/// Takes the live login out of the CLI's files once it is safe in the store,
+/// so every login is remuda's to refresh and sign in again.
+pub fn sign_out(store: &Store, p: &dyn Provider, discard: bool, by: By) -> Result<String> {
+    let live = sync_live(store, p)?;
+    let was = match &live {
+        LiveState::SignedOut => return Ok(format!("{} is already signed out", p.name())),
+        LiveState::Foreign { what } => {
+            bail!(
+                "{} is signed in with {what}, which remuda does not sign out",
+                p.name()
+            )
+        }
+        LiveState::Unreadable { error } => bail!("could not read {}'s login: {error}", p.name()),
+        LiveState::Stored { name, .. } => Some(name.clone()),
+        LiveState::Unstored { .. } => None,
+    };
+    refuse_to_replace(p, live, discard)?;
+    let _live = p.lock_live()?;
+    let mut attempts = 0;
+    loop {
+        if attempts > 0 {
+            sync_live(store, p)?;
+        }
+        let Some(outgoing) = p.live()? else { break };
+        match p.sign_out(&outgoing) {
+            Err(e) if e.is::<crate::fsx::Changed>() && attempts < 3 => attempts += 1,
+            result => break result?,
+        }
+    }
+    crate::runs::switched(store, p.id(), now_ms());
+    crate::attribution::noticed(store, p, &LiveState::SignedOut);
+    let message = match &was {
+        Some(name) => format!("signed {} out of {name}", p.name()),
+        None => format!("signed {} out, dropping its login", p.name()),
+    };
+    logbook::note(
+        store,
+        Event::new(Kind::Switch, true, &message)
+            .about(p.id(), was.as_deref())
+            .by(by),
+    );
+    Ok(message)
+}
+
 fn refuse_to_replace(p: &dyn Provider, live: LiveState, discard: bool) -> Result<()> {
     match live {
         LiveState::Stored {
@@ -298,7 +342,7 @@ fn refuse_to_replace(p: &dyn Provider, live: LiveState, discard: bool) -> Result
             name: current,
         } if !discard => {
             bail!(
-                "the live {} login looks like {current} but could not be confirmed, so switching could lose its newest tokens; retry online or pass --discard",
+                "the live {} login looks like {current} but could not be confirmed, so replacing it could lose its newest tokens; retry online or pass --discard",
                 p.name()
             );
         }

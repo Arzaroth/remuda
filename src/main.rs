@@ -112,6 +112,14 @@ enum Cmd {
         #[arg(long)]
         discard: bool,
     },
+    /// Sign a CLI out, keeping its login in the store, so no login is in use.
+    Signout {
+        #[arg(value_parser = PROVIDERS)]
+        provider: String,
+        /// Sign out even when the live login is not in the store, dropping it.
+        #[arg(long)]
+        discard: bool,
+    },
     /// Refresh the tokens of the inactive credentials that are close to expiring.
     Refresh {
         name: Option<String>,
@@ -227,6 +235,7 @@ impl Cmd {
     fn needs_store(&self) -> Option<&'static str> {
         match self {
             Cmd::Use { .. } => Some("switching"),
+            Cmd::Signout { .. } => Some("signing out"),
             Cmd::List { .. } => Some("listing"),
             Cmd::Refresh { .. } => Some("refreshing"),
             Cmd::Label { .. } => Some("labelling"),
@@ -785,6 +794,16 @@ fn main() -> Result<()> {
         Cmd::Use { name, discard } => {
             let (p, name) = commands::resolve(&store, &providers, &name)?;
             println!("{}", ops::switch_by(&store, p, &name, discard, By::Cli)?);
+            gauge::nudge(&paths::tokengauge_snapshot());
+            Ok(())
+        }
+        Cmd::Signout { provider, discard } => {
+            let p = commands::find(&providers, &provider)?;
+            let config = paths::config_file();
+            println!(
+                "{}",
+                commands::sign_out(&store, &config, p, discard, By::Cli)?
+            );
             gauge::nudge(&paths::tokengauge_snapshot());
             Ok(())
         }

@@ -238,6 +238,17 @@ impl Provider for Grok {
         })
     }
 
+    fn sign_out(&self, outgoing: &Value) -> Result<()> {
+        update_json(&self.auth_path, |file| {
+            if oidc(file) != oidc(outgoing) {
+                return Err(Changed.into());
+            }
+            let map = file.as_object_mut().context("auth.json is not an object")?;
+            map.retain(|k, _| !k.starts_with(OIDC_SCOPE));
+            Ok(())
+        })
+    }
+
     fn refresh(&self, creds: &mut Value) -> Result<Option<String>> {
         let entry = oidc(creds).context("credential has no x.ai sign-in")?;
         let refresh_token = text(entry, "refresh_token")

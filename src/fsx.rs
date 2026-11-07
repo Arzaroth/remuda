@@ -103,6 +103,26 @@ fn read_text(path: &Path) -> Result<Option<String>> {
     }
 }
 
+/// Removes a file another program writes when it still holds `expected`, and
+/// refuses with [`Changed`] when it holds something else. A link is refused:
+/// removing it would undo the user's own setup, and removing what it points
+/// at would leave it dangling.
+pub fn remove_json_if(path: &Path, expected: &Value) -> Result<()> {
+    if fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
+        anyhow::bail!("{} is a link, which remuda does not remove", path.display());
+    }
+    match read_json(path)? {
+        None => Ok(()),
+        Some(held) if &held != expected => Err(Changed.into()),
+        Some(_) => match fs::remove_file(path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                Err(e).with_context(|| format!("failed to remove {}", path.display()))
+            }
+            _ => Ok(()),
+        },
+    }
+}
+
 /// Rewrites a JSON object another program also writes, and takes no lock on:
 /// read, edit, and rename into place only if the file still holds what was
 /// read, starting over otherwise. A read caught halfway through the other
