@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { href, parse, type Route, tokenIn } from './hash';
+import { href, parse, type Route, tokenIn, wantsAdd } from './hash';
 
 describe('routes', () => {
   it('reads back every route it writes', () => {
@@ -38,5 +38,13 @@ describe('tokenIn', () => {
     expect(tokenIn('#/cli/claude')).toBe('');
     expect(tokenIn('#/')).toBe('');
     expect(tokenIn('')).toBe('');
+  });
+});
+
+describe('wantsAdd', () => {
+  it('reads the query remuda open --add writes, and nothing else', () => {
+    expect(wantsAdd('?add')).toBe(true);
+    expect(wantsAdd('')).toBe(false);
+    expect(wantsAdd('?address=1')).toBe(false);
   });
 });

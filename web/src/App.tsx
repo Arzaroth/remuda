@@ -1,6 +1,7 @@
 import { createEffect, Match, Show, Switch } from 'solid-js';
 import { store } from './state';
 import { go, href, route } from './route';
+import { wantsAdd } from './hash';
 import type { Provider } from './types';
 import { autoOn, inUse, loginsOf } from './windows';
 import { AddAccount } from './components/AddAccount';
@@ -99,6 +100,13 @@ export function App() {
     const id = r.page === 'cli' || r.page === 'quota' ? r.id : null;
     openSheet({ provider: providers().find((p) => p.id === id)?.id ?? providers()[0]?.id });
   };
+  let addAsked = wantsAdd(location.search);
+  createEffect(() => {
+    if (!addAsked || !store.s) return;
+    addAsked = false;
+    history.replaceState(null, '', location.pathname + location.hash);
+    openAdd();
+  });
   createEffect(() => {
     const s = sheet();
     if (s && !dialog.open) {

@@ -3,7 +3,7 @@ import { frames, isChange } from './sse';
 import { ask, share } from './token';
 
 const fromHash = tokenIn(location.hash);
-if (fromHash) history.replaceState(null, '', location.pathname);
+if (fromHash) history.replaceState(null, '', location.pathname + location.search);
 
 function keep(t: string) {
   try {

@@ -12,6 +12,8 @@ export const isRoute = (hash: string) => hash.startsWith('#/');
 
 export const tokenIn = (hash: string) => (isRoute(hash) ? '' : hash.slice(1));
 
+export const wantsAdd = (search: string) => new URLSearchParams(search).has('add');
+
 export function parse(hash: string): Route {
   if (!isRoute(hash)) return { page: 'overview' };
   const [page, id, tab] = hash.slice(2).split('/');
