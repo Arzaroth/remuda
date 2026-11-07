@@ -10,7 +10,8 @@ running.
 | Module | Role |
 | --- | --- |
 | `main.rs` | Argument parsing (clap) and wiring: builds the providers, takes the lock, dispatches |
-| `browser.rs` | Opening a URL through a redirect file, in a private window when the default browser allows |
+| `browser.rs` | Opening a URL through a redirect file, in the browser and window `[login]` names (private, the login's own profile, normal) |
+| `callback.rs` | The local port a browser calls back to at the end of a sign-in (Codex, Claude) |
 | `commands.rs` | One function per command, writing to a `Write` so tests can read the output; name resolution |
 | `ops.rs` | The two operations everything rests on: `sync_live` and `switch`, plus `refresh_entry` |
 | `provider.rs` | The `Provider` and `PendingLogin` traits |
@@ -59,6 +60,7 @@ page reuses the same functions and how tests capture what a user would read.
 ## Sources
 
 - [src/browser.rs](../../src/browser.rs)
+- [src/callback.rs](../../src/callback.rs)
 - [src/main.rs](../../src/main.rs)
 - [src/commands.rs](../../src/commands.rs)
 - [src/ops.rs](../../src/ops.rs)
