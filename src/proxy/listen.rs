@@ -1,5 +1,5 @@
 use std::io::{ErrorKind, Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use std::thread::JoinHandle;
@@ -45,9 +45,14 @@ impl Running {
     }
 }
 
-pub fn start(backend: Weak<dyn Backend>, port: u16) -> Result<Running> {
-    let listener = TcpListener::bind(("127.0.0.1", port))
-        .with_context(|| format!("cannot listen on 127.0.0.1:{port}"))?;
+pub fn start(backend: Weak<dyn Backend>, port: u16, lan: bool) -> Result<Running> {
+    let host = if lan {
+        Ipv4Addr::UNSPECIFIED
+    } else {
+        Ipv4Addr::LOCALHOST
+    };
+    let listener = TcpListener::bind((host, port))
+        .with_context(|| format!("cannot listen on {host}:{port}"))?;
     let addr = listener.local_addr()?;
     listener.set_nonblocking(true)?;
     let stop = Arc::new(AtomicBool::new(false));

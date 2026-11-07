@@ -459,7 +459,12 @@ impl App {
         };
         let (running, error) = self.proxy.status();
         let error = unreadable.or(error);
-        let origin = format!("http://127.0.0.1:{}", running.map_or(s.port, |a| a.port()));
+        let host = s
+            .lan
+            .then(proxy::lan_address)
+            .flatten()
+            .map_or_else(|| "127.0.0.1".to_owned(), |ip| ip.to_string());
+        let origin = format!("http://{host}:{}", running.map_or(s.port, |a| a.port()));
         let providers: Vec<Value> = self
             .providers
             .iter()
@@ -480,6 +485,8 @@ impl App {
         json!({
             "enabled": s.enabled,
             "port": s.port,
+            "lan": s.lan,
+            "host": host,
             "running": running.map(|a| a.port()),
             "error": error,
             "routes": providers,
@@ -809,6 +816,7 @@ impl App {
             }
             ("POST", "/api/proxy/settings") => {
                 let enabled = body.get("enabled").and_then(Value::as_bool);
+                let lan = body.get("lan").and_then(Value::as_bool);
                 let port = match body.get("port") {
                     None | Some(Value::Null) => None,
                     Some(v) => Some(
@@ -825,11 +833,18 @@ impl App {
                     if let Some(port) = port {
                         s.port = port;
                     }
+                    if let Some(lan) = lan {
+                        s.lan = lan;
+                    }
                     Ok(())
                 })?;
                 self.apply_proxy();
                 let (running, error) = self.proxy.status();
                 let message = match (running, error) {
+                    (Some(addr), _) if addr.ip().is_unspecified() => format!(
+                        "the proxy listens on port {}, reachable from other machines",
+                        addr.port()
+                    ),
                     (Some(addr), _) => format!("the proxy listens on {addr}"),
                     (None, Some(e)) => bail!("saved, but the proxy is not running: {e}"),
                     (None, None) => "the proxy is off".to_owned(),
