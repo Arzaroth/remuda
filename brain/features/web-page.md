@@ -77,7 +77,10 @@ Add a login.
   or name to pick and no overwrite to confirm, and closes it once stored; it
   stands out when the sign-in has run out. Remove asks
   for a second click; Use, Refresh and Remove are disabled on the active one,
-  and Sign in again too, since the CLI signs its own login in.
+  and Sign in again too, since the CLI signs its own login in. The active one
+  has Sign out instead, for every CLI but the API-key ones (the state's
+  `providers[].signsOut`), which asks for a second click and leaves the CLI
+  with no login ([switching.md](switching.md#signing-out)).
   Use asks for a second click too when switching would drop the CLI's live
   login, naming what goes: "Drop alice@example.com unsaved?" for one not
   stored, "Drop the API key?", or "Lose work's newest tokens?" for one that

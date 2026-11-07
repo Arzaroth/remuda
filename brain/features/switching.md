@@ -36,6 +36,32 @@ Running Claude Code sessions watch their credential files and adopt the new
 login. A running Codex session may keep the login it started with until it is
 restarted.
 
+## Signing out
+
+`remuda signout <cli> [--discard]` and the page's Sign out, on the login in
+use, leave the CLI with no login at all (`ops::sign_out`). Every login is then
+the store's alone, so remuda refreshes it and signs it in again, even when it
+is the only one; the page offers Sign in again only on a login the CLI is not
+using. `remuda use` puts one back.
+
+It syncs the live login back first and refuses as a switch does (unstored,
+unconfirmed, `--discard` drops it). A login remuda cannot store, such as an API
+key, is never signed out. Under `Provider::lock_live` it then calls
+`Provider::sign_out` against the login it read, retrying up to three times when
+the CLI rotated it meanwhile:
+
+- **Claude Code**: removes `claudeAiOauth` from `.credentials.json`, then
+  `oauthAccount` from `.claude.json`, keeping every other key (`mcpOAuth`).
+- **Codex, Kimi, Cursor**: removes the file that is the login (`auth.json`,
+  `credentials/kimi-code.json`), as their own logout does. A file that is a
+  link is refused rather than removed (`fsx::remove_json_if`).
+- **Grok**: removes the `auth.x.ai::` entries from `auth.json`.
+- **GLM, opencode Go**: refused; the page shows no Sign out for them.
+
+It notes the time in `.last-switch.json`, writes a ledger line with no account,
+and logs a `switch` event. With auto mode on for that CLI, the next round
+picks a login again, and the message says so.
+
 ## Whose spend it is
 
 A transcript names no login, so remuda writes down which one each CLI's files
@@ -65,8 +91,9 @@ login also carries its `oauthAccount` block and email back (Claude). See
 ## Sources
 
 - [src/ops.rs](../../src/ops.rs)
-- [src/claude.rs](../../src/claude.rs) `install`
-- [src/codex.rs](../../src/codex.rs) `install`
+- [src/claude.rs](../../src/claude.rs) `install`, `sign_out`
+- [src/codex.rs](../../src/codex.rs) `install`, `sign_out`
+- [src/fsx.rs](../../src/fsx.rs) `remove_json_if`
 - [src/runs.rs](../../src/runs.rs) `switched`
 - [src/attribution.rs](../../src/attribution.rs) `switched`, `noticed`
 - [src/logbook.rs](../../src/logbook.rs), each switch logged with who made it ([log.md](log.md))

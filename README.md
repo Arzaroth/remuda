@@ -104,6 +104,7 @@ take `-p <cli>`: `claude` (the default), `codex`, `cursor`, `glm`, `grok`,
 | `remuda import <name> [-p <cli>]` | Store the login the CLI is signed into right now |
 | `remuda login <name> [-p <cli>] [--no-browser]` | Sign another account in through the browser and store it, without touching the CLI |
 | `remuda use <name>` | Make a stored credential the one its CLI uses |
+| `remuda signout <cli>` | Sign the CLI out, keeping its login in the store, so remuda can refresh and sign in again every login |
 | `remuda run <name> [-- args]` | Start Claude Code or Codex on a stored login for this session only, without switching; `remuda claude <name>` is the same |
 | `remuda pin [name] [--remove <cli>] [--allow]` | Pin a login to this directory in `.remuda.toml`, show the pins in force, or trust a `.remuda.toml` as it is |
 | `remuda shell-init <shell>` | Print functions that start `claude` and `codex` on the login pinned where they run |

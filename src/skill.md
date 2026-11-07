@@ -71,6 +71,8 @@ the account that owns them lists them (`Artifact` with `action: "list"`).
   uses.
 - `remuda use [cli/]name`: switch a CLI to a stored login. It moves every open
   session of that CLI.
+- `remuda signout cli`: take the login out of a CLI and keep it stored. Every
+  open session of that CLI is left signed out until a `remuda use`.
 - `remuda auto`: which login auto mode wants each CLI on, and why.
 - `remuda run cli/name -- args`: start one session on a login without switching
   anyone else; `remuda pin name` makes a directory start on it.

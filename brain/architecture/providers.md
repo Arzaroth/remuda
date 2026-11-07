@@ -13,6 +13,7 @@ from a CLI. `creds` is always the store's shape for that CLI.
 | `live_identity` | Who the CLI's own files say that login is (`Identity`) |
 | `identify` | Whose tokens these are, per the tokens or the provider, never a file beside them |
 | `install` | Make an entry the live login |
+| `sign_out` | Take the live login out of the CLI's files and keep the rest ([../features/switching.md](../features/switching.md#signing-out)); refused by default, as for an API key |
 | `lock_live` | A lock other writers of the live login share, held by a switch (none by default) |
 | `refresh` | Rotate the tokens in place; returns the account the endpoint answered for |
 | `renews` | False for an API key, which `refresh` skips (true by default) |
