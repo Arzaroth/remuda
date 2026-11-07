@@ -653,6 +653,30 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
     }
 
     #[test]
+    fn lan_listens_on_every_interface_and_back() {
+        let backend: Arc<dyn Backend> = Arc::new(Test {
+            providers: Vec::new(),
+            settings: on(),
+            spent: Mutex::default(),
+            recorded: Mutex::default(),
+        });
+        let control = Control::default();
+        let lan = settings::Settings { lan: true, ..on() };
+        control.apply(Arc::downgrade(&backend), &lan);
+        let addr = control.status().0.expect("the proxy did not start");
+        assert!(addr.ip().is_unspecified(), "{addr}");
+        assert!(TcpStream::connect(("127.0.0.1", addr.port())).is_ok());
+
+        let local = settings::Settings {
+            port: addr.port(),
+            ..on()
+        };
+        control.apply(Arc::downgrade(&backend), &local);
+        let addr = control.status().0.expect("the proxy did not restart");
+        assert!(addr.ip().is_loopback(), "{addr}");
+    }
+
+    #[test]
     fn an_api_key_goes_to_the_path_its_plan_draws_on() {
         let mut server = mockito::Server::new();
         let chat = server

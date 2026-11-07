@@ -1186,6 +1186,45 @@ mod tests {
     }
 
     #[test]
+    fn the_page_opens_the_proxy_to_other_machines() {
+        let e = env(&OFFLINE);
+        let app = Arc::new(app(&e, &OFFLINE));
+        app.start();
+        let proxy = || call(&app, "GET", "/api/state", Value::Null).1["proxy"].clone();
+        assert_eq!(proxy()["lan"], false);
+        assert_eq!(proxy()["host"], "127.0.0.1");
+
+        let (status, r) = call(
+            &app,
+            "POST",
+            "/api/proxy/settings",
+            json!({"enabled": true, "port": free_port(), "lan": true}),
+        );
+        assert_eq!(status, 200, "{r}");
+        assert!(
+            r["message"].as_str().unwrap().contains("other machines"),
+            "{r}"
+        );
+        let state = proxy();
+        assert_eq!(state["lan"], true);
+        let host = state["host"].as_str().unwrap();
+        assert_eq!(
+            state["baseUrls"]["claude"],
+            format!("http://{host}:{}", state["running"])
+        );
+
+        let (status, r) = call(&app, "POST", "/api/proxy/settings", json!({"lan": false}));
+        assert_eq!(status, 200, "{r}");
+        assert!(r["message"].as_str().unwrap().contains("127.0.0.1"), "{r}");
+        assert_eq!(proxy()["host"], "127.0.0.1");
+    }
+
+    fn free_port() -> u16 {
+        let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        l.local_addr().unwrap().port()
+    }
+
+    #[test]
     fn a_broken_proxy_file_breaks_only_the_proxy() {
         let e = env(&OFFLINE);
         let app = app(&e, &OFFLINE);
