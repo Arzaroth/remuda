@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- `remuda open --add` lands on the sheet that adds an account, for a tool that
+  offers an add button and leaves the sign-in to remuda.
+
 ## [0.36.0] - 2026-11-06
 
 ### Changed

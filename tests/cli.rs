@@ -766,6 +766,8 @@ fn open_finds_the_page_a_running_serve_shows() {
     let url = home.ok(&["open", "--no-browser"]);
     assert!(printed.contains(url.trim()), "{printed} / {url}");
     assert!(get_state(&url).starts_with("HTTP/1.1 200"));
+    let adding = home.ok(&["open", "--no-browser", "--add"]);
+    assert_eq!(adding.trim(), url.trim().replacen("/#", "/?add#", 1));
     let status = read(&home.path(".local/share/remuda/credentials/serve.json"));
     assert!(
         !status
