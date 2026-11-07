@@ -40,8 +40,8 @@ a redirect file like everything else (or prints it). When nothing serves and
 `remuda-serve.service` is found in the user unit search path, it runs
 `systemctl --user start` on it and waits up to 10 s for the page. `--add` puts
 `?add` in front of the fragment (`served::adding`); the page keeps that query
-past taking the token, opens the add-account sheet once the state has loaded,
-and then drops it so a reload does not open the sheet again. TokenGauge's `+`
+past taking the token and, once the state has loaded, drops it so a reload
+does not open the sheet again, then opens the add-account sheet. TokenGauge's `+`
 button runs this.
 
 ## Under systemd
