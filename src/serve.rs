@@ -2966,6 +2966,33 @@ mod tests {
     }
 
     #[test]
+    fn claude_calls_back_unless_pasting_is_asked_for_or_set() {
+        let e = env(&OFFLINE);
+        let app = app(&e, &OFFLINE);
+        let begin = |body: Value| call(&app, "POST", "/api/login", body).1;
+
+        let callback = begin(json!({"name": "a"}));
+        assert_eq!(
+            (&callback["needsCode"], &callback["localOnly"]),
+            (&json!(false), &json!(true))
+        );
+        let pasted = begin(json!({"name": "a", "paste": true}));
+        assert_eq!(
+            (&pasted["needsCode"], &pasted["localOnly"]),
+            (&json!(true), &json!(false))
+        );
+
+        let (_, set) = call(&app, "POST", "/api/login/settings", json!({"paste": true}));
+        assert_eq!(set["paste"], true);
+        assert_eq!(begin(json!({"name": "a"}))["needsCode"], true);
+        assert_eq!(
+            begin(json!({"name": "a", "paste": false}))["needsCode"],
+            false
+        );
+        call(&app, "POST", "/api/login/cancel", json!({"id": "x"}));
+    }
+
+    #[test]
     fn the_page_reads_and_sets_where_sign_ins_open() {
         let e = env(&OFFLINE);
         let opened = Arc::new(Mutex::new(Vec::new()));

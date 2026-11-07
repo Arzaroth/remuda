@@ -832,6 +832,115 @@ fn reported_seat(e: &Entry) -> Option<&str> {
 mod tests {
     use super::*;
 
+    fn browse(url: &str) -> String {
+        use std::io::{Read, Write};
+        let url = reqwest::Url::parse(url).unwrap();
+        let mut stream = std::net::TcpStream::connect(("127.0.0.1", url.port().unwrap())).unwrap();
+        let target = format!("{}?{}", url.path(), url.query().unwrap_or_default());
+        write!(stream, "GET {target} HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
+        let mut answer = String::new();
+        stream.read_to_string(&mut answer).unwrap();
+        answer
+    }
+
+    fn param(url: &str, key: &str) -> String {
+        reqwest::Url::parse(url)
+            .unwrap()
+            .query_pairs()
+            .find(|(k, _)| k == key)
+            .unwrap()
+            .1
+            .into_owned()
+    }
+
+    #[test]
+    fn a_sign_in_calls_back_to_a_local_port_and_lands_on_claudes_page() {
+        let mut server = mockito::Server::new();
+        let claude = Claude::at(
+            std::path::Path::new("/nonexistent"),
+            Api::local(&server.url()),
+        );
+        let pending = claude.begin_login(false).unwrap();
+        assert!(!pending.needs_code());
+        assert!(pending.local_only());
+        let url = pending.url().to_owned();
+        let redirect = param(&url, "redirect_uri");
+        assert!(redirect.starts_with("http://localhost:"), "{redirect}");
+        assert!(redirect.ends_with("/callback"), "{redirect}");
+        assert_eq!(param(&url, "code"), "true");
+        let state = param(&url, "state");
+        let exchange = server
+            .mock("POST", "/v1/oauth/token")
+            .match_body(mockito::Matcher::PartialJson(json!({
+                "grant_type": "authorization_code",
+                "code": "the-code",
+                "redirect_uri": redirect,
+                "state": state,
+            })))
+            .with_body(
+                json!({"access_token": "a-new", "refresh_token": "r-new", "expires_in": 28800})
+                    .to_string(),
+            )
+            .create();
+        server
+            .mock("GET", "/api/oauth/profile")
+            .with_body(crate::ops::testing::profile_body("u-new"))
+            .create();
+
+        let browser = std::thread::spawn(move || {
+            let local = redirect.replace("localhost", "127.0.0.1");
+            let forged = browse(&format!("{local}?code=x&state=forged"));
+            let done = browse(&format!("{local}?code=the-code&state={state}"));
+            (forged, done)
+        });
+        let login = pending.finish(None).unwrap();
+        let (forged, done) = browser.join().unwrap();
+
+        exchange.assert();
+        assert!(forged.starts_with("HTTP/1.1 400"), "{forged}");
+        assert!(done.starts_with("HTTP/1.1 302"), "{done}");
+        assert!(
+            done.contains(&format!("Location: {SIGNED_IN_URL}")),
+            "{done}"
+        );
+        assert_eq!(login.identity.account_id, "u-new");
+        assert_eq!(login.creds[OAUTH_KEY]["refreshToken"], "r-new");
+    }
+
+    #[test]
+    fn a_refused_callback_ends_the_sign_in_and_says_why() {
+        let claude = Claude::at(
+            std::path::Path::new("/nonexistent"),
+            Api::local("http://127.0.0.1:1"),
+        );
+        let pending = claude.begin_login(false).unwrap();
+        let local = param(pending.url(), "redirect_uri").replace("localhost", "127.0.0.1");
+        let state = param(pending.url(), "state");
+        let browser = std::thread::spawn(move || {
+            browse(&format!(
+                "{local}?error=access_denied&error_description=no%20thanks&state={state}"
+            ))
+        });
+
+        let err = pending.finish(None).err().unwrap();
+
+        assert!(err.to_string().contains("no thanks"), "{err}");
+        let answer = browser.join().unwrap();
+        assert!(answer.starts_with("HTTP/1.1 400"), "{answer}");
+    }
+
+    #[test]
+    fn pasting_keeps_claudes_own_redirect_and_no_local_port() {
+        let claude = Claude::at(
+            std::path::Path::new("/nonexistent"),
+            Api::local("http://127.0.0.1:1"),
+        );
+        let pending = claude.begin_login(true).unwrap();
+        assert!(pending.needs_code());
+        assert!(!pending.local_only());
+        assert_eq!(param(pending.url(), "redirect_uri"), REDIRECT_URI);
+    }
+
     #[test]
     fn another_clients_request_opens_with_claude_codes_line() {
         let claude = Claude::at(
