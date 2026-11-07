@@ -118,7 +118,7 @@ take `-p <cli>`: `claude` (the default), `codex`, `cursor`, `glm`, `grok`,
 | `remuda log [name] [-n N] [--json]` | Show what remuda did: switches and who made them, refreshes, auto mode, keep-warm, the proxy |
 | `remuda doctor [--json]` | Check what remuda relies on (the service, the refresh timer, TokenGauge, the logins, the CLIs' versions) and say how to fix what is wrong |
 | `remuda serve [--port N] [--no-browser]` | Do all of the above from a page in the browser, and run auto mode |
-| `remuda open [--no-browser]` | Open the page a running `serve` shows |
+| `remuda open [--no-browser] [--add]` | Open the page a running `serve` shows; `--add` opens it on the add-account sheet |
 | `remuda completions <shell>` | Print a completion script |
 | `remuda --update` | Replace the binary with the latest release |
 | `remuda --check-update` | Report whether a newer release exists |
