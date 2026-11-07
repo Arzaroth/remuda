@@ -120,7 +120,7 @@ export type Proxy = {
   enabled: boolean;
   port: number;
   lan: boolean;
-  host: string;
+  host: string | null;
   firewall: Firewall | null;
   running: number | null;
   error: string | null;

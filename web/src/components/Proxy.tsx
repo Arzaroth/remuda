@@ -35,6 +35,7 @@ export function Proxy() {
   const [name, setName] = createSignal('');
   const [port, setPort] = createSignal('');
   const [armed, setArmed] = createSignal<string | null>(null);
+  const [switching, setSwitching] = createSignal(false);
   const confirm = createConfirm();
 
   const pick = (id: Protocol) => {
@@ -95,7 +96,11 @@ export function Proxy() {
           class="switch"
           role="switch"
           aria-checked={p().lan}
-          onClick={() => send('/api/proxy/settings', { lan: !p().lan })}
+          disabled={switching()}
+          onClick={() => {
+            setSwitching(true);
+            send('/api/proxy/settings', { lan: !p().lan }).finally(() => setSwitching(false));
+          }}
         >
           <i />
           {p().lan ? 'On' : 'Off'}

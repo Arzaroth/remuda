@@ -42,10 +42,14 @@ describe('proxy', () => {
     expect(status(proxy({ enabled: true, error: 'cannot listen' }))).toEqual({ text: 'cannot listen', tone: 'bad' });
   });
 
-  it('says when other machines can reach it', () => {
-    expect(status(proxy({ enabled: true, running: 8317, lan: true, host: '192.168.1.5' })).text).toBe(
-      'Listening on 192.168.1.5:8317, reachable from other machines',
-    );
+  it('names the address other machines use, without claiming they reach it', () => {
+    expect(status(proxy({ enabled: true, running: 8317, lan: true, host: '192.168.1.5' }))).toEqual({
+      text: 'Listening on every interface, port 8317; other machines use 192.168.1.5',
+      tone: 'good',
+    });
+    const lost = status(proxy({ enabled: true, running: 8317, lan: true, host: null }));
+    expect(lost.tone).toBe('bad');
+    expect(lost.text).toContain('LAN address was not found');
   });
 
   it('warns only when a firewall may block the lan port', () => {
