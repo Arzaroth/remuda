@@ -1898,6 +1898,60 @@ mod tests {
     }
 
     #[test]
+    fn a_logins_browser_profile_follows_its_rename_and_goes_with_it() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let config = e.tmp.path().join("config.toml");
+        let profile = |name| crate::browser::profile_dir(e.store.root(), "claude", name);
+        std::fs::create_dir_all(profile("work")).unwrap();
+        std::fs::write(profile("work").join("Cookies"), "c").unwrap();
+
+        rename(&e.store, &config, &e.claude, "work", "job", &mut Vec::new()).unwrap();
+        assert!(!profile("work").exists());
+        assert_eq!(
+            std::fs::read_to_string(profile("job").join("Cookies")).unwrap(),
+            "c"
+        );
+
+        let gone = LiveState::SignedOut;
+        remove(&e.store, &config, &e.claude, &gone, "job", &mut Vec::new()).unwrap();
+        assert!(!profile("job").exists());
+    }
+
+    #[test]
+    fn the_link_is_printed_and_enter_offered_only_when_something_can_open_it() {
+        let (server, _) = login_server("u-new");
+        let e = env(&server.url());
+        let (tx, lines) = std::sync::mpsc::channel();
+        tx.send(String::new()).unwrap();
+        drop(tx);
+        let mut out = Vec::new();
+
+        let err = login(
+            &e.store,
+            &e.claude,
+            "new",
+            false,
+            Prompt {
+                open: &|_, _| unreachable!(),
+                opens_in: None,
+                lines,
+            },
+            &mut out,
+        )
+        .unwrap_err();
+
+        let out = text(out);
+        assert!(
+            out.contains("store as new:\n\nhttps://claude.com/cai/oauth/authorize?"),
+            "{out}"
+        );
+        assert!(!out.contains("press Enter"), "{out}");
+        assert_eq!(out.matches("Paste the code").count(), 2, "{out}");
+        assert!(err.to_string().contains("input ended"), "{err}");
+    }
+
+    #[test]
     fn rename_says_where_the_credential_went() {
         let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);

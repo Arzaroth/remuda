@@ -1037,6 +1037,48 @@ reserve = { work = "workday" }
     }
 
     #[test]
+    fn where_sign_ins_open_is_kept_and_checked() {
+        let c: Config =
+            toml_edit::de::from_str("[login]\nbrowser = \"firefox\"\nwindow = \"profile\"\n")
+                .unwrap();
+        assert_eq!(c.login.browser.as_deref(), Some("firefox"));
+        assert_eq!(c.login.window, Window::Profile);
+        assert_eq!(c.check(&stored), []);
+        let text = "[login]\nbrowser = \"firefox\"\nwindow = \"profile\"\n";
+        assert_eq!(written(text, &c), text);
+
+        let odd: Config = toml_edit::de::from_str("[login]\nbrowser = \"lynx\"\n").unwrap();
+        assert_eq!(odd.check(&stored)[0].at, "login.browser");
+        assert!(toml_edit::de::from_str::<Config>("[login]\nwindow = \"tab\"\n").is_err());
+        assert!(toml_edit::de::from_str::<Config>("[login]\ncolour = 1\n").is_err());
+    }
+
+    #[test]
+    fn setting_where_sign_ins_open_starts_the_file_and_keeps_the_rest() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("remuda/config.toml");
+        let profile = Login {
+            browser: Some("chromium".into()),
+            window: Window::Profile,
+        };
+
+        set_login(&path, profile.clone()).unwrap();
+        assert_eq!(load(&path).unwrap().config.login, profile);
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(
+            &path,
+            format!("{text}\n# mine\n[warm]\nclaude = [\"work\"]\n"),
+        )
+        .unwrap();
+        set_login(&path, Login::default()).unwrap();
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(after.contains("# mine\n[warm]"), "{after}");
+        assert!(!after.contains("[login]"), "{after}");
+        assert_eq!(load(&path).unwrap().config.warm["claude"], ["work"]);
+    }
+
+    #[test]
     fn hours_and_spans_read_the_way_they_are_written() {
         let hours = |s: &str| Hours::try_from(s.to_owned());
         assert_eq!(

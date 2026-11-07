@@ -2954,6 +2954,60 @@ mod tests {
     }
 
     #[test]
+    fn the_page_reads_and_sets_where_sign_ins_open() {
+        let e = env(&OFFLINE);
+        let opened = Arc::new(Mutex::new(Vec::new()));
+        let app = app_opening(&e, &OFFLINE, Box::new(Recording(opened)));
+
+        let (_, now) = call(&app, "GET", "/api/login/settings", Value::Null);
+        assert_eq!(
+            (&now["browser"], &now["window"], &now["opensIn"]),
+            (
+                &Value::Null,
+                &json!("private"),
+                &json!("a private window of a test browser")
+            )
+        );
+        assert!(now["browsers"].is_array());
+
+        let (status, set) = call(
+            &app,
+            "POST",
+            "/api/login/settings",
+            json!({"browser": "firefox", "window": "profile"}),
+        );
+        assert_eq!(status, 200, "{set}");
+        assert_eq!(set["browser"], "firefox");
+        assert_eq!(
+            set["opensIn"],
+            "a test browser, in this login's own profile"
+        );
+        let saved = std::fs::read_to_string(e.tmp.path().join("config.toml")).unwrap();
+        assert!(
+            saved.contains("[login]") && saved.contains("window = \"profile\""),
+            "{saved}"
+        );
+
+        let (status, r) = call(
+            &app,
+            "POST",
+            "/api/login/settings",
+            json!({"browser": "lynx"}),
+        );
+        assert_eq!(status, 400);
+        assert!(r["error"].as_str().unwrap().contains("lynx"));
+        let (status, _) = call(
+            &app,
+            "POST",
+            "/api/login/settings",
+            json!({"window": "tab"}),
+        );
+        assert_eq!(status, 400);
+        let (status, _) = call(&app, "POST", "/api/login/open", json!({"id": "gone"}));
+        assert_eq!(status, 400);
+    }
+
+    #[test]
     fn a_second_sign_in_for_the_same_cli_replaces_the_first() {
         let e = env(&OFFLINE);
         let app = app(&e, &OFFLINE);

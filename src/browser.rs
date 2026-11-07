@@ -469,6 +469,88 @@ mod tests {
     }
 
     #[test]
+    fn each_family_is_asked_for_its_window_its_own_way() {
+        let by = |id: &str| BROWSERS.iter().find(|b| b.id == id).unwrap();
+        let profile = Path::new("/s/.browser/claude/work");
+        let page = Path::new("/run/open-x.html");
+        let args = |id: &str, window| -> Vec<String> {
+            arguments(by(id), window, profile, page)
+                .iter()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect()
+        };
+
+        assert_eq!(
+            args("brave", Window::Private),
+            ["--incognito", "/run/open-x.html"]
+        );
+        assert_eq!(
+            args("edge", Window::Private),
+            ["--inprivate", "/run/open-x.html"]
+        );
+        assert_eq!(
+            args("librewolf", Window::Private),
+            ["--private-window", "/run/open-x.html"]
+        );
+        assert_eq!(
+            args("chromium", Window::Profile),
+            [
+                "--user-data-dir=/s/.browser/claude/work",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "/run/open-x.html"
+            ]
+        );
+        assert_eq!(
+            args("firefox", Window::Profile),
+            [
+                "--new-instance",
+                "--profile",
+                "/s/.browser/claude/work",
+                "/run/open-x.html"
+            ]
+        );
+        assert_eq!(args("vivaldi", Window::Normal), ["/run/open-x.html"]);
+    }
+
+    #[test]
+    fn a_named_browser_is_found_by_its_id_and_said_with_its_window() {
+        let tmp = tempfile::tempdir().unwrap();
+        bin(tmp.path(), "vivaldi", 0o755);
+        let path = tmp.path().as_os_str();
+
+        let (b, program) = installed_as("vivaldi", Some(path)).unwrap();
+        assert_eq!((b.name, program), ("Vivaldi", tmp.path().join("vivaldi")));
+        assert_eq!(installed_as("chromium", Some(path)), None);
+        assert_eq!(installed_as("lynx", Some(path)), None);
+
+        let choice = |window| Choice {
+            browser: installed_as("vivaldi", Some(path)),
+            window,
+        };
+        assert_eq!(
+            choice(Window::Private).describe(),
+            "a private window of Vivaldi"
+        );
+        assert_eq!(
+            choice(Window::Profile).describe(),
+            "Vivaldi, in this login's own profile"
+        );
+        assert_eq!(choice(Window::Normal).describe(), "Vivaldi");
+        let desktop = Choice {
+            browser: None,
+            window: Window::Profile,
+        };
+        assert_eq!(desktop.describe(), "the default browser");
+        assert_eq!(
+            profile_dir(Path::new("/s"), "codex", "work"),
+            Path::new("/s/.browser/codex/work")
+        );
+        assert_eq!("profile".parse::<Window>(), Ok(Window::Profile));
+        assert!("incognito".parse::<Window>().is_err());
+    }
+
+    #[test]
     fn each_open_gets_its_own_redirect_file_and_old_ones_go() {
         let tmp = tempfile::tempdir().unwrap();
         let now = SystemTime::now();
