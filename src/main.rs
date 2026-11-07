@@ -117,6 +117,10 @@ enum Cmd {
         /// overriding `[login] window`.
         #[arg(long)]
         window: Option<browser::Window>,
+        /// End with a code to paste rather than a callback, where the CLI
+        /// offers one (Claude Code), so the browser can be on another machine.
+        #[arg(long)]
+        paste: bool,
     },
     /// Make a stored credential the one its CLI uses. NAME or PROVIDER/NAME.
     Use {
@@ -765,6 +769,7 @@ fn main() -> Result<()> {
         no_browser,
         browser: named,
         window,
+        paste,
     } = &command
     {
         let p = commands::find(&providers, provider)?;
@@ -789,6 +794,7 @@ fn main() -> Result<()> {
             open: &open,
             opens_in: (!no_browser).then(|| choice.describe()),
             lines,
+            paste: *paste || set.paste,
         };
         return commands::login(&store, p, name, *force, prompt, out);
     }

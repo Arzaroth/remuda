@@ -231,7 +231,7 @@ impl Provider for Kimi {
         Ok(self.me(access).ok().map(|id| id.account_id))
     }
 
-    fn begin_login(&self) -> Result<Box<dyn PendingLogin>> {
+    fn begin_login(&self, _paste: bool) -> Result<Box<dyn PendingLogin>> {
         let api = self.api.clone();
         let headers = self.headers();
         let me = Kimi {
@@ -520,7 +520,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let k = Kimi::at(tmp.path(), Api::local(&server.url()));
 
-        let pending = k.begin_login().unwrap();
+        let pending = k.begin_login(false).unwrap();
         assert!(pending.url().ends_with("user_code=K1"));
         let login = pending.finish(None).unwrap();
 

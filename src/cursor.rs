@@ -206,7 +206,7 @@ impl Provider for Cursor {
         Ok(user_of(&access))
     }
 
-    fn begin_login(&self) -> Result<Box<dyn PendingLogin>> {
+    fn begin_login(&self, _paste: bool) -> Result<Box<dyn PendingLogin>> {
         let verifier = pkce::random()?;
         let uuid = pkce::uuid()?;
         let url = reqwest::Url::parse_with_params(
@@ -431,7 +431,7 @@ mod tests {
         let mut server = mockito::Server::new();
         let tmp = tempfile::tempdir().unwrap();
         let c = Cursor::at(tmp.path(), Api::local(&server.url()));
-        let pending = c.begin_login().unwrap();
+        let pending = c.begin_login(false).unwrap();
         let url = reqwest::Url::parse(pending.url()).unwrap();
         assert_eq!(url.path(), "/loginDeepControl");
         let param = |k: &str| {

@@ -80,6 +80,10 @@ pub trait PendingLogin: Send {
     fn canceller(&self) -> Box<dyn Fn() + Send + Sync> {
         Box::new(|| {})
     }
+    /// The browser must be on this machine: it calls back to a local port.
+    fn local_only(&self) -> bool {
+        false
+    }
 }
 
 /// One coding CLI whose login remuda keeps copies of. `creds` is always the
@@ -172,7 +176,9 @@ pub trait Provider: Send + Sync {
     fn redeem_reset(&self, _entry: &Entry) -> Result<String> {
         bail!("{} has no banked resets", self.name())
     }
-    fn begin_login(&self) -> Result<Box<dyn PendingLogin>>;
+    /// `paste` asks for a sign-in that ends with a code to paste rather than a
+    /// callback, where the CLI offers one, so the browser can be anywhere.
+    fn begin_login(&self, paste: bool) -> Result<Box<dyn PendingLogin>>;
     /// The formats the CLI's inference endpoint takes for `model`, best
     /// first. Empty when the proxy cannot spend this login.
     fn formats(&self, _model: &str) -> Vec<Format> {

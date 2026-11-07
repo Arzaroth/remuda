@@ -280,7 +280,7 @@ impl Provider for Grok {
         lock_file(&self.auth_path.with_file_name("auth.json.lock")).map(Some)
     }
 
-    fn begin_login(&self) -> Result<Box<dyn PendingLogin>> {
+    fn begin_login(&self, _paste: bool) -> Result<Box<dyn PendingLogin>> {
         DeviceFlow {
             client: self.api.client.clone(),
             device_url: self.api.device_url(),
@@ -513,7 +513,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let g = grok(tmp.path(), &server.url());
 
-        let pending = g.begin_login().unwrap();
+        let pending = g.begin_login(false).unwrap();
         assert_eq!(pending.url(), "https://accounts.x.ai/device?code=X");
         let login = pending.finish(None).unwrap();
 

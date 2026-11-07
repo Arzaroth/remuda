@@ -6,12 +6,21 @@ import { closeSheet } from '../sheet';
 import { overwrite, taken } from '../windows';
 import { ProviderIcon } from './ProviderIcon';
 
-type Login = { id: string; url: string; needsCode: boolean; asksFor: string; opensIn: string | null; name: string };
+type Login = {
+  id: string;
+  url: string;
+  needsCode: boolean;
+  asksFor: string;
+  localOnly: boolean;
+  opensIn: string | null;
+  name: string;
+};
 type Window = 'private' | 'profile' | 'normal';
 type Settings = {
   browsers: { id: string; name: string }[];
   browser: string | null;
   window: Window;
+  paste: boolean;
   opensIn: string | null;
 };
 const windows: [Window, string][] = [
@@ -33,13 +42,14 @@ export function AddAccount(props: { provider?: string; again?: string }) {
   onMount(() => {
     api<Settings>('/api/login/settings').then(setSettings, () => {});
   });
-  const choose = async (change: Partial<Pick<Settings, 'browser' | 'window'>>) => {
+  const choose = async (change: Partial<Pick<Settings, 'browser' | 'window' | 'paste'>>) => {
     const now = settings();
     if (!now) return;
     try {
       const next = await api<Settings>('/api/login/settings', {
         browser: change.browser !== undefined ? change.browser : now.browser,
         window: change.window ?? now.window,
+        paste: change.paste ?? now.paste,
       });
       setSettings(next);
       const l = login();
@@ -101,7 +111,7 @@ export function AddAccount(props: { provider?: string; again?: string }) {
     let begun: Login;
     try {
       if (openLogin) await api('/api/login/cancel', { id: openLogin }).catch(() => {});
-      begun = { ...(await api('/api/login', { provider: p, name: n, force })), name: n };
+      begun = { ...(await api('/api/login', { provider: p, name: n, force, paste: settings()?.paste })), name: n };
     } catch (e) {
       return toast((e as Error).message, true);
     } finally {
@@ -204,12 +214,23 @@ export function AddAccount(props: { provider?: string; again?: string }) {
           </select>
         </div>
       </Show>
+      <Show when={settings() && provider() === 'claude'}>
+        <label class="opens-in">
+          <input
+            type="checkbox"
+            checked={settings()!.paste}
+            onChange={(e) => choose({ paste: e.currentTarget.checked })}
+          />
+          <span class="aside">Paste the code instead, to sign in from a browser on another machine</span>
+        </label>
+      </Show>
       <Show when={login()}>
         {(l) => {
           return (
             <div class="signin">
               <div>
-                Sign in with the account to store as <b>{l().name}</b>, in any browser:
+                Sign in with the account to store as <b>{l().name}</b>,{' '}
+                {l().localOnly ? 'in a browser on this machine, since it calls back here' : 'in any browser'}:
               </div>
               <a class="signin-link" href={l().url} target="_blank" rel="noopener">
                 {l().url}

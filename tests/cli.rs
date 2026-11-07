@@ -430,7 +430,7 @@ fn only_import_and_login_start_a_missing_store() {
     assert!(store.join(".dirs.json").exists());
     std::fs::remove_dir_all(home.path(".local/share/remuda")).unwrap();
 
-    let mut login = home.command(&["login", "perso", "--no-browser"]);
+    let mut login = home.command(&["login", "perso", "--no-browser", "--paste"]);
     login.stdin(std::process::Stdio::null());
     let _ = login.output().unwrap();
     let mode = std::fs::metadata(&store).unwrap().permissions().mode();

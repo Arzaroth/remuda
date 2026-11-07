@@ -285,7 +285,7 @@ impl Provider for Codex {
         Ok(seat_of(&access, fresh("id_token").as_deref()))
     }
 
-    fn begin_login(&self) -> Result<Box<dyn PendingLogin>> {
+    fn begin_login(&self, _paste: bool) -> Result<Box<dyn PendingLogin>> {
         let state = pkce::random()?;
         let callback = Callback::bind(
             self.callback_port,
@@ -424,6 +424,10 @@ impl PendingLogin for CodexPending {
 
     fn canceller(&self) -> Box<dyn Fn() + Send + Sync> {
         self.callback.canceller()
+    }
+
+    fn local_only(&self) -> bool {
+        true
     }
 
     fn finish(self: Box<Self>, _code: Option<&str>) -> Result<Login> {
@@ -769,7 +773,7 @@ mod tests {
         let mut server = mockito::Server::new();
         let tmp = tempfile::tempdir().unwrap();
         let c = codex(tmp.path(), &server.url());
-        let pending = c.begin_login().unwrap();
+        let pending = c.begin_login(false).unwrap();
         assert!(!pending.needs_code());
         let url = pending.url().to_owned();
         assert!(url.starts_with(&format!("{}/oauth/authorize?", server.url())));
@@ -831,7 +835,7 @@ mod tests {
     fn stray_connections_do_not_end_the_wait_and_a_refusal_does() {
         let tmp = tempfile::tempdir().unwrap();
         let c = codex(tmp.path(), &OFFLINE);
-        let pending = c.begin_login().unwrap();
+        let pending = c.begin_login(false).unwrap();
         let redirect = param(pending.url(), "redirect_uri").replace("localhost", "127.0.0.1");
         let state = param(pending.url(), "state");
         let browser = std::thread::spawn(move || {
@@ -889,6 +893,7 @@ mod tests {
                 open: &open,
                 opens_in: Some("a test browser".into()),
                 lines,
+                paste: false,
             },
             &mut out,
         )
@@ -933,7 +938,7 @@ mod tests {
         }
         let tmp = tempfile::tempdir().unwrap();
         let c = codex(tmp.path(), &OFFLINE);
-        let pending = c.begin_login().unwrap();
+        let pending = c.begin_login(false).unwrap();
         let port = reqwest::Url::parse(&param(pending.url(), "redirect_uri"))
             .unwrap()
             .port()
@@ -948,7 +953,7 @@ mod tests {
         let port = held.local_addr().unwrap().port();
         let tmp = tempfile::tempdir().unwrap();
         let c = Codex::at(tmp.path(), Api::local(&OFFLINE), port);
-        let err = c.begin_login().err().unwrap();
+        let err = c.begin_login(false).err().unwrap();
         assert!(err.to_string().contains("codex login"), "{err}");
     }
 }

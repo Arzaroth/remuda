@@ -402,6 +402,8 @@ pub struct Prompt<'a> {
     pub opens_in: Option<String>,
     /// The lines typed, in order, until the input ends.
     pub lines: std::sync::mpsc::Receiver<String>,
+    /// A sign-in that ends with a code to paste, where the CLI offers one.
+    pub paste: bool,
 }
 
 /// Prints the link first, so it can be opened anywhere; Enter opens it here.
@@ -413,12 +415,17 @@ pub fn login(
     prompt: Prompt,
     out: &mut dyn Write,
 ) -> Result<()> {
-    let pending = begin_login(store, p, name, force)?;
+    let pending = begin_login(store, p, name, force, prompt.paste)?;
     let url = pending.url().to_owned();
     let profile = crate::browser::profile_dir(store.root(), p.id(), name);
+    let browser = if pending.local_only() {
+        "a browser on this machine"
+    } else {
+        "any browser"
+    };
     writeln!(
         out,
-        "Sign in to {} with the account to store as {name}:\n\n{url}\n",
+        "Sign in to {} with the account to store as {name}, in {browser}:\n\n{url}\n",
         p.name()
     )?;
     let offer = match &prompt.opens_in {
@@ -483,6 +490,7 @@ pub fn begin_login(
     p: &dyn Provider,
     name: &str,
     force: bool,
+    paste: bool,
 ) -> Result<Box<dyn crate::provider::PendingLogin>> {
     validate_name(name)?;
     if !force && store.get(p.id(), name)?.is_some() {
@@ -492,7 +500,7 @@ pub fn begin_login(
         );
     }
     refuse_in_use(store, p, name)?;
-    p.begin_login()
+    p.begin_login(paste)
 }
 
 /// Prints the shell line that puts a stored key in the environment.
@@ -1536,6 +1544,7 @@ mod tests {
                 open: &open,
                 opens_in: Some("a test browser".into()),
                 lines,
+                paste: true,
             },
             &mut out,
         )
@@ -1604,6 +1613,7 @@ mod tests {
                 open: &|_, _| false,
                 opens_in: None,
                 lines,
+                paste: true,
             },
             &mut Vec::new(),
         )
@@ -1628,6 +1638,7 @@ mod tests {
                 open: &open,
                 opens_in: Some("a test browser".into()),
                 lines,
+                paste: true,
             },
             &mut Vec::new(),
         )
@@ -1646,6 +1657,7 @@ mod tests {
                 open: &|_, _| unreachable!(),
                 opens_in: None,
                 lines: std::sync::mpsc::channel().1,
+                paste: true,
             },
             &mut Vec::new(),
         )
@@ -1677,6 +1689,7 @@ mod tests {
                     open: &open,
                     opens_in: Some("a test browser".into()),
                     lines,
+                    paste: true,
                 },
                 &mut Vec::new(),
             )
@@ -1936,6 +1949,7 @@ mod tests {
                 open: &|_, _| unreachable!(),
                 opens_in: None,
                 lines,
+                paste: true,
             },
             &mut out,
         )
@@ -1943,7 +1957,9 @@ mod tests {
 
         let out = text(out);
         assert!(
-            out.contains("store as new:\n\nhttps://claude.com/cai/oauth/authorize?"),
+            out.contains(
+                "store as new, in any browser:\n\nhttps://claude.com/cai/oauth/authorize?"
+            ),
             "{out}"
         );
         assert!(!out.contains("press Enter"), "{out}");

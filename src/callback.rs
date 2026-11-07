@@ -136,6 +136,13 @@ pub fn respond(mut stream: &TcpStream, status: &str, body: &str) {
     );
 }
 
+pub fn redirect(mut stream: &TcpStream, location: &str) {
+    let _ = write!(
+        stream,
+        "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    );
+}
+
 pub fn page(message: &str) -> String {
     let message = message
         .replace('&', "&amp;")

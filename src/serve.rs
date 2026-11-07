@@ -839,6 +839,7 @@ impl App {
             "browsers": browsers,
             "browser": login.browser,
             "window": login.window,
+            "paste": login.paste,
             "opensIn": self.open.opens_in(&login),
         }))
     }
@@ -1091,6 +1092,7 @@ impl App {
                 let login = config::Login {
                     browser: text("browser").filter(|b| !b.is_empty()).map(str::to_owned),
                     window,
+                    paste: flag("paste"),
                 };
                 if let Some(id) = &login.browser
                     && !browser::BROWSERS.iter().any(|b| b.id == id)
@@ -1115,11 +1117,16 @@ impl App {
                     }
                     keep
                 });
-                let login = commands::begin_login(store, p, name, force)?;
+                let paste = match body.get("paste").and_then(Value::as_bool) {
+                    Some(paste) => paste,
+                    None => self.login_settings().paste,
+                };
+                let login = commands::begin_login(store, p, name, force, paste)?;
                 let id = pkce::random()?;
                 let url = login.url().to_owned();
                 let needs_code = login.needs_code();
                 let asks_for = login.asks_for();
+                let local_only = login.local_only();
                 pending.insert(
                     id.clone(),
                     Pending {
@@ -1134,7 +1141,7 @@ impl App {
                 drop(pending);
                 let opens_in = self.open.opens_in(&self.login_settings());
                 Ok(
-                    json!({"id": id, "url": url, "needsCode": needs_code, "asksFor": asks_for, "opensIn": opens_in}),
+                    json!({"id": id, "url": url, "needsCode": needs_code, "asksFor": asks_for, "localOnly": local_only, "opensIn": opens_in}),
                 )
             }
             ("POST", "/api/login/open") => {
@@ -2919,7 +2926,12 @@ mod tests {
         let opened = Arc::new(Mutex::new(Vec::new()));
         let app = app_opening(&e, &server.url(), Box::new(Recording(opened.clone())));
 
-        let (status, begun) = call(&app, "POST", "/api/login", json!({"name": "new"}));
+        let (status, begun) = call(
+            &app,
+            "POST",
+            "/api/login",
+            json!({"name": "new", "paste": true}),
+        );
         assert_eq!(status, 200);
         assert_eq!(begun["needsCode"], true);
         assert_eq!(begun["opensIn"], "a private window of a test browser");
