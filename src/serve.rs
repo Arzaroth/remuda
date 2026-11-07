@@ -1326,6 +1326,33 @@ mod tests {
         assert_eq!(proxy()["firewall"], Value::Null);
     }
 
+    #[test]
+    fn a_lan_proxy_without_a_lan_address_says_so() {
+        let e = env(&OFFLINE);
+        let app = Arc::new(app(&e, &OFFLINE));
+        app.start();
+        let (status, r) = call(
+            &app,
+            "POST",
+            "/api/proxy/settings",
+            json!({"enabled": true, "port": free_port(), "lan": true}),
+        );
+        assert_eq!(status, 200, "{r}");
+        assert!(
+            r["message"]
+                .as_str()
+                .unwrap()
+                .contains("LAN address was not found"),
+            "{r}"
+        );
+        let state = call(&app, "GET", "/api/state", Value::Null).1["proxy"].clone();
+        assert_eq!(state["host"], Value::Null);
+        assert_eq!(
+            state["baseUrls"]["claude"],
+            format!("http://127.0.0.1:{}", state["running"])
+        );
+    }
+
     fn free_port() -> u16 {
         let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
         l.local_addr().unwrap().port()
