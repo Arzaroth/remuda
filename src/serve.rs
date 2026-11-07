@@ -50,6 +50,8 @@ pub struct Places {
     pub runtime: PathBuf,
     /// Where the CLIs are looked for, as `$PATH`.
     pub search: Option<std::ffi::OsString>,
+    /// Where the firewall's settings are read from.
+    pub etc: PathBuf,
 }
 
 impl Places {
@@ -62,6 +64,7 @@ impl Places {
             github: crate::versions::GITHUB.to_owned(),
             runtime: paths::runtime_dir(),
             search: std::env::var_os("PATH"),
+            etc: PathBuf::from("/etc"),
         }
     }
 }
@@ -72,6 +75,11 @@ const SPEND_FRESH: Duration = Duration::from_secs(60);
 
 /// GitHub allows 60 unsigned requests an hour, and a check spends two.
 const VERSIONS_FRESH: Duration = Duration::from_secs(15 * 60);
+
+/// firewall-cmd is a Python program, too slow to run on every state.
+const FIREWALL_FRESH: Duration = Duration::from_secs(10);
+
+type FirewallSeen = (Instant, u16, Option<proxy::firewall::Verdict>);
 
 pub struct App {
     store: Store,
@@ -90,6 +98,7 @@ pub struct App {
     refused: Mutex<BTreeMap<String, String>>,
     spent: Mutex<BTreeMap<u32, (Instant, Value)>>,
     versions: Mutex<Option<(Instant, Value)>>,
+    firewall: Mutex<Option<FirewallSeen>>,
     me: OnceLock<Weak<App>>,
 }
 
@@ -187,6 +196,7 @@ impl App {
             refused: Mutex::new(BTreeMap::new()),
             spent: Mutex::new(BTreeMap::new()),
             versions: Mutex::new(None),
+            firewall: Mutex::new(None),
             me: OnceLock::new(),
         }
     }
@@ -450,6 +460,25 @@ impl App {
         proxy::settings::File::at(self.store.root().join(".proxy.json"))
     }
 
+    /// The firewall in front of the proxy's port, while other machines are
+    /// meant to reach it.
+    fn firewall(&self, s: &proxy::settings::Settings) -> Option<proxy::firewall::Verdict> {
+        if !(s.enabled && s.lan) {
+            return None;
+        }
+        let port = self.proxy.status().0.map_or(s.port, |a| a.port());
+        let mut seen = self.firewall.lock().ok()?;
+        if let Some((at, p, verdict)) = seen.as_ref()
+            && *p == port
+            && at.elapsed() < FIREWALL_FRESH
+        {
+            return verdict.clone();
+        }
+        let verdict = proxy::firewall::check(&self.places.etc, self.places.search.as_deref(), port);
+        *seen = Some((Instant::now(), port, verdict.clone()));
+        verdict
+    }
+
     /// A settings file that cannot be read shows as the proxy's error, not as
     /// a page that cannot load.
     fn proxy_state(&self) -> Value {
@@ -487,6 +516,7 @@ impl App {
             "port": s.port,
             "lan": s.lan,
             "host": host,
+            "firewall": self.firewall(&s),
             "running": running.map(|a| a.port()),
             "error": error,
             "routes": providers,
@@ -826,7 +856,7 @@ impl App {
                             .context("port must be a number from 1 to 65535")?,
                     ),
                 };
-                self.proxy_file().edit(|s| {
+                let saved = self.proxy_file().edit(|s| {
                     if let Some(enabled) = enabled {
                         s.enabled = enabled;
                     }
@@ -841,10 +871,25 @@ impl App {
                 self.apply_proxy();
                 let (running, error) = self.proxy.status();
                 let message = match (running, error) {
-                    (Some(addr), _) if addr.ip().is_unspecified() => format!(
-                        "the proxy listens on port {}, reachable from other machines",
-                        addr.port()
-                    ),
+                    (Some(addr), _) if addr.ip().is_unspecified() => {
+                        let reach = format!(
+                            "the proxy listens on port {}, reachable from other machines",
+                            addr.port()
+                        );
+                        match self.firewall(&saved) {
+                            Some(f) if f.open != Some(true) => format!(
+                                "{reach}, {} {} blocks it: {}",
+                                if f.open == Some(false) {
+                                    "but"
+                                } else {
+                                    "unless"
+                                },
+                                f.name,
+                                f.commands.join(" && ")
+                            ),
+                            _ => reach,
+                        }
+                    }
                     (Some(addr), _) => format!("the proxy listens on {addr}"),
                     (None, Some(e)) => bail!("saved, but the proxy is not running: {e}"),
                     (None, None) => "the proxy is off".to_owned(),
@@ -1079,6 +1124,7 @@ mod tests {
             github: "http://127.0.0.1:1".into(),
             runtime: e.tmp.path().join("run"),
             search: None,
+            etc: e.tmp.path().join("etc"),
         }
     }
 

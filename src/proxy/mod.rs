@@ -1,3 +1,4 @@
+pub mod firewall;
 mod forward;
 mod journal;
 mod listen;

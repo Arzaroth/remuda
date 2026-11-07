@@ -348,6 +348,7 @@ mod tests {
                 github: "http://127.0.0.1:1".into(),
                 runtime: e.tmp.path().join("run"),
                 search: None,
+                etc: e.tmp.path().join("etc"),
             },
             providers,
             TOKEN.into(),
