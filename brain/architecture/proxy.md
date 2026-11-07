@@ -50,22 +50,28 @@ Errors are written in the client's shape: Anthropic's
 
 With `lan` set, the base URLs the page shows use `proxy::lan_address`, the
 source address of the default route, found by connecting a UDP socket, which
-sends nothing; with no route, `127.0.0.1`. `firewall::check` then says
-whether something on this machine keeps other machines out, reading only what
-needs no root:
+sends nothing. With no route `host` is null, the URLs say `127.0.0.1`, and
+the card and the settings answer say the LAN address was not found.
+`firewall::check` then says whether something on this machine keeps other
+machines out, reading only what needs no root:
 
 | Firewall | On when | Port open when | Opened by |
 | --- | --- | --- | --- |
-| ufw | `ENABLED=yes` in `/etc/ufw/ufw.conf` | the first `ufw-user-input` rule in `/etc/ufw/user.rules` for TCP on the port accepts it, else `DEFAULT_INPUT_POLICY` in `/etc/default/ufw` is `ACCEPT` | `sudo ufw allow <port>/tcp` |
-| firewalld | `firewall-cmd --state` succeeds | `firewall-cmd --query-port=<port>/tcp` says `yes` | `sudo firewall-cmd --permanent --add-port=<port>/tcp`, then `--reload` |
+| ufw | `ENABLED=yes` in `/etc/ufw/ufw.conf` | the first `ufw-user-input` rule in `/etc/ufw/user.rules` for TCP on the port, from any source, accepts it, else `DEFAULT_INPUT_POLICY` in `/etc/default/ufw` is `ACCEPT` | `sudo ufw allow <port>/tcp`, or `sudo ufw insert 1 allow <port>/tcp` when a deny rule matched, since an appended allow would come after it |
+| firewalld | `firewall-cmd --state` succeeds | `firewall-cmd --zone=<zone> --query-port=<port>/tcp` says `yes`, the zone being that of the default route's interface (`proxy::default_interface`, from `/proc/net/route`), or the default zone when it has none | `sudo firewall-cmd --permanent --zone=<zone> --add-port=<port>/tcp`, then `--reload` |
 
-ufw is looked at first. `open` is null when ufw's rules cannot be read and its
-policy drops, or when firewall-cmd's answer is neither yes nor no. A port
-another rule opens (a firewalld service, a source-restricted ufw allow) counts
-as whatever the first matching rule says; nftables or iptables set by hand are
-not read. `App` keeps a verdict 10 s, since firewall-cmd is a Python program,
-and asks only while the proxy is on with `lan`. The places are
-`Places::etc` and `Places::search`, a temporary directory and none in tests.
+ufw is looked at first. `open` is null when ufw's rules cannot be read, when
+only source-limited rules let the port in, or when firewall-cmd's answer is
+neither yes nor no. A port opened by a firewalld service counts as closed;
+nftables or iptables set by hand are not read.
+
+`/api/state` runs under the store's lock, so it never asks: `App::firewall`
+answers the last verdict for the port and, once that is 10 s old, starts
+`App::ask_firewall` on its own thread (one at a time). A verdict that changes
+moves an entry of `App::fingerprint`, so `/api/events` tells the page to load
+again. It asks only while the proxy is on with `lan`. The places are
+`Places::etc`, `Places::search`, `Places::route` and `Places::lan_address`:
+a temporary directory, none, a missing file and no address in tests.
 
 ## Forwarding (`forward.rs`, `route.rs`)
 

@@ -164,9 +164,10 @@ nothing. TokenGauge still does the fetching ([decisions](../decisions.md)).
 `remuda use --discard` replaces it) or `unreadable` (with the error).
 
 `proxy` is the proxy's settings and state ([proxy.md](proxy.md)): `enabled`,
-`port`, `lan`, `host` (the address in the base URLs: the LAN address with
-`lan`, else `127.0.0.1`), `firewall` (null, or `name`, `open` true, false or
-null, and the `commands` that open the port; only while it is on with `lan`),
+`port`, `lan`, `host` (the LAN address with `lan`, null when none was found,
+else `127.0.0.1`; the base URLs fall back to `127.0.0.1`), `firewall` (null, or `name`, `open` true, false or
+null, and the `commands` that open the port; only while it is on with `lan`,
+and only once the background ask has answered),
 `running` (the bound port, or null), `error` (why it could not bind,
 or why `.proxy.json` could not be read),
 `baseUrls` (`openai`, `claude`), `keys` (`id`, `name`, `key`, `created`) and

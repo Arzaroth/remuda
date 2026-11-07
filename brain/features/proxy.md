@@ -81,8 +81,10 @@ listen on every interface instead of `127.0.0.1`, and its base URLs and
 keys included, so it is meant for a network the user trusts or a tailnet.
 While it is on, the card looks for ufw or firewalld and, when one blocks the
 port or its rules cannot be read without root, shows the commands that open
-it, with a copy button; the settings answer says the same. A machine with
-neither, or with rules set straight in nftables, gets no notice.
+it, with a copy button, a moment after the switch, since asking firewalld
+takes a while. A machine with neither, or with rules set straight in
+nftables, gets no notice. When no LAN address can be found (no default
+route), the card says so instead of offering `127.0.0.1` to other machines.
 
 ## The request log
 
