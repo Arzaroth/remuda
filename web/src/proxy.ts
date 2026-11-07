@@ -22,8 +22,18 @@ export const exports = (p: Proxy, protocol: Protocol, key: string) => {
 export const masked = (key: string) => '•'.repeat(Math.min(Math.max(key.length, 8), 24));
 
 export function status(p: Proxy): { text: string; tone: 'good' | 'bad' | 'muted' } {
+  if (p.running !== null && p.lan)
+    return { text: `Listening on ${p.host}:${p.running}, reachable from other machines`, tone: 'good' };
   if (p.running !== null) return { text: `Listening on 127.0.0.1:${p.running}`, tone: 'good' };
   if (p.enabled && p.error) return { text: p.error, tone: 'bad' };
   if (p.enabled) return { text: 'Starting', tone: 'muted' };
   return { text: 'Off', tone: 'muted' };
+}
+
+export function blocked(p: Proxy): string | null {
+  const f = p.firewall;
+  if (!p.lan || p.running === null || !f || f.open) return null;
+  return f.open === false
+    ? `${f.name} blocks port ${p.running}: other machines cannot reach the proxy until it is opened.`
+    : `${f.name} is on and its rules cannot be read without root; if port ${p.running} is not open yet, open it.`;
 }

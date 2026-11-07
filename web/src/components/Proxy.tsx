@@ -4,7 +4,7 @@ import { createConfirm } from '../confirm';
 import { api } from '../api';
 import { load, store, toast } from '../state';
 import { remember, remembered } from '../storage';
-import { baseUrl, exports, masked, PROTOCOLS, status, type Protocol } from '../proxy';
+import { baseUrl, blocked, exports, masked, PROTOCOLS, status, type Protocol } from '../proxy';
 import { Icon } from './Icon';
 
 async function send(path: string, body: unknown): Promise<boolean> {
@@ -82,6 +82,42 @@ export function Proxy() {
         </button>
       </div>
       <div class={`proxy-status ${status(p()).tone}`}>{status(p()).text}</div>
+
+      <div class="proxy-lan">
+        <div>
+          <div class="lan-title">Reachable from other machines</div>
+          <p class="muted">
+            Listens on every interface instead of 127.0.0.1 alone. Requests and keys cross the network unencrypted, so
+            keep it to a network you trust.
+          </p>
+        </div>
+        <button
+          class="switch"
+          role="switch"
+          aria-checked={p().lan}
+          onClick={() => send('/api/proxy/settings', { lan: !p().lan })}
+        >
+          <i />
+          {p().lan ? 'On' : 'Off'}
+        </button>
+      </div>
+      <Show when={blocked(p())}>
+        {(text) => (
+          <div class="firewall">
+            <div class="proxy-status bad">{text()}</div>
+            <div class="field env">
+              <pre>{p().firewall!.commands.join('\n')}</pre>
+              <button
+                class="btn icon"
+                title="Copy the commands"
+                onClick={() => copy(p().firewall!.commands.join('\n'), 'Commands')}
+              >
+                <Icon name="copy" />
+              </button>
+            </div>
+          </div>
+        )}
+      </Show>
 
       <div class="field-label">Choose the API protocol used by your client</div>
       <div class="segmented" role="group" aria-label="Protocol">
