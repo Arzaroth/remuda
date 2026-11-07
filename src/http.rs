@@ -350,6 +350,7 @@ mod tests {
                 search: None,
                 etc: e.tmp.path().join("etc"),
                 route: e.tmp.path().join("route"),
+                lan_address: || None,
             },
             providers,
             TOKEN.into(),
