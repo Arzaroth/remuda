@@ -47,7 +47,12 @@ refresh token into "sign this credential in again".
   authorize at `claude.com/cai/oauth/authorize`, token at
   `platform.claude.com/v1/oauth/token` (JSON body), profile at
   `api.anthropic.com/api/oauth/profile`. Sign-in redirects to
-  `platform.claude.com/oauth/code/callback`, which shows a `code#state` to paste.
+  `http://localhost:<port>/callback` on a free port, and the browser is then
+  sent on to `platform.claude.com/oauth/code/success?app=claude-code`; pasting
+  redirects to `platform.claude.com/oauth/code/callback`, which shows a
+  `code#state`. Both keep `code=true` in the authorize URL, and the token
+  request repeats the `redirect_uri` used (the callback and the success page
+  read from Claude Code 2.1.319, where its own sign-in does the same).
 - A banked usage-limit reset is spent by asking
   `api.anthropic.com/api/oauth/usage?cedar_ember=1` which grant it would accept
   (`next_grant_id` while it is usable, else any usable one) and POSTing

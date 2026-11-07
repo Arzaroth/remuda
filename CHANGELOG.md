@@ -15,14 +15,22 @@
 - `remuda signout <cli>`, and Sign out on the page, leave a CLI with no login
   in use, keeping it in the store. remuda can then refresh and sign in again
   every login, even a lone one, without going through the CLI.
-- Signing in shows the link before anything opens, so you can open it in any
-  browser, here or on another machine; Enter in the terminal, or Open on the
-  page, opens it here.
+- Signing in shows the link before anything opens, so you choose where it
+  goes: Enter in the terminal, or Open on the page, opens it here, and Grok,
+  Kimi, Cursor and Claude with `--paste` can be signed in from a browser on
+  another machine.
 - Where a sign-in opens is a setting, `[login]` in config.toml, which the Add
   a login dialog sets too, and `--browser` / `--window` for one run: any
   browser remuda knows rather than only the default one, and a private window
   as before, a normal window, or a profile of the login's own, kept under the
   store, which stays signed in for the next time.
+
+### Changed
+
+- Claude signs in the way Claude Code does: the browser calls back to remuda,
+  with nothing to paste. `--paste`, `paste = true` under `[login]`, or the
+  checkbox on the page brings the code to paste back, for a browser on another
+  machine.
 
 ## [0.38.0] - 2026-11-10
 

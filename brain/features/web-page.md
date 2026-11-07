@@ -151,8 +151,11 @@ open it, or runs with `--no-browser`, Open opens a new tab of the page's own
 browser instead, which also serves a page viewed through a tunnel from another
 machine. Two selects above the box set where sign-ins open, the browser (the
 desktop's default or one installed) and the window (private, the login's own
-profile, normal), saved to `[login]` (`GET`/`POST /api/login/settings`). Then
-Claude shows a box for the pasted code while Codex waits for its callback.
+profile, normal), saved to `[login]` (`GET`/`POST /api/login/settings`); for
+Claude, a checkbox saves `paste`. The box says whether any browser will do or
+only one on this machine (`localOnly`: Codex, and Claude unless pasting). Then
+Claude shows a box for the pasted code when pasting, and otherwise waits for
+its callback, as Codex does.
 Cancel, or closing the dialog, abandons it, and for Codex frees port 1455
 immediately.
 

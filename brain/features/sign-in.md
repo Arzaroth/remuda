@@ -1,10 +1,12 @@
 # Sign-in
 
 `remuda login <name> [-p <cli>] [--force] [--no-browser] [--browser <id>]
-[--window private|profile|normal]` adds an account without touching the CLI's
+[--window private|profile|normal] [--paste]` adds an account without touching the CLI's
 live login. It checks the name first (`commands::begin_login`), then prints the
-provider's authorize URL before opening anything, so it can be opened in any
-browser, on this machine or another. Pressing Enter opens it here, in the
+provider's authorize URL before opening anything, saying whether any browser
+will do or only one on this machine, for a sign-in that calls back to a local
+port (`PendingLogin::local_only`: Codex, and Claude unless pasting). Pressing
+Enter opens it here, in the
 place the prompt names; it is still waited for meanwhile, and a pasted code
 still finishes it. `--no-browser` prints the link and offers nothing.
 `--force` signs a stored login in again under its name, for one whose refresh
@@ -48,10 +50,17 @@ window, and the prompt says "the default browser".
 
 ## Per CLI
 
-- **Claude Code**: after sign-in, the callback page shows `code#state`; paste it.
-  A pasted state that does not match refuses the login. The code is exchanged,
-  the profile fetched, and the credential is built the way Claude Code builds
-  its own (`subscriptionType`, `rateLimitTier`, the `oauthAccount` block).
+- **Claude Code**: the browser calls back to `localhost` on a free port, as
+  Claude Code's own sign-in does, so the command waits (up to 10 minutes) and
+  the browser must be on this machine; the prompt and the page say so. Once
+  stored, the browser lands on Claude's success page. Other requests to the
+  port, and callbacks with another attempt's state, are answered and ignored;
+  a refusal ends it. With `--paste`, `[login] paste = true` or the page's
+  checkbox, the sign-in ends on Claude's page that shows `code#state` instead,
+  to paste, so the browser can be on any machine; a pasted state that does not
+  match refuses the login. Either way the code is exchanged, the profile
+  fetched, and the credential is built the way Claude Code builds its own
+  (`subscriptionType`, `rateLimitTier`, the `oauthAccount` block).
 - **Codex**: the browser calls back to `localhost:1455` by itself, so the
   command just waits (up to 10 minutes). Port 1455 must be free, so not while
   `codex login` runs, and the browser must be on the same machine. Stray
@@ -78,7 +87,8 @@ The page offers the same flow in two calls; see [web-page.md](web-page.md).
 
 - [src/browser.rs](../../src/browser.rs) `choose`, `Choice`, `BROWSERS`, `profile_dir`
 - [src/commands.rs](../../src/commands.rs) `login`, `save_login`
-- [src/claude.rs](../../src/claude.rs) `start_login`, `finish_login`
+- [src/claude.rs](../../src/claude.rs) `begin_login`, `start_login`, `finish_login`, `ClaudePending`
+- [src/callback.rs](../../src/callback.rs) `Callback`
 - [src/codex.rs](../../src/codex.rs) `begin_login`, `CodexPending`
 - [src/device.rs](../../src/device.rs) `DeviceFlow`, `DevicePending`
 - [src/cursor.rs](../../src/cursor.rs) `CursorPending`

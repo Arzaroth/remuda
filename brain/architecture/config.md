@@ -50,6 +50,7 @@ Where a sign-in opens ([features/sign-in.md](../features/sign-in.md#where-it-ope
 [login]
 browser = "firefox"   # a browser remuda knows; none: the desktop's default
 window  = "profile"   # private (default), profile (the login's own), normal
+paste   = true        # Claude: end with a code to paste, not a local callback
 ```
 
 The page sets it from the Add a login dialog (`config::set_login`, which
