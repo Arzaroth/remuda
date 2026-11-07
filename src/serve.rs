@@ -459,7 +459,7 @@ impl App {
         };
         let (running, error) = self.proxy.status();
         let error = unreadable.or(error);
-        let origin = format!("http://127.0.0.1:{}", running.unwrap_or(s.port));
+        let origin = format!("http://127.0.0.1:{}", running.map_or(s.port, |a| a.port()));
         let providers: Vec<Value> = self
             .providers
             .iter()
@@ -480,7 +480,7 @@ impl App {
         json!({
             "enabled": s.enabled,
             "port": s.port,
-            "running": running,
+            "running": running.map(|a| a.port()),
             "error": error,
             "routes": providers,
             "baseUrls": {"openai": format!("{origin}/v1"), "claude": origin},
@@ -830,7 +830,7 @@ impl App {
                 self.apply_proxy();
                 let (running, error) = self.proxy.status();
                 let message = match (running, error) {
-                    (Some(port), _) => format!("the proxy listens on 127.0.0.1:{port}"),
+                    (Some(addr), _) => format!("the proxy listens on {addr}"),
                     (None, Some(e)) => bail!("saved, but the proxy is not running: {e}"),
                     (None, None) => "the proxy is off".to_owned(),
                 };

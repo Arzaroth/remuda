@@ -8,6 +8,7 @@ mod translate;
 
 pub use ping::ping;
 
+use std::net::SocketAddr;
 use std::sync::{Mutex, Weak};
 
 use anyhow::Result;
@@ -66,10 +67,10 @@ impl Control {
         }
     }
 
-    /// The bound port, or why there is none while it is enabled.
-    pub fn status(&self) -> (Option<u16>, Option<String>) {
+    /// The bound address, or why there is none while it is enabled.
+    pub fn status(&self) -> (Option<SocketAddr>, Option<String>) {
         match self.state.lock() {
-            Ok(s) => (s.running.as_ref().map(|r| r.port), s.error.clone()),
+            Ok(s) => (s.running.as_ref().map(|r| r.addr), s.error.clone()),
             Err(_) => (None, Some("the proxy's state is poisoned".to_owned())),
         }
     }
@@ -149,7 +150,7 @@ mod tests {
         let control = Control::default();
         let weak: Weak<dyn Backend> = Arc::downgrade(&backend) as Weak<dyn Backend>;
         control.apply(weak, &backend.settings);
-        let port = control.status().0.expect("the proxy did not start");
+        let port = control.status().0.expect("the proxy did not start").port();
         Running {
             backend,
             control,
