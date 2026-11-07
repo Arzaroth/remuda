@@ -1,24 +1,52 @@
 # Sign-in
 
-`remuda login <name> [-p <cli>] [--force] [--no-browser]` adds an account
-without touching the CLI's live login. It checks the name first
-(`commands::begin_login`), prints the provider's authorize URL and opens it
-through a private redirect file, never as a command-line argument.
+`remuda login <name> [-p <cli>] [--force] [--no-browser] [--browser <id>]
+[--window private|profile|normal]` adds an account without touching the CLI's
+live login. It checks the name first (`commands::begin_login`), then prints the
+provider's authorize URL before opening anything, so it can be opened in any
+browser, on this machine or another. Pressing Enter opens it here, in the
+place the prompt names; it is still waited for meanwhile, and a pasted code
+still finishes it. `--no-browser` prints the link and offers nothing.
 `--force` signs a stored login in again under its name, for one whose refresh
 token was rejected or whose sign-in ran out; when the new tokens are the same
 account's, its label is kept (`commands::save_login`).
 
-It opens in a private window of the default browser (`browser::open_private`),
-because signing in as another account in the browser's normal profile replaces
-the claude.ai or ChatGPT session already there. `xdg-settings get
-default-web-browser` names the browser, and remuda waits two seconds for it at
-most. Brave, Chrome, Chromium and Vivaldi get `--incognito`, Edge
-`--inprivate`, Firefox and LibreWolf `--private-window`. The desktop entry must
-match exactly, so each release channel (beta, dev, nightly, ESR, developer
-edition) runs its own executable and never the stable one. With no display, a
-browser not in the table (Snap and Flatpak ones included), no such executable
-on `PATH` or no answer in time, it falls back to `xdg-open` and says a private
-window avoids the account you are signed into.
+## Where it opens
+
+`[login]` in config.toml says where ([config.md](../architecture/config.md)),
+and `--browser` and `--window` override it for one run (`browser::choose`):
+
+- **browser**: one of the browsers remuda knows (`browser::BROWSERS`, by id:
+  `brave`, `chrome`, `chromium`, `vivaldi`, `edge`, `firefox`, `librewolf` and
+  their beta, dev, nightly, ESR or developer channels), when it is on `PATH`.
+  Otherwise the desktop's default browser, which `xdg-settings get
+  default-web-browser` names (waited for two seconds at most); its desktop
+  entry must match one of the table's exactly, so each release channel runs
+  its own executable and never the stable one. A browser set to one that is
+  not installed falls back to the default the same way, so naming a known
+  browser is also how to sign in when the default one is not in the table.
+- **window**:
+  - `private` (the default): `--incognito` (Chromium family), `--inprivate`
+    (Edge), `--private-window` (Firefox family). Signing in as another
+    account in the browser's normal profile would replace the claude.ai or
+    ChatGPT session already there.
+  - `profile`: the login's own browser profile,
+    `<store>/.browser/<cli>/<name>/` (`browser::profile_dir`), created 0700,
+    passed as `--user-data-dir=` with `--no-first-run
+    --no-default-browser-check` (Chromium family) or `--new-instance
+    --profile` (Firefox family). The profile keeps that account signed in, so
+    signing it in again later can take a click rather than an emailed link.
+    It holds the account's web session, so it stays under the store; `rename`
+    moves it and `rm` deletes it.
+  - `normal`: the browser as it is, in its own profile.
+
+The browser is handed a private redirect file, never the URL, whose state
+would otherwise be on a command line. With no display, a browser not in the
+table (Snap and Flatpak ones included), no such executable on `PATH` or no
+answer in time, it falls back to `xdg-open`, which cannot be asked for a
+window, and the prompt says "the default browser".
+
+## Per CLI
 
 - **Claude Code**: after sign-in, the callback page shows `code#state`; paste it.
   A pasted state that does not match refuses the login. The code is exchanged,
@@ -48,7 +76,7 @@ The page offers the same flow in two calls; see [web-page.md](web-page.md).
 
 ## Sources
 
-- [src/browser.rs](../../src/browser.rs) `open_private`, `launcher`
+- [src/browser.rs](../../src/browser.rs) `choose`, `Choice`, `BROWSERS`, `profile_dir`
 - [src/commands.rs](../../src/commands.rs) `login`, `save_login`
 - [src/claude.rs](../../src/claude.rs) `start_login`, `finish_login`
 - [src/codex.rs](../../src/codex.rs) `begin_login`, `CodexPending`

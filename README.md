@@ -102,7 +102,7 @@ take `-p <cli>`: `claude` (the default), `codex`, `cursor`, `glm`, `grok`,
 | Command | Does |
 | --- | --- |
 | `remuda import <name> [-p <cli>]` | Store the login the CLI is signed into right now |
-| `remuda login <name> [-p <cli>] [--no-browser]` | Sign another account in through the browser and store it, without touching the CLI |
+| `remuda login <name> [-p <cli>] [--browser <id>] [--window private\|profile\|normal]` | Sign another account in through the browser and store it, without touching the CLI. Prints the link first; Enter opens it where `[login]` in config.toml says |
 | `remuda use <name>` | Make a stored credential the one its CLI uses |
 | `remuda signout <cli>` | Sign the CLI out, keeping its login in the store, so remuda can refresh and sign in again every login |
 | `remuda run <name> [-- args]` | Start Claude Code or Codex on a stored login for this session only, without switching; `remuda claude <name>` is the same |
@@ -125,16 +125,17 @@ take `-p <cli>`: `claude` (the default), `codex`, `cursor`, `glm`, `grok`,
 | `remuda --update` | Replace the binary with the latest release |
 | `remuda --check-update` | Report whether a newer release exists |
 
-`login` opens the provider's sign-in page in a private window of your default
-browser (Brave, Chrome, Chromium, Vivaldi, Edge, Firefox or LibreWolf, not
-their Snap or Flatpak packages), so the account you are signed into there stays
-put; with another browser, open it in a private window yourself. Sign in with the account to add. Claude
-then shows a `code#state` string to paste back; Codex calls back to
-`localhost:1455` on its own, so run it on the machine whose browser you use,
-and not while `codex login` is running. Grok and Kimi show a code to approve
-and Cursor a confirmation, and remuda waits for the provider to say it is
-done, from any machine's browser. GLM and opencode Go open their key page and
-ask for the key.
+`login` prints the provider's sign-in link first, so you choose the browser.
+Enter opens it where `[login]` says (`--browser` and `--window` for one run):
+by default a private window of your default browser, so the account you are
+signed into there stays put. remuda knows how to open Brave, Chrome, Chromium,
+Vivaldi, Edge, Firefox and LibreWolf, not their Snap or Flatpak packages. Sign
+in with the account to add. Claude then shows a `code#state` string to paste
+back; Codex calls back to `localhost:1455` on its own, so run it on the machine
+whose browser you use, and not while `codex login` is running. Grok and Kimi
+show a code to approve and Cursor a confirmation, and remuda waits for the
+provider to say it is done, from any machine's browser. GLM and opencode Go
+open their key page and ask for the key.
 
 ## A login per session, and per repository
 

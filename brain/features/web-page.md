@@ -143,14 +143,18 @@ click within 400 ms, so a double-click only arms it.
 "Refresh tokens" refreshes every inactive credential due within the hour.
 
 Add a login opens a dialog that picks a CLI by its logo, preselecting the
-page's, and a name, and starts a sign-in: the
-server opens the provider's page in a private window, as `login` does (see
-[sign-in.md](sign-in.md)). When it cannot, or runs with `--no-browser`, the page
-opens a new tab instead. Either way the box can copy the link for pasting into
-a private window by hand, which also serves a page viewed through a tunnel from
-another machine. Then Claude shows a box for the pasted code
-while Codex waits for its callback. Cancel, or closing the dialog, abandons
-it, and for Codex frees port 1455 immediately.
+page's, and a name, and starts a sign-in. Nothing opens by itself: the dialog
+shows the provider's link, with Copy the link, and Open in, which asks the
+server to open it where `[login]` says, as `login` does on Enter (see
+[sign-in.md](sign-in.md); `POST /api/login/open`). When the server could not
+open it, or runs with `--no-browser`, Open opens a new tab of the page's own
+browser instead, which also serves a page viewed through a tunnel from another
+machine. Two selects above the box set where sign-ins open, the browser (the
+desktop's default or one installed) and the window (private, the login's own
+profile, normal), saved to `[login]` (`GET`/`POST /api/login/settings`). Then
+Claude shows a box for the pasted code while Codex waits for its callback.
+Cancel, or closing the dialog, abandons it, and for Codex frees port 1455
+immediately.
 
 Usage figures come from TokenGauge's snapshot, which remuda reads and never
 writes. A refresh or a switch made from the page asks TokenGauge's daemon to
