@@ -10,6 +10,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use toml_edit::{ArrayOfTables, DocumentMut, InlineTable, Item, Table, Value};
 
+use crate::browser::Window;
 use crate::fsx;
 
 pub const OTHERWISE: &str = "otherwise";
@@ -27,6 +28,26 @@ pub struct Config {
     /// closes.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub warm: BTreeMap<String, Vec<String>>,
+    #[serde(default, skip_serializing_if = "Login::is_default")]
+    pub login: Login,
+}
+
+/// Where a sign-in opens.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Login {
+    /// A browser remuda knows (`browser::BROWSERS`); none is the desktop's
+    /// default one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser: Option<String>,
+    #[serde(default, skip_serializing_if = "Window::is_private")]
+    pub window: Window,
+}
+
+impl Login {
+    fn is_default(&self) -> bool {
+        *self == Login::default()
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -332,6 +353,15 @@ impl Config {
         }
         let is_schedule = |s: &str| s != OTHERWISE && self.schedules.contains_key(s);
 
+        if let Some(browser) = &self.login.browser
+            && !crate::browser::BROWSERS.iter().any(|b| b.id == browser)
+        {
+            flag(
+                "login.browser",
+                format!("remuda does not know a browser called {browser:?}"),
+            );
+        }
+
         for (provider, auto) in &self.auto {
             let at = format!("auto.{provider}");
             let Some(stored) = logins(provider) else {
@@ -547,6 +577,21 @@ impl Config {
             }
             doc["warm"] = Item::Table(all);
         }
+        if !self.login.is_default() {
+            let mut t = Table::new();
+            if let Some(browser) = &self.login.browser {
+                t["browser"] = toml_edit::value(browser.as_str());
+            }
+            if !self.login.window.is_private() {
+                let window = match self.login.window {
+                    Window::Private => "private",
+                    Window::Profile => "profile",
+                    Window::Normal => "normal",
+                };
+                t["window"] = toml_edit::value(window);
+            }
+            doc["login"] = Item::Table(t);
+        }
         doc
     }
 }
@@ -645,6 +690,18 @@ fn update(path: &Path, edit: impl FnOnce(&mut Config)) -> Result<()> {
     let before = config.clone();
     edit(&mut config);
     if config != before {
+        write(path, &text, &config)?;
+    }
+    Ok(())
+}
+
+/// Sets where sign-ins open, starting the file when there is none.
+pub fn set_login(path: &Path, login: Login) -> Result<()> {
+    let _lock = lock(path)?;
+    let text = read(path)?.unwrap_or_default();
+    let mut config = parse(path, &text)?;
+    if config.login != login {
+        config.login = login;
         write(path, &text, &config)?;
     }
     Ok(())

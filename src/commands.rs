@@ -395,11 +395,16 @@ pub fn import(
 }
 
 pub struct Prompt<'a> {
-    /// Opens the sign-in page; true when it went to a private window.
-    pub open: &'a dyn Fn(&str) -> bool,
-    pub read_code: &'a mut dyn FnMut() -> Result<String>,
+    /// Opens the sign-in page, in the login's own browser profile when it is
+    /// asked for one; false when nothing could.
+    pub open: &'a dyn Fn(&str, &Path) -> bool,
+    /// Where `open` opens it; none when opening is not offered.
+    pub opens_in: Option<String>,
+    /// The lines typed, in order, until the input ends.
+    pub lines: std::sync::mpsc::Receiver<String>,
 }
 
+/// Prints the link first, so it can be opened anywhere; Enter opens it here.
 pub fn login(
     store: &Store,
     p: &dyn Provider,
@@ -409,32 +414,64 @@ pub fn login(
     out: &mut dyn Write,
 ) -> Result<()> {
     let pending = begin_login(store, p, name, force)?;
-    let (lead, tail) = if (prompt.open)(pending.url()) {
-        (
-            "Opened a private window to sign in to",
-            "If it did not appear, open this link in one:",
-        )
-    } else {
-        (
-            "Sign in to",
-            "A private window avoids the account you are signed into.",
-        )
-    };
+    let url = pending.url().to_owned();
+    let profile = crate::browser::profile_dir(store.root(), p.id(), name);
     writeln!(
         out,
-        "{lead} {} with the account to store as {name}. {tail}\n\n{}\n",
-        p.name(),
-        pending.url()
+        "Sign in to {} with the account to store as {name}:\n\n{url}\n",
+        p.name()
     )?;
-    let code = if pending.needs_code() {
-        write!(out, "Paste {}: ", pending.asks_for())?;
-        out.flush()?;
-        Some((prompt.read_code)()?)
-    } else {
-        writeln!(out, "Waiting for the browser to finish...")?;
-        None
+    let offer = match &prompt.opens_in {
+        Some(place) => format!(", or press Enter to open it in {place}"),
+        None => String::new(),
     };
-    let done = pending.finish(code.as_deref())?;
+    let open = |out: &mut dyn Write| -> Result<()> {
+        let Some(place) = &prompt.opens_in else {
+            return Ok(());
+        };
+        if (prompt.open)(&url, &profile) {
+            writeln!(out, "Opened it in {place}.")?;
+        } else {
+            writeln!(
+                out,
+                "Could not open a browser here; open the link yourself."
+            )?;
+        }
+        Ok(())
+    };
+    let done = if pending.needs_code() {
+        let code = loop {
+            write!(out, "Paste {}{offer}: ", pending.asks_for())?;
+            out.flush()?;
+            let line = prompt.lines.recv().map_err(|_| {
+                anyhow::anyhow!("the input ended before {} was pasted", pending.asks_for())
+            })?;
+            if !line.trim().is_empty() {
+                break line;
+            }
+            open(out)?;
+        };
+        pending.finish(Some(&code))
+    } else {
+        writeln!(out, "Waiting for the browser to finish{offer}...")?;
+        std::thread::scope(|s| -> Result<_> {
+            let worker = s.spawn(move || pending.finish(None));
+            let mut listening = true;
+            while listening && !worker.is_finished() {
+                match prompt
+                    .lines
+                    .recv_timeout(std::time::Duration::from_millis(100))
+                {
+                    Ok(line) if line.trim().is_empty() => open(out)?,
+                    Ok(_) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => listening = false,
+                }
+            }
+            worker
+                .join()
+                .map_err(|_| anyhow::anyhow!("the sign-in stopped unexpectedly"))
+        })?
+    }?;
     let entry = save_login(store, p, name, force, done)?;
     writeln!(out, "{}", stored_message(p, &entry))?;
     Ok(())
@@ -823,6 +860,13 @@ pub fn rename(
     refuse_in_use(store, p, from)?;
     refuse_in_use(store, p, to)?;
     store.rename(p.id(), from, to)?;
+    let profile = |name| crate::browser::profile_dir(store.root(), p.id(), name);
+    if profile(from).exists() {
+        let _ = std::fs::remove_dir_all(profile(to));
+        if let Err(e) = std::fs::rename(profile(from), profile(to)) {
+            eprintln!("warning: {from}'s browser profile stays under its old name: {e}");
+        }
+    }
     let message = format!("renamed {0}/{from} to {0}/{to}", p.id());
     logbook::note(
         store,
@@ -862,6 +906,12 @@ pub fn remove(
     }
     refuse_in_use(store, p, name)?;
     store.remove(p.id(), name)?;
+    let profile = crate::browser::profile_dir(store.root(), p.id(), name);
+    if let Err(e) = std::fs::remove_dir_all(&profile)
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        eprintln!("warning: could not remove {}: {e}", profile.display());
+    }
     let message = format!("removed {}/{name}", p.id());
     logbook::note(
         store,
@@ -1448,16 +1498,33 @@ mod tests {
             .into_owned()
     }
 
+    /// Lines that press Enter, and an opener that answers with the code the
+    /// page it opened would show.
+    fn pasting() -> (
+        std::sync::mpsc::Receiver<String>,
+        impl Fn(&str, &Path) -> bool,
+    ) {
+        let (tx, lines) = std::sync::mpsc::channel();
+        tx.send(String::new()).unwrap();
+        let open = move |url: &str, _: &Path| {
+            tx.send(format!("the-code#{}", state_of(url))).unwrap();
+            true
+        };
+        (lines, open)
+    }
+
     #[test]
     fn login_exchanges_the_pasted_code_and_stores_the_account() {
         let (server, verifiers) = login_server("u-new");
         let e = env(&server.url());
         let opened = std::cell::RefCell::new(String::new());
-        let open = |url: &str| {
+        let (tx, lines) = std::sync::mpsc::channel();
+        tx.send(String::new()).unwrap();
+        let open = |url: &str, _: &Path| {
             *opened.borrow_mut() = url.to_owned();
-            false
+            tx.send(format!("the-code#{}\n", state_of(url))).unwrap();
+            true
         };
-        let mut read_code = || Ok(format!("the-code#{}\n", state_of(&opened.borrow())));
         let mut out = Vec::new();
 
         login(
@@ -1467,7 +1534,8 @@ mod tests {
             false,
             Prompt {
                 open: &open,
-                read_code: &mut read_code,
+                opens_in: Some("a test browser".into()),
+                lines,
             },
             &mut out,
         )
@@ -1525,15 +1593,17 @@ mod tests {
     fn login_refuses_a_code_from_another_attempt() {
         let (server, _) = login_server("u-new");
         let e = env(&server.url());
-        let mut read_code = || Ok("the-code#forged".to_owned());
+        let (tx, lines) = std::sync::mpsc::channel();
+        tx.send("the-code#forged".to_owned()).unwrap();
         let err = login(
             &e.store,
             &e.claude,
             "new",
             false,
             Prompt {
-                open: &|_| false,
-                read_code: &mut read_code,
+                open: &|_, _| false,
+                opens_in: None,
+                lines,
             },
             &mut Vec::new(),
         )
@@ -1547,12 +1617,7 @@ mod tests {
         let (server, _) = login_server("u-work");
         let e = env(&server.url());
         e.stored("work", "u-work", HOUR);
-        let opened = std::cell::RefCell::new(String::new());
-        let open = |url: &str| {
-            *opened.borrow_mut() = url.to_owned();
-            false
-        };
-        let mut read_code = || Ok(format!("the-code#{}", state_of(&opened.borrow())));
+        let (lines, open) = pasting();
 
         let err = login(
             &e.store,
@@ -1561,7 +1626,8 @@ mod tests {
             false,
             Prompt {
                 open: &open,
-                read_code: &mut read_code,
+                opens_in: Some("a test browser".into()),
+                lines,
             },
             &mut Vec::new(),
         )
@@ -1577,8 +1643,9 @@ mod tests {
             "work",
             false,
             Prompt {
-                open: &|_| unreachable!(),
-                read_code: &mut || unreachable!(),
+                open: &|_, _| unreachable!(),
+                opens_in: None,
+                lines: std::sync::mpsc::channel().1,
             },
             &mut Vec::new(),
         )
@@ -1600,12 +1667,7 @@ mod tests {
                 &mut Vec::new(),
             )
             .unwrap();
-            let opened = std::cell::RefCell::new(String::new());
-            let open = |url: &str| {
-                *opened.borrow_mut() = url.to_owned();
-                false
-            };
-            let mut read_code = || Ok(format!("the-code#{}", state_of(&opened.borrow())));
+            let (lines, open) = pasting();
             login(
                 &e.store,
                 &e.claude,
@@ -1613,7 +1675,8 @@ mod tests {
                 true,
                 Prompt {
                     open: &open,
-                    read_code: &mut read_code,
+                    opens_in: Some("a test browser".into()),
+                    lines,
                 },
                 &mut Vec::new(),
             )

@@ -9,6 +9,7 @@ use jiff::Zoned;
 use serde_json::{Value, json};
 
 use crate::auto;
+use crate::browser;
 use crate::commands::{self, RefreshScope};
 use crate::config;
 use crate::doctor;
@@ -33,6 +34,7 @@ const ICON: &str = include_str!("../assets/remuda.svg");
 struct Pending {
     provider: &'static str,
     name: String,
+    url: String,
     force: bool,
     login: Option<Box<dyn PendingLogin>>,
     cancel: Box<dyn Fn() + Send + Sync>,
@@ -104,7 +106,7 @@ pub struct App {
     providers: Vec<Box<dyn Provider>>,
     token: String,
     port: u16,
-    open: Opener,
+    open: Box<dyn Opener>,
     pending: Mutex<HashMap<String, Pending>>,
     auto: Mutex<BTreeMap<String, Value>>,
     /// `provider/name` to what keep-warm last did for that login.
@@ -122,8 +124,39 @@ pub struct App {
 /// The latest events the page's Log shows; `remuda log` reaches further back.
 const LOG_SHOWN: usize = 500;
 
-/// Opens a sign-in page in a private window; false leaves it to the page.
-pub type Opener = Box<dyn Fn(&str) -> bool + Send + Sync>;
+/// Where the page's sign-ins open.
+pub trait Opener: Send + Sync {
+    /// Where one opens with these settings; none leaves it to the page.
+    fn opens_in(&self, login: &config::Login) -> Option<String>;
+    /// False when nothing could open it.
+    fn open(&self, url: &str, profile: &Path, login: &config::Login) -> bool;
+}
+
+/// The desktop's browsers.
+pub struct Desktop;
+
+impl Opener for Desktop {
+    fn opens_in(&self, login: &config::Login) -> Option<String> {
+        Some(browser::choose(login.browser.as_deref(), login.window).describe())
+    }
+
+    fn open(&self, url: &str, profile: &Path, login: &config::Login) -> bool {
+        browser::choose(login.browser.as_deref(), login.window).open(url, profile)
+    }
+}
+
+/// `--no-browser`: the page opens sign-ins in a tab of its own.
+pub struct Nowhere;
+
+impl Opener for Nowhere {
+    fn opens_in(&self, _: &config::Login) -> Option<String> {
+        None
+    }
+
+    fn open(&self, _: &str, _: &Path, _: &config::Login) -> bool {
+        false
+    }
+}
 
 /// What a round decided, without its reasons, whose figures move every round.
 fn gist(seen: &Value) -> (&Value, &Value) {
@@ -197,7 +230,7 @@ impl App {
         providers: Vec<Box<dyn Provider>>,
         token: String,
         port: u16,
-        open: Opener,
+        open: Box<dyn Opener>,
     ) -> Self {
         App {
             store,
@@ -790,6 +823,26 @@ impl App {
         Some(entries.into_iter().map(|e| e.name).collect())
     }
 
+    fn login_settings(&self) -> config::Login {
+        config::load(&self.places.config)
+            .map(|l| l.config.login)
+            .unwrap_or_default()
+    }
+
+    fn sign_in_settings(&self) -> Result<Value> {
+        let login = self.login_settings();
+        let browsers: Vec<Value> = browser::installed()
+            .iter()
+            .map(|b| json!({"id": b.id, "name": b.name}))
+            .collect();
+        Ok(json!({
+            "browsers": browsers,
+            "browser": login.browser,
+            "window": login.window,
+            "opensIn": self.open.opens_in(&login),
+        }))
+    }
+
     fn config(&self) -> Result<Value> {
         let loaded = config::load(&self.places.config)?;
         let problems = loaded.config.check(&|id| self.logins(id));
@@ -1029,6 +1082,24 @@ impl App {
                     json!({"message": if out.is_empty() { "nothing was due".to_owned() } else { out }}),
                 )
             }
+            ("GET", "/api/login/settings") => self.sign_in_settings(),
+            ("POST", "/api/login/settings") => {
+                let window = match text("window") {
+                    Some(w) => w.parse().map_err(|e: String| anyhow!(e))?,
+                    None => browser::Window::default(),
+                };
+                let login = config::Login {
+                    browser: text("browser").filter(|b| !b.is_empty()).map(str::to_owned),
+                    window,
+                };
+                if let Some(id) = &login.browser
+                    && !browser::BROWSERS.iter().any(|b| b.id == id)
+                {
+                    bail!("remuda does not know a browser called {id}");
+                }
+                config::set_login(&self.places.config, login)?;
+                self.sign_in_settings()
+            }
             ("POST", "/api/login") => {
                 let p = commands::find(
                     &providers,
@@ -1054,16 +1125,30 @@ impl App {
                     Pending {
                         provider: p.id(),
                         name: name.to_owned(),
+                        url: url.clone(),
                         force,
                         cancel: login.canceller(),
                         login: Some(login),
                     },
                 );
                 drop(pending);
-                let opened = (self.open)(&url);
+                let opens_in = self.open.opens_in(&self.login_settings());
                 Ok(
-                    json!({"id": id, "url": url, "needsCode": needs_code, "asksFor": asks_for, "opened": opened}),
+                    json!({"id": id, "url": url, "needsCode": needs_code, "asksFor": asks_for, "opensIn": opens_in}),
                 )
+            }
+            ("POST", "/api/login/open") => {
+                let id = text("id").context("id is required")?;
+                let (url, provider, name) = {
+                    let all = self.pending.lock().map_err(|_| anyhow!("poisoned"))?;
+                    let pending = all
+                        .get(id)
+                        .context("that sign-in is no longer open; start it again")?;
+                    (pending.url.clone(), pending.provider, pending.name.clone())
+                };
+                let profile = browser::profile_dir(store.root(), provider, &name);
+                let opened = self.open.open(&url, &profile, &self.login_settings());
+                Ok(json!({ "opened": opened }))
             }
             ("POST", "/api/login/finish") => {
                 let id = text("id").context("id is required")?;
@@ -1175,11 +1260,32 @@ mod tests {
         }
     }
 
-    fn app(e: &Env, api_base: &str) -> App {
-        app_opening(e, api_base, Box::new(|_| false))
+    /// Opens nothing, and notes what it was asked to open and where.
+    struct Recording(Arc<Mutex<Vec<(String, PathBuf)>>>);
+
+    impl Opener for Recording {
+        fn opens_in(&self, login: &config::Login) -> Option<String> {
+            Some(match login.window {
+                browser::Window::Private => "a private window of a test browser".into(),
+                browser::Window::Profile => "a test browser, in this login's own profile".into(),
+                browser::Window::Normal => "a test browser".into(),
+            })
+        }
+
+        fn open(&self, url: &str, profile: &Path, _: &config::Login) -> bool {
+            self.0
+                .lock()
+                .unwrap()
+                .push((url.to_owned(), profile.to_owned()));
+            true
+        }
     }
 
-    fn app_opening(e: &Env, api_base: &str, open: Opener) -> App {
+    fn app(e: &Env, api_base: &str) -> App {
+        app_opening(e, api_base, Box::new(Nowhere))
+    }
+
+    fn app_opening(e: &Env, api_base: &str, open: Box<dyn Opener>) -> App {
         let providers: Vec<Box<dyn Provider>> =
             vec![Box::new(Claude::at(e.tmp.path(), Api::local(api_base)))];
         App::new(
@@ -1291,7 +1397,7 @@ mod tests {
             providers,
             TOKEN.into(),
             PORT,
-            Box::new(|_| false),
+            Box::new(Nowhere),
         ));
         app.start();
         let proxy = || call(&app, "GET", "/api/state", Value::Null).1["proxy"].clone();
@@ -1412,7 +1518,7 @@ mod tests {
             providers,
             TOKEN.into(),
             PORT,
-            Box::new(|_| false),
+            Box::new(Nowhere),
         ));
         app.start();
         let (status, _) = call(
@@ -2198,7 +2304,7 @@ mod tests {
             vec![Box::new(Claude::at(e.tmp.path(), Api::local(&OFFLINE)))],
             TOKEN.into(),
             PORT,
-            Box::new(|_| false),
+            Box::new(Nowhere),
         )
     }
 
@@ -2321,7 +2427,7 @@ mod tests {
             vec![Box::new(Claude::at(e.tmp.path(), Api::local(&OFFLINE)))],
             TOKEN.into(),
             PORT,
-            Box::new(|_| false),
+            Box::new(Nowhere),
         );
 
         let (status, body) = call(&app, "GET", "/api/versions", Value::Null);
@@ -2811,24 +2917,25 @@ mod tests {
             .create();
         let e = env(&server.url());
         let opened = Arc::new(Mutex::new(Vec::new()));
-        let seen = opened.clone();
-        let app = app_opening(
-            &e,
-            &server.url(),
-            Box::new(move |url| {
-                seen.lock().unwrap().push(url.to_owned());
-                true
-            }),
-        );
+        let app = app_opening(&e, &server.url(), Box::new(Recording(opened.clone())));
 
         let (status, begun) = call(&app, "POST", "/api/login", json!({"name": "new"}));
         assert_eq!(status, 200);
         assert_eq!(begun["needsCode"], true);
-        assert_eq!(begun["opened"], true);
-        assert_eq!(*opened.lock().unwrap(), [begun["url"].as_str().unwrap()]);
+        assert_eq!(begun["opensIn"], "a private window of a test browser");
+        assert!(opened.lock().unwrap().is_empty());
+        let id = begun["id"].as_str().unwrap();
+        let (_, r) = call(&app, "POST", "/api/login/open", json!({"id": id}));
+        assert_eq!(r["opened"], true);
+        assert_eq!(
+            *opened.lock().unwrap(),
+            [(
+                begun["url"].as_str().unwrap().to_owned(),
+                e.store.root().join(".browser/claude/new")
+            )]
+        );
         let url = reqwest::Url::parse(begun["url"].as_str().unwrap()).unwrap();
         let state = url.query_pairs().find(|(k, _)| k == "state").unwrap().1;
-        let id = begun["id"].as_str().unwrap();
 
         let (_, r) = call(
             &app,
@@ -2884,7 +2991,7 @@ mod tests {
             providers,
             TOKEN.into(),
             PORT,
-            Box::new(|_| false),
+            Box::new(Nowhere),
         ));
         let (_, begun) = call(
             &app,
@@ -2892,7 +2999,7 @@ mod tests {
             "/api/login",
             json!({"provider": "codex", "name": "x"}),
         );
-        assert_eq!(begun["opened"], false);
+        assert_eq!(begun["opensIn"], Value::Null);
         let id = begun["id"].as_str().unwrap().to_owned();
         let waiting = {
             let app = Arc::clone(&app);

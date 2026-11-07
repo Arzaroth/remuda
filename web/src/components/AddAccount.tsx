@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, on, onCleanup, Show } from 'solid-js';
+import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from 'solid-js';
 import { api } from '../api';
 import { createConfirm } from '../confirm';
 import { load, store, toast } from '../state';
@@ -6,7 +6,19 @@ import { closeSheet } from '../sheet';
 import { overwrite, taken } from '../windows';
 import { ProviderIcon } from './ProviderIcon';
 
-type Login = { id: string; url: string; needsCode: boolean; asksFor: string; opened: boolean; name: string };
+type Login = { id: string; url: string; needsCode: boolean; asksFor: string; opensIn: string | null; name: string };
+type Window = 'private' | 'profile' | 'normal';
+type Settings = {
+  browsers: { id: string; name: string }[];
+  browser: string | null;
+  window: Window;
+  opensIn: string | null;
+};
+const windows: [Window, string][] = [
+  ['private', 'Private window'],
+  ['profile', "The login's own profile"],
+  ['normal', 'Normal window'],
+];
 
 export function AddAccount(props: { provider?: string; again?: string }) {
   const [provider, setProvider] = createSignal(props.provider ?? store.s!.providers[0]?.id ?? '');
@@ -17,6 +29,25 @@ export function AddAccount(props: { provider?: string; again?: string }) {
   const [login, setLogin] = createSignal<Login | null>(null);
   const [code, setCode] = createSignal('');
   const confirm = createConfirm();
+  const [settings, setSettings] = createSignal<Settings | null>(null);
+  onMount(() => {
+    api<Settings>('/api/login/settings').then(setSettings, () => {});
+  });
+  const choose = async (change: Partial<Pick<Settings, 'browser' | 'window'>>) => {
+    const now = settings();
+    if (!now) return;
+    try {
+      const next = await api<Settings>('/api/login/settings', {
+        browser: change.browser !== undefined ? change.browser : now.browser,
+        window: change.window ?? now.window,
+      });
+      setSettings(next);
+      const l = login();
+      if (l) setLogin({ ...l, opensIn: next.opensIn });
+    } catch (e) {
+      toast((e as Error).message, true);
+    }
+  };
   let openLogin: string | null = null;
   let beginning = false;
   let codeInput: HTMLInputElement | undefined;
@@ -77,11 +108,22 @@ export function AddAccount(props: { provider?: string; again?: string }) {
       beginning = false;
     }
     openLogin = begun.id;
-    if (!begun.opened) window.open(begun.url, '_blank', 'noopener');
     setCode('');
     setLogin(begun);
     if (begun.needsCode) codeInput?.focus();
     else done(begun);
+  };
+
+  const open = async (l: Login) => {
+    if (l.opensIn) {
+      try {
+        const r = await api<{ opened: boolean }>('/api/login/open', { id: l.id });
+        if (r.opened) return toast(`Opened it in ${l.opensIn}`);
+      } catch (e) {
+        return toast((e as Error).message, true);
+      }
+    }
+    window.open(l.url, '_blank', 'noopener');
   };
 
   const copy = (url: string) =>
@@ -142,33 +184,43 @@ export function AddAccount(props: { provider?: string; again?: string }) {
           {confirm.text() ?? (props.again ? 'Sign in again' : 'Sign in')}
         </button>
       </form>
+      <Show when={settings()?.opensIn}>
+        <div class="opens-in">
+          <span class="aside">Sign-ins open in</span>
+          <select
+            aria-label="Browser"
+            value={settings()!.browser ?? ''}
+            onChange={(e) => choose({ browser: e.currentTarget.value || null })}
+          >
+            <option value="">The default browser</option>
+            <For each={settings()!.browsers}>{(b) => <option value={b.id}>{b.name}</option>}</For>
+          </select>
+          <select
+            aria-label="Window"
+            value={settings()!.window}
+            onChange={(e) => choose({ window: e.currentTarget.value as Window })}
+          >
+            <For each={windows}>{([id, label]) => <option value={id}>{label}</option>}</For>
+          </select>
+        </div>
+      </Show>
       <Show when={login()}>
         {(l) => {
-          const copyLink = (
-            <button type="button" class="linkish" onClick={() => copy(l().url)}>
-              copy its link
-            </button>
-          );
           return (
             <div class="signin">
               <div>
-                Sign in with the account to store as <b>{l().name}</b>.{' '}
-                <Show
-                  when={l().opened}
-                  fallback={
-                    <>
-                      A private window keeps the account you are signed into out of the way: {copyLink} into one. If
-                      no tab opened,{' '}
-                      <a href={l().url} target="_blank" rel="noopener">
-                        open the sign-in page
-                      </a>
-                      .
-                    </>
-                  }
-                >
-                  A private window opened for it, so the account you are signed into here stays put. If it did not
-                  appear, {copyLink} into a private window.
-                </Show>
+                Sign in with the account to store as <b>{l().name}</b>, in any browser:
+              </div>
+              <a class="signin-link" href={l().url} target="_blank" rel="noopener">
+                {l().url}
+              </a>
+              <div class="inline">
+                <button type="button" class="btn go" onClick={() => open(l())}>
+                  {l().opensIn ? `Open in ${l().opensIn}` : 'Open in a new tab'}
+                </button>
+                <button type="button" class="btn" onClick={() => copy(l().url)}>
+                  Copy the link
+                </button>
               </div>
               <Show
                 when={l().needsCode}

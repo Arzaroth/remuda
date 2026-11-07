@@ -982,12 +982,14 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let store = Store::open(&tmp.path().join("store"));
         let c = codex(tmp.path(), &server.url());
-        let open = |url: &str| {
+        let open = |url: &str, _: &std::path::Path| {
             let redirect = param(url, "redirect_uri").replace("localhost", "127.0.0.1");
             let state = param(url, "state");
             std::thread::spawn(move || browse(&format!("{redirect}?code=c&state={state}")));
             true
         };
+        let (tx, lines) = std::sync::mpsc::channel();
+        tx.send(String::new()).unwrap();
         let mut out = Vec::new();
         crate::commands::login(
             &store,
@@ -996,17 +998,21 @@ mod tests {
             false,
             crate::commands::Prompt {
                 open: &open,
-                read_code: &mut || unreachable!(),
+                opens_in: Some("a test browser".into()),
+                lines,
             },
             &mut out,
         )
         .unwrap();
         let out = String::from_utf8(out).unwrap();
+        assert!(out.starts_with("Sign in to Codex"), "{out}");
         assert!(
-            out.starts_with("Opened a private window to sign in to"),
+            out.contains(
+                "Waiting for the browser to finish, or press Enter to open it in a test browser"
+            ),
             "{out}"
         );
-        assert!(out.contains("Waiting for the browser"), "{out}");
+        assert!(out.contains("Opened it in a test browser."), "{out}");
         assert!(
             out.ends_with("stored codex/nine (seat-9@example.com, pro)\n"),
             "{out}"

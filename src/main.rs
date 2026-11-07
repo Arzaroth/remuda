@@ -40,6 +40,7 @@ mod warm;
 
 use std::ffi::OsString;
 use std::io::{self, BufRead, Write};
+use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use clap::{CommandFactory, Parser, Subcommand};
@@ -77,6 +78,10 @@ const PROVIDERS: [&str; 7] = [
     "claude", "codex", "cursor", "glm", "grok", "kimi", "opencode",
 ];
 
+fn browser_ids() -> clap::builder::PossibleValuesParser {
+    clap::builder::PossibleValuesParser::new(browser::BROWSERS.iter().map(|b| b.id))
+}
+
 #[derive(Subcommand)]
 enum Cmd {
     /// List stored credentials and which one each CLI is using.
@@ -101,9 +106,16 @@ enum Cmd {
         provider: String,
         #[arg(long)]
         force: bool,
-        /// Print the URL instead of opening it.
+        /// Only print the link; never offer to open it here.
         #[arg(long)]
         no_browser: bool,
+        /// The browser to open it in, overriding `[login] browser`.
+        #[arg(long, value_parser = browser_ids())]
+        browser: Option<String>,
+        /// A private window, the login's own profile, or a normal window,
+        /// overriding `[login] window`.
+        #[arg(long)]
+        window: Option<browser::Window>,
     },
     /// Make a stored credential the one its CLI uses. NAME or PROVIDER/NAME.
     Use {
@@ -724,10 +736,10 @@ fn main() -> Result<()> {
         if !no_browser && !service {
             browser::open(&url);
         }
-        let open: serve::Opener = if no_browser {
-            Box::new(|_| false)
+        let open: Box<dyn serve::Opener> = if no_browser {
+            Box::new(serve::Nowhere)
         } else {
-            Box::new(browser::open_private)
+            Box::new(serve::Desktop)
         };
         let app = serve::App::new(
             store,
@@ -750,26 +762,32 @@ fn main() -> Result<()> {
         provider,
         force,
         no_browser,
+        browser: named,
+        window,
     } = &command
     {
         let p = commands::find(&providers, provider)?;
-        let open = |url: &str| {
-            if *no_browser {
-                return false;
+        let set = config::load(&paths::config_file())
+            .map(|l| l.config.login)
+            .unwrap_or_default();
+        let choice = browser::choose(
+            named.as_deref().or(set.browser.as_deref()),
+            window.unwrap_or(set.window),
+        );
+        let (tx, lines) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for line in io::stdin().lock().lines() {
+                let Ok(line) = line else { break };
+                if tx.send(line).is_err() {
+                    break;
+                }
             }
-            browser::open_private(url) || {
-                browser::open(url);
-                false
-            }
-        };
-        let mut read_code = || {
-            let mut line = String::new();
-            io::stdin().lock().read_line(&mut line)?;
-            Ok(line)
-        };
+        });
+        let open = |url: &str, profile: &Path| choice.open(url, profile);
         let prompt = commands::Prompt {
             open: &open,
-            read_code: &mut read_code,
+            opens_in: (!no_browser).then(|| choice.describe()),
+            lines,
         };
         return commands::login(&store, p, name, *force, prompt, out);
     }

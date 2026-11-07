@@ -233,22 +233,131 @@ pub fn open(url: &str) {
     }
 }
 
-/// Opens `url` in a private window of the default browser, so signing in
-/// there leaves the browser's own sessions alone. False when there is no
-/// display or the default browser is not one it knows how to ask.
-pub fn open_private(url: &str) -> bool {
-    let shown = ["DISPLAY", "WAYLAND_DISPLAY"]
-        .iter()
-        .any(|v| env::var_os(v).is_some_and(|v| !v.is_empty()));
-    if !shown {
-        return false;
+/// Where a sign-in opens: a private window (the default) leaves the
+/// browser's own sessions alone, a profile kept for the login stays signed in
+/// for the next time, and a normal window uses the browser as it is.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Window {
+    #[default]
+    Private,
+    Profile,
+    Normal,
+}
+
+impl Window {
+    pub fn is_private(&self) -> bool {
+        *self == Window::Private
     }
-    let Some((program, flag)) =
-        default_browser().and_then(|desktop| launcher(&desktop, env::var_os("PATH").as_deref()))
-    else {
-        return false;
+}
+
+impl std::str::FromStr for Window {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "private" => Ok(Window::Private),
+            "profile" => Ok(Window::Profile),
+            "normal" => Ok(Window::Normal),
+            _ => Err(format!("{s} is not private, profile or normal")),
+        }
+    }
+}
+
+/// The browser a sign-in opens in, and how; no browser is the desktop's
+/// own opener, which cannot be asked for a window.
+#[derive(Debug, PartialEq)]
+pub struct Choice {
+    browser: Option<(&'static Browser, PathBuf)>,
+    window: Window,
+}
+
+/// `named` when it is installed, else the desktop's default browser when
+/// remuda knows it.
+pub fn choose(named: Option<&str>, window: Window) -> Choice {
+    let path = env::var_os("PATH");
+    let browser = named
+        .and_then(|id| installed_as(id, path.as_deref()))
+        .or_else(|| default_browser().and_then(|desktop| launcher(&desktop, path.as_deref())));
+    Choice { browser, window }
+}
+
+fn installed_as(id: &str, path: Option<&OsStr>) -> Option<(&'static Browser, PathBuf)> {
+    let browser = BROWSERS.iter().find(|b| b.id == id)?;
+    Some((browser, program(browser, path)?))
+}
+
+/// The browsers on `PATH`, for a choice to offer.
+pub fn installed() -> Vec<&'static Browser> {
+    let path = env::var_os("PATH");
+    BROWSERS
+        .iter()
+        .filter(|b| program(b, path.as_deref()).is_some())
+        .collect()
+}
+
+/// A login's own browser profile, under the store, so its sessions are kept
+/// with it and never in a profile the user browses with.
+pub fn profile_dir(store: &Path, provider: &str, name: &str) -> PathBuf {
+    store.join(".browser").join(provider).join(name)
+}
+
+impl Choice {
+    pub fn describe(&self) -> String {
+        match &self.browser {
+            None => "the default browser".to_owned(),
+            Some((b, _)) => match self.window {
+                Window::Private => format!("a private window of {}", b.name),
+                Window::Profile => format!("{}, in this login's own profile", b.name),
+                Window::Normal => b.name.to_owned(),
+            },
+        }
+    }
+
+    /// False when there is no display or nothing could be started.
+    pub fn open(&self, url: &str, profile: &Path) -> bool {
+        let shown = ["DISPLAY", "WAYLAND_DISPLAY"]
+            .iter()
+            .any(|v| env::var_os(v).is_some_and(|v| !v.is_empty()));
+        if !shown {
+            return false;
+        }
+        let Some(page) = redirect_file(url) else {
+            return false;
+        };
+        match &self.browser {
+            None => spawn(Path::new("xdg-open"), &[page.as_os_str()]),
+            Some((b, program)) => {
+                if self.window == Window::Profile && fsx::create_private_dir(profile).is_err() {
+                    return false;
+                }
+                let args = arguments(b, self.window, profile, &page);
+                let args: Vec<&OsStr> = args.iter().map(|a| a.as_os_str()).collect();
+                spawn(program, &args)
+            }
+        }
+    }
+}
+
+fn arguments(b: &Browser, window: Window, profile: &Path, page: &Path) -> Vec<std::ffi::OsString> {
+    let mut args: Vec<std::ffi::OsString> = match (window, b.family) {
+        (Window::Private, family) => vec![family.private_flag().into()],
+        (Window::Profile, Family::Firefox) => {
+            vec!["--new-instance".into(), "--profile".into(), profile.into()]
+        }
+        (Window::Profile, Family::Chromium | Family::Edge) => {
+            let mut dir = std::ffi::OsString::from("--user-data-dir=");
+            dir.push(profile);
+            vec![
+                dir,
+                "--no-first-run".into(),
+                "--no-default-browser-check".into(),
+            ]
+        }
+        (Window::Normal, _) => Vec::new(),
     };
-    redirect_file(url).is_some_and(|page| spawn(&program, &[OsStr::new(flag), page.as_os_str()]))
+    args.push(page.into());
+    args
 }
 
 fn default_browser() -> Option<String> {
@@ -285,9 +394,13 @@ fn output_within(mut cmd: Command, limit: Duration) -> Option<String> {
     status.success().then_some(out)
 }
 
-fn launcher(desktop: &str, path: Option<&OsStr>) -> Option<(PathBuf, &'static str)> {
+fn launcher(desktop: &str, path: Option<&OsStr>) -> Option<(&'static Browser, PathBuf)> {
     let id = desktop.strip_suffix(".desktop").unwrap_or(desktop);
     let browser = BROWSERS.iter().find(|b| b.desktop.contains(&id))?;
+    Some((browser, program(browser, path)?))
+}
+
+fn program(browser: &Browser, path: Option<&OsStr>) -> Option<PathBuf> {
     let dirs: Vec<PathBuf> = env::split_paths(path?).collect();
     browser
         .programs
@@ -297,7 +410,6 @@ fn launcher(desktop: &str, path: Option<&OsStr>) -> Option<(PathBuf, &'static st
             p.metadata()
                 .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
         })
-        .map(|p| (p, browser.family.private_flag()))
 }
 
 #[cfg(test)]
@@ -326,12 +438,15 @@ mod tests {
         bin(tmp.path(), "google-chrome-stable", 0o755);
         let path = env::join_paths(["/nonexistent".into(), tmp.path().to_owned()]).unwrap();
 
+        let flag = |desktop: &str| {
+            launcher(desktop, Some(&path)).map(|(b, program)| (program, b.family.private_flag()))
+        };
         assert_eq!(
-            launcher("brave-browser.desktop", Some(&path)),
+            flag("brave-browser.desktop"),
             Some((tmp.path().join("brave-browser"), "--incognito"))
         );
         assert_eq!(
-            launcher("firefox.desktop", Some(&path)),
+            flag("firefox.desktop"),
             Some((tmp.path().join("firefox"), "--private-window"))
         );
         assert_eq!(launcher("google-chrome-beta.desktop", Some(&path)), None);
