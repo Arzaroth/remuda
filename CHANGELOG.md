@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-11-07
+
 ### Added
 
 - `remuda open --add` lands on the sheet that adds an account, for a tool that
