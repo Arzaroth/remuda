@@ -198,6 +198,9 @@ enum Cmd {
         /// Print the URL instead of opening it.
         #[arg(long)]
         no_browser: bool,
+        /// Land on the sheet that adds an account.
+        #[arg(long)]
+        add: bool,
     },
     /// Print a completion script for a shell.
     Completions { shell: clap_complete::Shell },
@@ -308,12 +311,13 @@ fn start_service() -> bool {
             .is_ok_and(|s| s.success())
 }
 
-fn open(no_browser: bool) -> Result<()> {
+fn open(no_browser: bool, add: bool) -> Result<()> {
     let url = served::find(
         &paths::runtime_dir(),
         start_service,
         std::time::Duration::from_secs(10),
     )?;
+    let url = if add { served::adding(&url) } else { url };
     if no_browser {
         println!("{url}");
     } else {
@@ -540,8 +544,8 @@ fn main() -> Result<()> {
             }
         }
     };
-    if let Cmd::Open { no_browser } = command {
-        return open(no_browser);
+    if let Cmd::Open { no_browser, add } = command {
+        return open(no_browser, add);
     }
     if let Cmd::SyncUnits = command {
         return sync_units();
