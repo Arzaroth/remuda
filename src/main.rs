@@ -3,6 +3,7 @@ mod artifacts;
 mod attribution;
 mod auto;
 mod browser;
+mod callback;
 mod child;
 mod claude;
 mod codex;
