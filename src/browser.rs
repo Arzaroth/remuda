@@ -13,73 +13,164 @@ const REDIRECT_KEPT: Duration = Duration::from_secs(600);
 /// `xdg-settings` asks the desktop; a sign-in does not wait on it for longer.
 const ASK_DESKTOP: Duration = Duration::from_secs(2);
 
-/// Default browsers that can be told to open a private window: their
-/// desktop entries, the executables those run, and the flag.
-const PRIVATE: &[(&[&str], &[&str], &str)] = &[
-    (
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Family {
+    Chromium,
+    Edge,
+    Firefox,
+}
+
+impl Family {
+    fn private_flag(self) -> &'static str {
+        match self {
+            Family::Chromium => "--incognito",
+            Family::Edge => "--inprivate",
+            Family::Firefox => "--private-window",
+        }
+    }
+}
+
+/// A browser remuda knows how to ask for a private window: its desktop
+/// entries and the executables those run. Each release channel runs its own
+/// executable and never the stable one.
+#[derive(Debug, PartialEq)]
+pub struct Browser {
+    pub id: &'static str,
+    pub name: &'static str,
+    desktop: &'static [&'static str],
+    programs: &'static [&'static str],
+    family: Family,
+}
+
+const fn known(
+    id: &'static str,
+    name: &'static str,
+    desktop: &'static [&'static str],
+    programs: &'static [&'static str],
+    family: Family,
+) -> Browser {
+    Browser {
+        id,
+        name,
+        desktop,
+        programs,
+        family,
+    }
+}
+
+pub const BROWSERS: &[Browser] = &[
+    known(
+        "brave",
+        "Brave",
         &["brave-browser", "brave"],
         &["brave-browser", "brave"],
-        "--incognito",
+        Family::Chromium,
     ),
-    (
+    known(
+        "brave-beta",
+        "Brave Beta",
         &["brave-browser-beta"],
         &["brave-browser-beta"],
-        "--incognito",
+        Family::Chromium,
     ),
-    (
+    known(
+        "brave-nightly",
+        "Brave Nightly",
         &["brave-browser-nightly"],
         &["brave-browser-nightly"],
-        "--incognito",
+        Family::Chromium,
     ),
-    (
+    known(
+        "chrome",
+        "Google Chrome",
         &["google-chrome"],
         &["google-chrome-stable", "google-chrome"],
-        "--incognito",
+        Family::Chromium,
     ),
-    (
+    known(
+        "chrome-beta",
+        "Google Chrome Beta",
         &["google-chrome-beta"],
         &["google-chrome-beta"],
-        "--incognito",
+        Family::Chromium,
     ),
-    (
+    known(
+        "chrome-unstable",
+        "Google Chrome Dev",
         &["google-chrome-unstable"],
         &["google-chrome-unstable"],
-        "--incognito",
+        Family::Chromium,
     ),
-    (
+    known(
+        "chromium",
+        "Chromium",
         &["chromium", "chromium-browser"],
         &["chromium", "chromium-browser"],
-        "--incognito",
+        Family::Chromium,
     ),
-    (
+    known(
+        "vivaldi",
+        "Vivaldi",
         &["vivaldi-stable"],
         &["vivaldi-stable", "vivaldi"],
-        "--incognito",
+        Family::Chromium,
     ),
-    (&["vivaldi-snapshot"], &["vivaldi-snapshot"], "--incognito"),
-    (
+    known(
+        "vivaldi-snapshot",
+        "Vivaldi Snapshot",
+        &["vivaldi-snapshot"],
+        &["vivaldi-snapshot"],
+        Family::Chromium,
+    ),
+    known(
+        "edge",
+        "Microsoft Edge",
         &["microsoft-edge"],
         &["microsoft-edge-stable", "microsoft-edge"],
-        "--inprivate",
+        Family::Edge,
     ),
-    (
+    known(
+        "edge-beta",
+        "Microsoft Edge Beta",
         &["microsoft-edge-beta"],
         &["microsoft-edge-beta"],
-        "--inprivate",
+        Family::Edge,
     ),
-    (
+    known(
+        "edge-dev",
+        "Microsoft Edge Dev",
         &["microsoft-edge-dev"],
         &["microsoft-edge-dev"],
-        "--inprivate",
+        Family::Edge,
     ),
-    (&["firefox"], &["firefox"], "--private-window"),
-    (&["firefox-esr"], &["firefox-esr"], "--private-window"),
-    (
+    known(
+        "firefox",
+        "Firefox",
+        &["firefox"],
+        &["firefox"],
+        Family::Firefox,
+    ),
+    known(
+        "firefox-esr",
+        "Firefox ESR",
+        &["firefox-esr"],
+        &["firefox-esr"],
+        Family::Firefox,
+    ),
+    known(
+        "firefox-developer-edition",
+        "Firefox Developer Edition",
         &["firefox-developer-edition"],
         &["firefox-developer-edition"],
-        "--private-window",
+        Family::Firefox,
     ),
-    (&["librewolf"], &["librewolf"], "--private-window"),
+    known(
+        "librewolf",
+        "LibreWolf",
+        &["librewolf"],
+        &["librewolf"],
+        Family::Firefox,
+    ),
 ];
 
 /// A page that sends the browser on to `url`. The browser is handed this
@@ -196,16 +287,17 @@ fn output_within(mut cmd: Command, limit: Duration) -> Option<String> {
 
 fn launcher(desktop: &str, path: Option<&OsStr>) -> Option<(PathBuf, &'static str)> {
     let id = desktop.strip_suffix(".desktop").unwrap_or(desktop);
-    let (_, programs, flag) = PRIVATE.iter().find(|(ids, ..)| ids.contains(&id))?;
+    let browser = BROWSERS.iter().find(|b| b.desktop.contains(&id))?;
     let dirs: Vec<PathBuf> = env::split_paths(path?).collect();
-    programs
+    browser
+        .programs
         .iter()
         .flat_map(|p| dirs.iter().map(move |d| d.join(p)))
         .find(|p| {
             p.metadata()
                 .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
         })
-        .map(|p| (p, *flag))
+        .map(|p| (p, browser.family.private_flag()))
 }
 
 #[cfg(test)]
