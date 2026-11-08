@@ -1353,6 +1353,48 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_slow_firewall_holds_up_no_request() {
+        use std::os::unix::fs::PermissionsExt;
+        let e = env(&OFFLINE);
+        let bin = e.tmp.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let stub = bin.join("firewall-cmd");
+        std::fs::write(&stub, "#!/bin/sh\nsleep 3\necho running\n").unwrap();
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut slow = places(&e);
+        slow.search = Some(bin.into_os_string());
+        let providers: Vec<Box<dyn Provider>> =
+            vec![Box::new(Claude::at(e.tmp.path(), Api::local(&OFFLINE)))];
+        let app = Arc::new(App::new(
+            Store::open(e.store.root()),
+            slow,
+            providers,
+            TOKEN.into(),
+            PORT,
+            Box::new(|_| false),
+        ));
+        app.start();
+        let (status, _) = call(
+            &app,
+            "POST",
+            "/api/proxy/settings",
+            json!({"enabled": true, "port": free_port(), "lan": true}),
+        );
+        assert_eq!(status, 200);
+        let started = Instant::now();
+        let (status, state) = call(&app, "GET", "/api/state", Value::Null);
+        assert_eq!(status, 200);
+        assert_eq!(state["proxy"]["firewall"], Value::Null);
+        let (status, _) = call(&app, "POST", "/api/proxy/keys", json!({"name": "laptop"}));
+        assert_eq!(status, 200);
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
     fn free_port() -> u16 {
         let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
         l.local_addr().unwrap().port()

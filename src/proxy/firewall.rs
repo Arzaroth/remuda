@@ -269,6 +269,19 @@ COMMIT
     }
 
     #[test]
+    fn a_rule_on_another_interface_or_destination_is_limited() {
+        let rules = "-A ufw-user-input -i eth0 -p tcp --dport 8317 -j ACCEPT
+-A ufw-user-input -d 10.0.0.1 -p tcp --dport 9000 -j ACCEPT
+";
+        let etc = ufw_at("yes", Some("DROP"), Some(rules));
+        let open_on = |interface, port| check(etc.path(), None, interface, port).unwrap().open;
+        assert_eq!(open_on(Some("eth0"), 8317), Some(true));
+        assert_eq!(open_on(Some("wlan0"), 8317), None);
+        assert_eq!(open_on(None, 8317), None);
+        assert_eq!(open_on(Some("eth0"), 9000), None);
+    }
+
+    #[test]
     fn a_deny_rule_is_overtaken_rather_than_appended_after() {
         let etc = ufw_at("yes", Some("DROP"), Some(RULES));
         let v = check(etc.path(), None, None, 6000).unwrap();
@@ -354,6 +367,23 @@ esac"#,
             v.commands[0],
             "sudo firewall-cmd --permanent --zone=work --add-port=8317/tcp"
         );
+    }
+
+    #[test]
+    fn a_failed_zone_lookup_leaves_the_verdict_open() {
+        let empty = tempfile::tempdir().unwrap();
+        let (_bin, dir) = firewall_cmd(
+            r#"case "$*" in
+--state) echo running ;;
+--get-zone-of-interface=eth0) echo 'no zone'; exit 2 ;;
+--get-zone-of-interface=*) echo 'dbus error' >&2; exit 252 ;;
+*) echo no; exit 1 ;;
+esac"#,
+        );
+        let v = check(empty.path(), Some(dir.as_os_str()), Some("eth0"), 8317).unwrap();
+        assert_eq!(v.open, Some(false));
+        let v = check(empty.path(), Some(dir.as_os_str()), Some("wlan0"), 8317).unwrap();
+        assert_eq!(v.open, None);
     }
 
     #[test]
