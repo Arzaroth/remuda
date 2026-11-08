@@ -84,7 +84,9 @@ port or its rules cannot be read without root, shows the commands that open
 it, with a copy button, a moment after the switch, since asking firewalld
 takes a while. A machine with neither, or with rules set straight in
 nftables, gets no notice. When no LAN address can be found (no default
-route), the card says so instead of offering `127.0.0.1` to other machines.
+route), the status line says so in red; the base URL and the Shell exports
+then still read `127.0.0.1`, which only this machine can use, so a client
+elsewhere needs this machine's address put in by hand.
 
 ## The request log
 

@@ -57,12 +57,13 @@ machines out, reading only what needs no root:
 
 | Firewall | On when | Port open when | Opened by |
 | --- | --- | --- | --- |
-| ufw | `ENABLED=yes` in `/etc/ufw/ufw.conf` | the first `ufw-user-input` rule in `/etc/ufw/user.rules` for TCP on the port, from any source, accepts it, else `DEFAULT_INPUT_POLICY` in `/etc/default/ufw` is `ACCEPT` | `sudo ufw allow <port>/tcp`, or `sudo ufw insert 1 allow <port>/tcp` when a deny rule matched, since an appended allow would come after it |
-| firewalld | `firewall-cmd --state` succeeds | `firewall-cmd --zone=<zone> --query-port=<port>/tcp` says `yes`, the zone being that of the default route's interface (`proxy::default_interface`, from `/proc/net/route`), or the default zone when it has none | `sudo firewall-cmd --permanent --zone=<zone> --add-port=<port>/tcp`, then `--reload` |
+| ufw | `ENABLED=yes` in `/etc/ufw/ufw.conf` | the first `ufw-user-input` rule in `/etc/ufw/user.rules` for TCP on the port that is not limited (`-s`, `-d`, or `-i` naming another interface than the default route's) accepts it, else `DEFAULT_INPUT_POLICY` in `/etc/default/ufw` is `ACCEPT` | `sudo ufw allow <port>/tcp`, or `sudo ufw insert 1 allow <port>/tcp` when a deny rule matched, since an appended allow would come after it |
+| firewalld | `firewall-cmd --state` succeeds | `firewall-cmd --zone=<zone> --query-port=<port>/tcp` says `yes`, the zone being that of the default route's interface (`proxy::default_interface`, from `/proc/net/route`), or the default zone when firewall-cmd says `no zone` | `sudo firewall-cmd --permanent --zone=<zone> --add-port=<port>/tcp`, then `--reload` |
 
-ufw is looked at first. `open` is null when ufw's rules cannot be read, when
-only source-limited rules let the port in, or when firewall-cmd's answer is
-neither yes nor no. A port opened by a firewalld service counts as closed;
+ufw is looked at first. `open` is null when ufw's rules or policy cannot be
+read, when limited rules let some machines in that the verdict would keep out
+(or the reverse), when the interface's zone cannot be learnt, or when
+firewall-cmd's answer is neither yes nor no. A port opened by a firewalld service counts as closed;
 nftables or iptables set by hand are not read.
 
 `/api/state` runs under the store's lock, so it never asks: `App::firewall`
