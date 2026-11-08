@@ -29,10 +29,10 @@ pub fn check(
     interface: Option<&str>,
     port: u16,
 ) -> Option<Verdict> {
-    ufw(etc, port).or_else(|| firewalld(search?, interface, port))
+    ufw(etc, interface, port).or_else(|| firewalld(search?, interface, port))
 }
 
-fn ufw(etc: &Path, port: u16) -> Option<Verdict> {
+fn ufw(etc: &Path, interface: Option<&str>, port: u16) -> Option<Verdict> {
     let conf = std::fs::read_to_string(etc.join("ufw/ufw.conf")).ok()?;
     if !setting(&conf, "ENABLED").is_some_and(|v| v.eq_ignore_ascii_case("yes")) {
         return None;
@@ -42,7 +42,7 @@ fn ufw(etc: &Path, port: u16) -> Option<Verdict> {
         .and_then(|d| setting(&d, "DEFAULT_INPUT_POLICY").map(|p| p == "ACCEPT"));
     let open = std::fs::read_to_string(etc.join("ufw/user.rules"))
         .ok()
-        .map(|rules| ufw_rules(&rules, port, policy));
+        .map(|rules| ufw_rules(&rules, port, interface, policy));
     let (open, denied) = match open {
         Some((open, denied)) => (open, denied),
         None => (None, false),
@@ -55,29 +55,31 @@ fn ufw(etc: &Path, port: u16) -> Option<Verdict> {
     })
 }
 
-/// Whether ufw lets any LAN machine in on `port`, `None` when only some
-/// sources are let in, and whether a rule of its own refuses the port, which
-/// an appended allow would come after.
-fn ufw_rules(rules: &str, port: u16, policy: Option<bool>) -> (Option<bool>, bool) {
-    let mut some_sources = false;
+/// Whether ufw lets every LAN machine in on `port`, `None` when it cannot
+/// tell or when rules limited to some machines let only some in, and whether
+/// a rule of its own refuses the port, which an appended allow would come
+/// after.
+fn ufw_rules(
+    rules: &str,
+    port: u16,
+    interface: Option<&str>,
+    policy: Option<bool>,
+) -> (Option<bool>, bool) {
+    let (mut some_let_in, mut some_kept_out) = (false, false);
     let mut decided = None;
-    for rule in rules.lines().filter_map(|l| ufw_rule(l, port)) {
-        match rule {
-            Rule {
-                restricted: true,
-                accepts,
-            } => some_sources |= accepts,
-            Rule { accepts, .. } => {
-                decided = Some(accepts);
-                break;
-            }
+    for rule in rules.lines().filter_map(|l| ufw_rule(l, port, interface)) {
+        if rule.restricted {
+            some_let_in |= rule.accepts;
+            some_kept_out |= !rule.accepts;
+        } else {
+            decided = Some(rule.accepts);
+            break;
         }
     }
-    let open = decided.or(policy).unwrap_or(false);
-    let verdict = if !open && some_sources {
-        None
-    } else {
-        Some(open)
+    let verdict = match decided.or(policy) {
+        Some(true) if some_kept_out => None,
+        Some(false) if some_let_in => None,
+        verdict => verdict,
     };
     (verdict, decided == Some(false))
 }
@@ -91,12 +93,13 @@ fn setting<'a>(text: &'a str, key: &str) -> Option<&'a str> {
 
 struct Rule {
     accepts: bool,
-    /// Limited to some sources, so it decides nothing for the others.
+    /// Limited to some sources, destinations or another interface, so it
+    /// decides nothing for the rest.
     restricted: bool,
 }
 
 /// Whether a line of ufw's `user.rules` accepts or refuses TCP on `port`.
-fn ufw_rule(line: &str, port: u16) -> Option<Rule> {
+fn ufw_rule(line: &str, port: u16, interface: Option<&str>) -> Option<Rule> {
     let words: Vec<&str> = line.split_whitespace().collect();
     if words.get(..2) != Some(&["-A", "ufw-user-input"]) {
         return None;
@@ -122,7 +125,9 @@ fn ufw_rule(line: &str, port: u16) -> Option<Rule> {
     };
     Some(Rule {
         accepts,
-        restricted: after("-s").is_some(),
+        restricted: after("-s").is_some()
+            || after("-d").is_some()
+            || after("-i").is_some_and(|i| Some(i) != interface),
     })
 }
 
@@ -142,12 +147,23 @@ fn firewalld(search: &OsStr, interface: Option<&str>, port: u16) -> Option<Verdi
     if !ask("--state")?.ok {
         return None;
     }
-    let zone = interface
-        .and_then(|i| ask(&format!("--get-zone-of-interface={i}")))
-        .filter(|r| r.ok)
-        .map(|r| String::from_utf8_lossy(&r.out).trim().to_owned())
-        .filter(|z| !z.is_empty());
-    let zoned = zone.map(|z| format!(" --zone={z}")).unwrap_or_default();
+    let zone = match interface.map(|i| ask(&format!("--get-zone-of-interface={i}"))) {
+        None => Some(None),
+        Some(Some(r)) => {
+            let said = String::from_utf8_lossy(&r.out).trim().to_owned();
+            match (r.ok, said.as_str()) {
+                (_, "no zone") => Some(None),
+                (true, z) if !z.is_empty() => Some(Some(said)),
+                _ => None,
+            }
+        }
+        Some(None) => None,
+    };
+    let zoned = zone
+        .clone()
+        .flatten()
+        .map(|z| format!(" --zone={z}"))
+        .unwrap_or_default();
     let query = format!("{zoned} --query-port={port}/tcp");
     let args: Vec<&str> = query.split_whitespace().collect();
     let open = child::run("firewall-cmd", &program, &args, ASK_FOR, 4096)
@@ -156,7 +172,8 @@ fn firewalld(search: &OsStr, interface: Option<&str>, port: u16) -> Option<Verdi
             "yes" => Some(true),
             "no" => Some(false),
             _ => None,
-        });
+        })
+        .filter(|_| zone.is_some());
     Some(Verdict {
         name: "firewalld",
         open,
@@ -234,11 +251,11 @@ COMMIT
         let etc = ufw_at("yes", Some("DROP"), None);
         assert_eq!(open(&etc, 8317), None);
         let etc = ufw_at("yes", None, Some(""));
-        assert_eq!(open(&etc, 8317), Some(false));
+        assert_eq!(open(&etc, 8317), None);
     }
 
     #[test]
-    fn a_source_limited_rule_decides_nothing_for_other_machines() {
+    fn a_source_limited_rule_leaves_the_verdict_open() {
         let rules = "-A ufw-user-input -p tcp --dport 8317 -s 192.168.1.9 -j ACCEPT
 -A ufw-user-input -p tcp --dport 7000 -s 192.168.1.9 -j DROP
 ";
@@ -246,7 +263,9 @@ COMMIT
         assert_eq!(open(&etc, 8317), None);
         let etc = ufw_at("yes", Some("ACCEPT"), Some(rules));
         assert_eq!(open(&etc, 8317), Some(true));
-        assert_eq!(open(&etc, 7000), Some(true));
+        assert_eq!(open(&etc, 7000), None);
+        let etc = ufw_at("yes", Some("DROP"), Some(rules));
+        assert_eq!(open(&etc, 7000), Some(false));
     }
 
     #[test]
