@@ -56,7 +56,7 @@ describe('proxy', () => {
     const ufw = (open: boolean | null) => ({ name: 'ufw', open, commands: ['sudo ufw allow 8317/tcp'] });
     const on = { enabled: true, running: 8317, lan: true };
     expect(blocked(proxy({ ...on, firewall: ufw(false) }))).toContain('ufw blocks port 8317');
-    expect(blocked(proxy({ ...on, firewall: ufw(null) }))).toContain('cannot be read');
+    expect(blocked(proxy({ ...on, firewall: ufw(null) }))).toContain('cannot tell for sure');
     expect(blocked(proxy({ ...on, firewall: ufw(true) }))).toBeNull();
     expect(blocked(proxy({ ...on, firewall: null }))).toBeNull();
     expect(blocked(proxy({ ...on, lan: false, firewall: ufw(false) }))).toBeNull();

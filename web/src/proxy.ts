@@ -40,5 +40,5 @@ export function blocked(p: Proxy): string | null {
   if (!p.lan || p.running === null || !f || f.open) return null;
   return f.open === false
     ? `${f.name} blocks port ${p.running}: other machines cannot reach the proxy until it is opened.`
-    : `${f.name} is on and its rules cannot be read without root; if port ${p.running} is not open yet, open it.`;
+    : `${f.name} may keep some or all other machines off port ${p.running}: remuda cannot tell for sure, since some rules need root to read or cover only some machines. This opens it to every machine:`;
 }
