@@ -296,6 +296,22 @@ COMMIT
         assert_eq!(open_on(Some("wlan0"), 8317), None);
         assert_eq!(open_on(None, 8317), None);
         assert_eq!(open_on(Some("eth0"), 9000), None);
+
+        let negated = "-A ufw-user-input ! -i eth0 -p tcp --dport 8317 -j ACCEPT\n";
+        let etc = ufw_at("yes", Some("DROP"), Some(negated));
+        let v = check(etc.path(), None, Some("eth0"), 8317).unwrap();
+        assert_eq!(v.open, None);
+    }
+
+    #[test]
+    fn a_limited_deny_sends_the_user_to_ufw_status() {
+        let rules = "-A ufw-user-input -p tcp --dport 8317 -s 192.168.1.9 -j DROP\n";
+        let etc = ufw_at("yes", Some("DROP"), Some(rules));
+        let v = check(etc.path(), None, None, 8317).unwrap();
+        assert_eq!(
+            v.commands,
+            ["sudo ufw status numbered", "sudo ufw allow 8317/tcp"]
+        );
     }
 
     #[test]
@@ -401,6 +417,10 @@ esac"#,
         assert_eq!(v.open, Some(false));
         let v = check(empty.path(), Some(dir.as_os_str()), Some("wlan0"), 8317).unwrap();
         assert_eq!(v.open, None);
+        assert_eq!(
+            v.commands[0],
+            "sudo firewall-cmd --permanent --zone=$(firewall-cmd --get-zone-of-interface=wlan0) --add-port=8317/tcp"
+        );
     }
 
     #[test]

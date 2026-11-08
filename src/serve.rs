@@ -1359,8 +1359,23 @@ mod tests {
         let e = env(&OFFLINE);
         let bin = e.tmp.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
+        let started = e.tmp.path().join("started");
+        let release = e.tmp.path().join("release");
         let stub = bin.join("firewall-cmd");
-        std::fs::write(&stub, "#!/bin/sh\nsleep 3\necho running\n").unwrap();
+        std::fs::write(
+            &stub,
+            format!(
+                "#!/bin/sh\n\
+                 [ \"$1\" = --state ] || {{ echo no; exit 1; }}\n\
+                 touch '{}'\n\
+                 i=0\n\
+                 while [ ! -e '{}' ] && [ $i -lt 40 ]; do sleep 0.1; i=$((i+1)); done\n\
+                 echo running\n",
+                started.display(),
+                release.display()
+            ),
+        )
+        .unwrap();
         std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
         let mut slow = places(&e);
         slow.search = Some(bin.into_os_string());
@@ -1382,17 +1397,35 @@ mod tests {
             json!({"enabled": true, "port": free_port(), "lan": true}),
         );
         assert_eq!(status, 200);
-        let started = Instant::now();
+        call(&app, "GET", "/api/state", Value::Null);
+        let until = Instant::now() + Duration::from_secs(3);
+        while !started.exists() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(started.exists(), "the firewall was never asked");
+
+        let blocked = Instant::now();
         let (status, state) = call(&app, "GET", "/api/state", Value::Null);
         assert_eq!(status, 200);
         assert_eq!(state["proxy"]["firewall"], Value::Null);
         let (status, _) = call(&app, "POST", "/api/proxy/keys", json!({"name": "laptop"}));
         assert_eq!(status, 200);
         assert!(
-            started.elapsed() < Duration::from_secs(2),
+            blocked.elapsed() < Duration::from_secs(1),
             "{:?}",
-            started.elapsed()
+            blocked.elapsed()
         );
+        std::fs::write(&release, "").unwrap();
+
+        let firewall = (0..100)
+            .map(|_| {
+                std::thread::sleep(Duration::from_millis(50));
+                call(&app, "GET", "/api/state", Value::Null).1["proxy"]["firewall"].clone()
+            })
+            .find(|f| !f.is_null())
+            .expect("no verdict came back");
+        assert_eq!(firewall["name"], "firewalld");
+        assert_eq!(firewall["open"], false);
     }
 
     fn free_port() -> u16 {
