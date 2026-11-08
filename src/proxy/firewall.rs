@@ -43,28 +43,40 @@ fn ufw(etc: &Path, interface: Option<&str>, port: u16) -> Option<Verdict> {
     let open = std::fs::read_to_string(etc.join("ufw/user.rules"))
         .ok()
         .map(|rules| ufw_rules(&rules, port, interface, policy));
-    let (open, denied) = match open {
-        Some((open, denied)) => (open, denied),
-        None => (None, false),
-    };
+    let Ruled {
+        open,
+        denied,
+        some_kept_out,
+    } = open.unwrap_or(Ruled {
+        open: None,
+        denied: false,
+        some_kept_out: false,
+    });
     let allow = if denied { "insert 1 allow" } else { "allow" };
+    let mut commands = vec![format!("sudo ufw {allow} {port}/tcp")];
+    if some_kept_out {
+        commands.insert(0, "sudo ufw status numbered".to_owned());
+    }
     Some(Verdict {
         name: "ufw",
         open,
-        commands: vec![format!("sudo ufw {allow} {port}/tcp")],
+        commands,
     })
 }
 
-/// Whether ufw lets every LAN machine in on `port`, `None` when it cannot
-/// tell or when rules limited to some machines let only some in, and whether
-/// a rule of its own refuses the port, which an appended allow would come
-/// after.
-fn ufw_rules(
-    rules: &str,
-    port: u16,
-    interface: Option<&str>,
-    policy: Option<bool>,
-) -> (Option<bool>, bool) {
+struct Ruled {
+    /// Whether every LAN machine is let in, `None` when it cannot be told or
+    /// rules limited to some machines let only some in.
+    open: Option<bool>,
+    /// A rule refusing every machine decides the port, so an appended allow
+    /// would come after it.
+    denied: bool,
+    /// A rule refuses some machines, which an allow for all, appended, leaves
+    /// refused; `ufw status numbered` shows which.
+    some_kept_out: bool,
+}
+
+fn ufw_rules(rules: &str, port: u16, interface: Option<&str>, policy: Option<bool>) -> Ruled {
     let (mut some_let_in, mut some_kept_out) = (false, false);
     let mut decided = None;
     for rule in rules.lines().filter_map(|l| ufw_rule(l, port, interface)) {
@@ -81,7 +93,11 @@ fn ufw_rules(
         Some(false) if some_let_in => None,
         verdict => verdict,
     };
-    (verdict, decided == Some(false))
+    Ruled {
+        open: verdict,
+        denied: decided == Some(false),
+        some_kept_out,
+    }
 }
 
 fn setting<'a>(text: &'a str, key: &str) -> Option<&'a str> {
@@ -104,12 +120,9 @@ fn ufw_rule(line: &str, port: u16, interface: Option<&str>) -> Option<Rule> {
     if words.get(..2) != Some(&["-A", "ufw-user-input"]) {
         return None;
     }
-    let after = |flag: &str| {
-        words
-            .iter()
-            .position(|w| *w == flag)
-            .and_then(|i| words.get(i + 1).copied())
-    };
+    let at = |flag: &str| words.iter().position(|w| *w == flag);
+    let after = |flag: &str| at(flag).and_then(|i| words.get(i + 1).copied());
+    let negated = |flag: &str| at(flag).is_some_and(|i| i > 0 && words[i - 1] == "!");
     if after("-p").is_some_and(|p| p != "tcp" && p != "all") {
         return None;
     }
@@ -127,6 +140,7 @@ fn ufw_rule(line: &str, port: u16, interface: Option<&str>) -> Option<Rule> {
         accepts,
         restricted: after("-s").is_some()
             || after("-d").is_some()
+            || negated("-i")
             || after("-i").is_some_and(|i| Some(i) != interface),
     })
 }
@@ -159,21 +173,24 @@ fn firewalld(search: &OsStr, interface: Option<&str>, port: u16) -> Option<Verdi
         }
         Some(None) => None,
     };
-    let zoned = zone
-        .clone()
-        .flatten()
-        .map(|z| format!(" --zone={z}"))
-        .unwrap_or_default();
-    let query = format!("{zoned} --query-port={port}/tcp");
-    let args: Vec<&str> = query.split_whitespace().collect();
-    let open = child::run("firewall-cmd", &program, &args, ASK_FOR, 4096)
-        .ok()
-        .and_then(|r| match String::from_utf8_lossy(&r.out).trim() {
+    let open = zone.as_ref().and_then(|zone| {
+        let mut args = vec![format!("--query-port={port}/tcp")];
+        if let Some(z) = zone {
+            args.insert(0, format!("--zone={z}"));
+        }
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let r = child::run("firewall-cmd", &program, &args, ASK_FOR, 4096).ok()?;
+        match String::from_utf8_lossy(&r.out).trim() {
             "yes" => Some(true),
             "no" => Some(false),
             _ => None,
-        })
-        .filter(|_| zone.is_some());
+        }
+    });
+    let zoned = match (&zone, interface) {
+        (Some(Some(z)), _) => format!(" --zone={z}"),
+        (None, Some(i)) => format!(" --zone=$(firewall-cmd --get-zone-of-interface={i})"),
+        _ => String::new(),
+    };
     Some(Verdict {
         name: "firewalld",
         open,
