@@ -57,8 +57,8 @@ machines out, reading only what needs no root:
 
 | Firewall | On when | Port open when | Opened by |
 | --- | --- | --- | --- |
-| ufw | `ENABLED=yes` in `/etc/ufw/ufw.conf` | the first `ufw-user-input` rule in `/etc/ufw/user.rules` for TCP on the port that is not limited (`-s`, `-d`, or `-i` naming another interface than the default route's) accepts it, else `DEFAULT_INPUT_POLICY` in `/etc/default/ufw` is `ACCEPT` | `sudo ufw allow <port>/tcp`, or `sudo ufw insert 1 allow <port>/tcp` when a deny rule matched, since an appended allow would come after it |
-| firewalld | `firewall-cmd --state` succeeds | `firewall-cmd --zone=<zone> --query-port=<port>/tcp` says `yes`, the zone being that of the default route's interface (`proxy::default_interface`, from `/proc/net/route`), or the default zone when firewall-cmd says `no zone` | `sudo firewall-cmd --permanent --zone=<zone> --add-port=<port>/tcp`, then `--reload` |
+| ufw | `ENABLED=yes` in `/etc/ufw/ufw.conf` | the first `ufw-user-input` rule in `/etc/ufw/user.rules` for TCP on the port that is not limited (`-s`, `-d`, a negated `! -i`, or `-i` naming another interface than the default route's) accepts it, else `DEFAULT_INPUT_POLICY` in `/etc/default/ufw` is `ACCEPT` | `sudo ufw allow <port>/tcp`, or `sudo ufw insert 1 allow <port>/tcp` when a deny rule for every machine matched, since an appended allow would come after it; a deny limited to some machines is left in place, with `sudo ufw status numbered` first to show it |
+| firewalld | `firewall-cmd --state` succeeds | `firewall-cmd --zone=<zone> --query-port=<port>/tcp` says `yes`, the zone being that of the default route's interface (`proxy::default_interface`, from `/proc/net/route`), or the default zone when firewall-cmd says `no zone` | `sudo firewall-cmd --permanent --zone=<zone> --add-port=<port>/tcp`, then `--reload`; when the zone lookup failed, `--zone=$(firewall-cmd --get-zone-of-interface=<interface>)`, so the shell asks again |
 
 ufw is looked at first. `open` is null when ufw's rules or policy cannot be
 read, when limited rules let some machines in that the verdict would keep out
