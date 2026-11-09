@@ -56,11 +56,14 @@ fn ufw(etc: &Path, interface: Option<&str>, port: u16) -> Option<Verdict> {
         Some(i) => format!("allow in on {i} to any port {port} proto tcp"),
         None => format!("allow in on IFACE to any port {port} proto tcp"),
     };
-    let on = interface.map(|i| format!(" on {i}")).unwrap_or_default();
+    let on = match interface {
+        Some(i) => format!("on {i} or on no interface"),
+        None => "on any interface".to_owned(),
+    };
     let mut commands = match denied {
         true if some_kept_out => vec![
             format!(
-                "sudo ufw status numbered  # N: the first DENY IN{on} from Anywhere for {port}; move any DENY for some machines above it"
+                "sudo ufw status numbered  # N: the first DENY or REJECT IN for {port} to Anywhere from Anywhere, {on}; move any DENY or LIMIT for some machines above it"
             ),
             format!("sudo ufw insert N {rule}"),
         ],
@@ -102,8 +105,13 @@ struct Ruled {
 
 fn ufw_rules(rules: &str, port: u16, interface: Option<&str>, policy: Option<bool>) -> Ruled {
     let (mut some_let_in, mut some_kept_out, mut kept_out_after) = (false, false, false);
+    let mut throttled = false;
     let mut decided = None;
     for rule in rules.lines().filter_map(|l| ufw_rule(l, port, interface)) {
+        if rule.throttles {
+            throttled |= decided.is_none() && !rule.elsewhere;
+            continue;
+        }
         match (decided, rule.restricted) {
             (None, true) => {
                 some_let_in |= rule.accepts;
@@ -122,7 +130,7 @@ fn ufw_rules(rules: &str, port: u16, interface: Option<&str>, policy: Option<boo
     Ruled {
         open: verdict,
         denied,
-        some_kept_out: some_kept_out || (denied && kept_out_after),
+        some_kept_out: some_kept_out || (denied && (kept_out_after || throttled)),
     }
 }
 
@@ -140,6 +148,8 @@ struct Rule {
     restricted: bool,
     /// Limited to another interface than the known one an allow is scoped to.
     elsewhere: bool,
+    /// ufw's `limit`, refusing a source that connects too often.
+    throttles: bool,
 }
 
 /// Whether a line of ufw's `user.rules` accepts or refuses TCP on `port`.
@@ -159,9 +169,10 @@ fn ufw_rule(line: &str, port: u16, interface: Option<&str>) -> Option<Rule> {
     {
         return None;
     }
-    let accepts = match after("-j")? {
+    let target = after("-j")?;
+    let accepts = match target {
         "ACCEPT" | "ufw-user-limit-accept" => true,
-        "DROP" | "REJECT" => false,
+        "DROP" | "REJECT" | "ufw-user-limit" => false,
         _ => return None,
     };
     Some(Rule {
@@ -173,6 +184,7 @@ fn ufw_rule(line: &str, port: u16, interface: Option<&str>) -> Option<Rule> {
         elsewhere: interface.is_some()
             && !negated("-i")
             && after("-i").is_some_and(|i| Some(i) != interface),
+        throttles: target == "ufw-user-limit",
     })
 }
 
@@ -416,7 +428,7 @@ COMMIT
         assert_eq!(
             v.commands,
             [
-                "sudo ufw status numbered  # N: the first DENY IN from Anywhere for 8317; move any DENY for some machines above it",
+                "sudo ufw status numbered  # N: the first DENY or REJECT IN for 8317 to Anywhere from Anywhere, on any interface; move any DENY or LIMIT for some machines above it",
                 "sudo ufw insert N allow in on IFACE to any port 8317 proto tcp  # IFACE: the interface of the LAN, from ip -br addr"
             ]
         );
@@ -431,9 +443,24 @@ COMMIT
         assert_eq!(
             v.commands,
             [
-                "sudo ufw status numbered  # N: the first DENY IN on eth0 from Anywhere for 8317; move any DENY for some machines above it",
+                "sudo ufw status numbered  # N: the first DENY or REJECT IN for 8317 to Anywhere from Anywhere, on eth0 or on no interface; move any DENY or LIMIT for some machines above it",
                 "sudo ufw insert N allow in on eth0 to any port 8317 proto tcp"
             ]
+        );
+    }
+
+    #[test]
+    fn a_rate_limit_for_some_machines_is_not_overtaken_blindly() {
+        let rules = "-A ufw-user-input -p tcp --dport 8317 -s 192.168.1.9 -j ufw-user-limit
+-A ufw-user-input -p tcp --dport 8317 -s 192.168.1.9 -j ufw-user-limit-accept
+-A ufw-user-input -p tcp --dport 8317 -j DROP
+";
+        let etc = ufw_at("yes", Some("ACCEPT"), Some(rules));
+        let v = check(etc.path(), None, None, 8317).unwrap();
+        assert_eq!(v.open, None);
+        assert!(
+            v.commands[1].starts_with("sudo ufw insert N allow"),
+            "{v:?}"
         );
     }
 
