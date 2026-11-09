@@ -309,7 +309,8 @@ on a Codex login with `--model gpt-5` and an OpenAI SDK on a Claude login. It
 listens on `127.0.0.1` unless "Reachable from other machines" is switched on,
 which listens on every interface and shows the LAN address in the base URLs.
 Traffic is plain HTTP, keys included. When ufw or firewalld blocks the port,
-the card shows the command that opens it (`sudo ufw allow in on eth0 to any port 8317 proto tcp`).
+the card shows the command that opens it (`sudo ufw allow in on eth0 to any port 8317 proto tcp`),
+after `sudo ufw status numbered` when a deny for some machines may still refuse them.
 
 ## How a switch works
 
