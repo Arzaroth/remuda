@@ -459,7 +459,8 @@ select { appearance: none; padding-right: 30px; cursor: pointer;
 .proxy-status { margin: 12px 0 4px; font-size: 13px; color: var(--muted); }
 .proxy-status.good { color: var(--good); }
 .proxy-status.bad { color: var(--bad); }
-.proxy-lan { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-top: 18px; }
+.proxy-lan { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; align-items: center; margin-top: 18px; }
+.proxy-lan > div { flex: 1 1 16rem; min-width: 0; overflow-wrap: anywhere; }
 .proxy-lan .lan-title { font-weight: 650; }
 .proxy-lan p { margin: 4px 0 0; font-size: 12.5px; max-width: 64ch; }
 .proxy .firewall .proxy-status { margin-bottom: 8px; }
