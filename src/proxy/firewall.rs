@@ -54,7 +54,7 @@ fn ufw(etc: &Path, interface: Option<&str>, port: u16) -> Option<Verdict> {
     });
     let rule = match interface {
         Some(i) => format!("allow in on {i} to any port {port} proto tcp"),
-        None => format!("allow {port}/tcp"),
+        None => format!("allow in on IFACE to any port {port} proto tcp"),
     };
     let on = interface.map(|i| format!(" on {i}")).unwrap_or_default();
     let mut commands = match denied {
@@ -67,6 +67,11 @@ fn ufw(etc: &Path, interface: Option<&str>, port: u16) -> Option<Verdict> {
         true => vec![format!("sudo ufw insert 1 {rule}")],
         false => vec![format!("sudo ufw {rule}")],
     };
+    if interface.is_none()
+        && let Some(last) = commands.last_mut()
+    {
+        last.push_str("  # IFACE: the interface of the LAN, from ip -br addr");
+    }
     if some_kept_out && !denied {
         commands.insert(
             0,
@@ -296,7 +301,12 @@ COMMIT
         assert_eq!(open(&etc, 8317), Some(false));
         let v = check(etc.path(), None, None, 8317).unwrap();
         assert_eq!(v.name, "ufw");
-        assert_eq!(v.commands, ["sudo ufw allow 8317/tcp"]);
+        assert_eq!(
+            v.commands,
+            [
+                "sudo ufw allow in on IFACE to any port 8317 proto tcp  # IFACE: the interface of the LAN, from ip -br addr"
+            ]
+        );
     }
 
     #[test]
@@ -310,7 +320,10 @@ COMMIT
         assert_eq!(open(&etc, 8317), None);
         assert_eq!(
             check(etc.path(), None, None, 8317).unwrap().commands,
-            [KEPT, "sudo ufw allow 8317/tcp"]
+            [
+                KEPT,
+                "sudo ufw allow in on IFACE to any port 8317 proto tcp  # IFACE: the interface of the LAN, from ip -br addr"
+            ]
         );
         let etc = ufw_at("yes", None, Some(""));
         assert_eq!(open(&etc, 8317), None);
@@ -370,7 +383,13 @@ COMMIT
         let rules = "-A ufw-user-input -p tcp --dport 8317 -s 192.168.1.9 -j DROP\n";
         let etc = ufw_at("yes", Some("DROP"), Some(rules));
         let v = check(etc.path(), None, None, 8317).unwrap();
-        assert_eq!(v.commands, [KEPT, "sudo ufw allow 8317/tcp"]);
+        assert_eq!(
+            v.commands,
+            [
+                KEPT,
+                "sudo ufw allow in on IFACE to any port 8317 proto tcp  # IFACE: the interface of the LAN, from ip -br addr"
+            ]
+        );
     }
 
     #[test]
@@ -378,7 +397,12 @@ COMMIT
         let etc = ufw_at("yes", Some("DROP"), Some(RULES));
         let v = check(etc.path(), None, None, 6000).unwrap();
         assert_eq!(v.open, Some(false));
-        assert_eq!(v.commands, ["sudo ufw insert 1 allow 6000/tcp"]);
+        assert_eq!(
+            v.commands,
+            [
+                "sudo ufw insert 1 allow in on IFACE to any port 6000 proto tcp  # IFACE: the interface of the LAN, from ip -br addr"
+            ]
+        );
     }
 
     #[test]
@@ -393,7 +417,7 @@ COMMIT
             v.commands,
             [
                 "sudo ufw status numbered  # N: the first DENY IN from Anywhere for 8317; move any DENY for some machines above it",
-                "sudo ufw insert N allow 8317/tcp"
+                "sudo ufw insert N allow in on IFACE to any port 8317 proto tcp  # IFACE: the interface of the LAN, from ip -br addr"
             ]
         );
 
@@ -421,14 +445,22 @@ COMMIT
         let etc = ufw_at("yes", Some("ACCEPT"), Some(rules));
         let v = check(etc.path(), None, None, 8317).unwrap();
         assert_eq!(v.open, Some(false));
-        assert_eq!(v.commands[1], "sudo ufw insert N allow 8317/tcp");
+        assert_eq!(
+            v.commands[1],
+            "sudo ufw insert N allow in on IFACE to any port 8317 proto tcp  # IFACE: the interface of the LAN, from ip -br addr"
+        );
         let after_an_accept = "-A ufw-user-input -p tcp --dport 8317 -j ACCEPT
 -A ufw-user-input -p tcp --dport 8317 -s 192.168.1.9 -j DROP
 ";
         let etc = ufw_at("yes", Some("DROP"), Some(after_an_accept));
         let v = check(etc.path(), None, None, 8317).unwrap();
         assert_eq!(v.open, Some(true));
-        assert_eq!(v.commands, ["sudo ufw allow 8317/tcp"]);
+        assert_eq!(
+            v.commands,
+            [
+                "sudo ufw allow in on IFACE to any port 8317 proto tcp  # IFACE: the interface of the LAN, from ip -br addr"
+            ]
+        );
     }
 
     #[test]

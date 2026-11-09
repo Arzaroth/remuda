@@ -1314,7 +1314,9 @@ mod tests {
             state["firewall"]["commands"],
             json!([
                 "sudo ufw status numbered  # a DENY for some machines listed here still refuses them",
-                format!("sudo ufw allow {port}/tcp")
+                format!(
+                    "sudo ufw allow in on IFACE to any port {port} proto tcp  # IFACE: the interface of the LAN, from ip -br addr"
+                )
             ])
         );
         assert_eq!(
