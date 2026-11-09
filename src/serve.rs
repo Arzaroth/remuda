@@ -1373,6 +1373,7 @@ mod tests {
             format!(
                 "#!/bin/sh\n\
                  [ \"$1\" = --get-active-zones ] && {{ echo public; exit 0; }}\n\
+                 [ \"$1\" = --list-all ] && {{ echo '  target: default'; exit 0; }}\n\
                  [ \"$1\" = --state ] || {{ echo no; exit 1; }}\n\
                  touch '{}'\n\
                  i=0\n\

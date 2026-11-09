@@ -237,16 +237,26 @@ fn firewalld(search: &OsStr, interface: Option<&str>, port: u16) -> Option<Verdi
         Some(None) => None,
     };
     let open = zone.as_ref().filter(|_| state.is_some()).and_then(|zone| {
-        let mut args = vec![format!("--query-port={port}/tcp")];
-        if let Some(z) = zone {
-            args.insert(0, format!("--zone={z}"));
-        }
-        let args: Vec<&str> = args.iter().map(String::as_str).collect();
-        let r = child::run("firewall-cmd", &program, &args, ASK_FOR, 4096).ok()?;
-        match String::from_utf8_lossy(&r.out).trim() {
-            "yes" => Some(true),
-            "no" => Some(false),
-            _ => None,
+        let in_zone = |arg: String| {
+            let mut args = vec![arg];
+            if let Some(z) = zone {
+                args.insert(0, format!("--zone={z}"));
+            }
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            child::run("firewall-cmd", &program, &args, ASK_FOR, 64 * 1024).ok()
+        };
+        let r = in_zone(format!("--query-port={port}/tcp"))?;
+        let queried = match String::from_utf8_lossy(&r.out).trim() {
+            "yes" => true,
+            "no" => false,
+            _ => return None,
+        };
+        let all = in_zone("--list-all".to_owned()).filter(|r| r.ok)?;
+        let (target, rich) = zone_rules(&all.out);
+        match (rich, target.as_deref()) {
+            (true, _) => None,
+            (false, Some("ACCEPT")) => Some(true),
+            _ => Some(queried),
         }
     });
     let open =
@@ -267,6 +277,30 @@ fn firewalld(search: &OsStr, interface: Option<&str>, port: u16) -> Option<Verdi
         open,
         commands: vec![add, "sudo firewall-cmd --reload".to_owned()],
     })
+}
+
+/// A zone's target, and whether it has rich rules, which can let some
+/// machines in or keep them out whatever its ports say.
+fn zone_rules(listed: &[u8]) -> (Option<String>, bool) {
+    let listed = String::from_utf8_lossy(listed);
+    let target = listed
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("target:"))
+        .map(|t| t.trim().to_owned());
+    let rich = listed
+        .lines()
+        .skip_while(|l| !l.trim().starts_with("rich rules:"))
+        .enumerate()
+        .any(|(i, l)| {
+            let l = l.trim();
+            let l = if i == 0 {
+                l.trim_start_matches("rich rules:")
+            } else {
+                l
+            };
+            !l.trim().is_empty()
+        });
+    (target, rich)
 }
 
 /// `word` as the shell reads it back.
@@ -620,6 +654,7 @@ esac"#,
 --get-active-zones) printf 'home\n  interfaces: eth0\n' ;;
 --get-zone-of-interface=eth0) echo home ;;
 --get-zone-of-interface=*) echo 'no zone'; exit 2 ;;
+*--list-all) echo '  target: default' ;;
 "--zone=home --query-port=8317/tcp") echo yes ;;
 *) echo no; exit 1 ;;
 esac"#,
@@ -656,6 +691,7 @@ esac"#,
 --get-active-zones) echo public ;;
 --get-zone-of-interface=eth0) echo 'no zone'; exit 2 ;;
 --get-zone-of-interface=*) echo 'dbus error' >&2; exit 252 ;;
+*--list-all) echo '  target: default' ;;
 *) echo no; exit 1 ;;
 esac"#,
         );
@@ -690,6 +726,37 @@ esac"#,
         );
         let v = check(empty.path(), Some(dir.as_os_str()), None, 8317).unwrap();
         assert_eq!(v.open, None);
+    }
+
+    #[test]
+    fn a_zone_target_and_rich_rules_weigh_on_the_verdict() {
+        let empty = tempfile::tempdir().unwrap();
+        let zone = |listed: &str| {
+            let (bin, dir) = firewall_cmd(&format!(
+                r#"case "$1" in
+--state) echo running ;;
+--query-port=*) echo no; exit 1 ;;
+--list-all) printf '{listed}' ;;
+esac"#
+            ));
+            let v = check(empty.path(), Some(dir.as_os_str()), None, 8317).unwrap();
+            drop(bin);
+            v.open
+        };
+        assert_eq!(
+            zone("public\\n  target: default\\n  rich rules: \\n"),
+            Some(false)
+        );
+        assert_eq!(
+            zone("trusted\\n  target: ACCEPT\\n  rich rules: \\n"),
+            Some(true)
+        );
+        assert_eq!(
+            zone(
+                "public\\n  target: default\\n  rich rules: \\n\\trule family=\"ipv4\" source address=\"10.0.0.0/8\" accept\\n"
+            ),
+            None
+        );
     }
 
     #[test]
