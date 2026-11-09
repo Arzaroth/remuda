@@ -56,16 +56,23 @@ fn ufw(etc: &Path, interface: Option<&str>, port: u16) -> Option<Verdict> {
         Some(i) => format!("allow in on {i} to any port {port} proto tcp"),
         None => format!("allow {port}/tcp"),
     };
-    let allow = match (denied, some_kept_out) {
-        (true, true) => format!(
-            "sudo ufw insert N {rule}  # N: the first DENY from Anywhere that covers {port}"
-        ),
-        (true, false) => format!("sudo ufw insert 1 {rule}"),
-        (false, _) => format!("sudo ufw {rule}"),
+    let on = interface.map(|i| format!(" on {i}")).unwrap_or_default();
+    let mut commands = match denied {
+        true if some_kept_out => vec![
+            format!(
+                "sudo ufw status numbered  # N: the first DENY IN{on} from Anywhere for {port}; move any DENY for some machines above it"
+            ),
+            format!("sudo ufw insert N {rule}"),
+        ],
+        true => vec![format!("sudo ufw insert 1 {rule}")],
+        false => vec![format!("sudo ufw {rule}")],
     };
-    let mut commands = vec![allow];
-    if some_kept_out {
-        commands.insert(0, "sudo ufw status numbered".to_owned());
+    if some_kept_out && !denied {
+        commands.insert(
+            0,
+            "sudo ufw status numbered  # a DENY for some machines listed here still refuses them"
+                .to_owned(),
+        );
     }
     Some(Verdict {
         name: "ufw",
@@ -82,21 +89,23 @@ struct Ruled {
     /// would come after it, and one inserted first would overtake the rules
     /// refusing only some machines before it.
     denied: bool,
-    /// A rule refuses some machines, or the rules cannot be read;
+    /// A rule refuses some machines, ahead of the one deciding or behind a
+    /// deny an inserted allow would overtake, or the rules cannot be read;
     /// `ufw status numbered` shows them.
     some_kept_out: bool,
 }
 
 fn ufw_rules(rules: &str, port: u16, interface: Option<&str>, policy: Option<bool>) -> Ruled {
-    let (mut some_let_in, mut some_kept_out) = (false, false);
+    let (mut some_let_in, mut some_kept_out, mut kept_out_after) = (false, false, false);
     let mut decided = None;
     for rule in rules.lines().filter_map(|l| ufw_rule(l, port, interface)) {
-        if rule.restricted {
-            some_let_in |= rule.accepts;
-            some_kept_out |= !rule.accepts;
-        } else {
-            decided = Some(rule.accepts);
-            break;
+        match (decided, rule.restricted) {
+            (None, true) => {
+                some_let_in |= rule.accepts;
+                some_kept_out |= !rule.accepts;
+            }
+            (None, false) => decided = Some(rule.accepts),
+            (Some(_), _) => kept_out_after |= rule.restricted && !rule.accepts && !rule.elsewhere,
         }
     }
     let verdict = match decided.or(policy) {
@@ -104,10 +113,11 @@ fn ufw_rules(rules: &str, port: u16, interface: Option<&str>, policy: Option<boo
         Some(false) if some_let_in => None,
         verdict => verdict,
     };
+    let denied = decided == Some(false);
     Ruled {
         open: verdict,
-        denied: decided == Some(false),
-        some_kept_out,
+        denied,
+        some_kept_out: some_kept_out || (denied && kept_out_after),
     }
 }
 
@@ -123,6 +133,8 @@ struct Rule {
     /// Limited to some sources, destinations or another interface, so it
     /// decides nothing for the rest.
     restricted: bool,
+    /// Limited to another interface than the known one an allow is scoped to.
+    elsewhere: bool,
 }
 
 /// Whether a line of ufw's `user.rules` accepts or refuses TCP on `port`.
@@ -153,6 +165,9 @@ fn ufw_rule(line: &str, port: u16, interface: Option<&str>) -> Option<Rule> {
             || after("-d").is_some()
             || negated("-i")
             || after("-i").is_some_and(|i| Some(i) != interface),
+        elsewhere: interface.is_some()
+            && !negated("-i")
+            && after("-i").is_some_and(|i| Some(i) != interface),
     })
 }
 
@@ -231,6 +246,9 @@ mod tests {
 
     use super::*;
 
+    const KEPT: &str =
+        "sudo ufw status numbered  # a DENY for some machines listed here still refuses them";
+
     const RULES: &str = "*filter
 :ufw-user-input - [0:0]
 -A ufw-user-input -p udp --dport 8317 -j ACCEPT
@@ -292,7 +310,7 @@ COMMIT
         assert_eq!(open(&etc, 8317), None);
         assert_eq!(
             check(etc.path(), None, None, 8317).unwrap().commands,
-            ["sudo ufw status numbered", "sudo ufw allow 8317/tcp"]
+            [KEPT, "sudo ufw allow 8317/tcp"]
         );
         let etc = ufw_at("yes", None, Some(""));
         assert_eq!(open(&etc, 8317), None);
@@ -352,10 +370,7 @@ COMMIT
         let rules = "-A ufw-user-input -p tcp --dport 8317 -s 192.168.1.9 -j DROP\n";
         let etc = ufw_at("yes", Some("DROP"), Some(rules));
         let v = check(etc.path(), None, None, 8317).unwrap();
-        assert_eq!(
-            v.commands,
-            ["sudo ufw status numbered", "sudo ufw allow 8317/tcp"]
-        );
+        assert_eq!(v.commands, [KEPT, "sudo ufw allow 8317/tcp"]);
     }
 
     #[test]
@@ -377,10 +392,43 @@ COMMIT
         assert_eq!(
             v.commands,
             [
-                "sudo ufw status numbered",
-                "sudo ufw insert N allow 8317/tcp  # N: the first DENY from Anywhere that covers 8317"
+                "sudo ufw status numbered  # N: the first DENY IN from Anywhere for 8317; move any DENY for some machines above it",
+                "sudo ufw insert N allow 8317/tcp"
             ]
         );
+
+        let rules = "-A ufw-user-input -i eth1 -p tcp --dport 8317 -j DROP
+-A ufw-user-input -i eth0 -p tcp --dport 8317 -s 192.168.1.9 -j DROP
+-A ufw-user-input -i eth0 -p tcp --dport 8317 -j DROP
+";
+        let etc = ufw_at("yes", Some("ACCEPT"), Some(rules));
+        let v = check(etc.path(), None, Some("eth0"), 8317).unwrap();
+        assert_eq!(v.open, Some(false));
+        assert_eq!(
+            v.commands,
+            [
+                "sudo ufw status numbered  # N: the first DENY IN on eth0 from Anywhere for 8317; move any DENY for some machines above it",
+                "sudo ufw insert N allow in on eth0 to any port 8317 proto tcp"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_limited_deny_behind_the_deny_for_all_is_not_overtaken_blindly() {
+        let rules = "-A ufw-user-input -p tcp --dport 8317 -j DROP
+-A ufw-user-input -p tcp --dport 8317 -s 192.168.1.9 -j DROP
+";
+        let etc = ufw_at("yes", Some("ACCEPT"), Some(rules));
+        let v = check(etc.path(), None, None, 8317).unwrap();
+        assert_eq!(v.open, Some(false));
+        assert_eq!(v.commands[1], "sudo ufw insert N allow 8317/tcp");
+        let after_an_accept = "-A ufw-user-input -p tcp --dport 8317 -j ACCEPT
+-A ufw-user-input -p tcp --dport 8317 -s 192.168.1.9 -j DROP
+";
+        let etc = ufw_at("yes", Some("DROP"), Some(after_an_accept));
+        let v = check(etc.path(), None, None, 8317).unwrap();
+        assert_eq!(v.open, Some(true));
+        assert_eq!(v.commands, ["sudo ufw allow 8317/tcp"]);
     }
 
     #[test]

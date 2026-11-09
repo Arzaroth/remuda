@@ -1313,7 +1313,7 @@ mod tests {
         assert_eq!(
             state["firewall"]["commands"],
             json!([
-                "sudo ufw status numbered",
+                "sudo ufw status numbered  # a DENY for some machines listed here still refuses them",
                 format!("sudo ufw allow {port}/tcp")
             ])
         );
