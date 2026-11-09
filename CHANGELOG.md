@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The page's dropdowns draw their arrow inside the field, clear of the rounded
+  edge, instead of the browser's arrow pressed against the border.
+
 ## [0.37.0] - 2026-11-07
 
 ### Added
