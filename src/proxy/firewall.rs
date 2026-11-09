@@ -52,12 +52,16 @@ fn ufw(etc: &Path, interface: Option<&str>, port: u16) -> Option<Verdict> {
         denied: false,
         some_kept_out: true,
     });
+    let rule = match interface {
+        Some(i) => format!("allow in on {i} to any port {port} proto tcp"),
+        None => format!("allow {port}/tcp"),
+    };
     let allow = match (denied, some_kept_out) {
         (true, true) => format!(
-            "sudo ufw insert N allow {port}/tcp  # N: the first DENY from Anywhere that covers {port}"
+            "sudo ufw insert N {rule}  # N: the first DENY from Anywhere that covers {port}"
         ),
-        (true, false) => format!("sudo ufw insert 1 allow {port}/tcp"),
-        (false, _) => format!("sudo ufw allow {port}/tcp"),
+        (true, false) => format!("sudo ufw insert 1 {rule}"),
+        (false, _) => format!("sudo ufw {rule}"),
     };
     let mut commands = vec![allow];
     if some_kept_out {
@@ -319,6 +323,23 @@ COMMIT
         assert_eq!(open_on(Some("wlan0"), 8317), None);
         assert_eq!(open_on(None, 8317), None);
         assert_eq!(open_on(Some("eth0"), 9000), None);
+        assert_eq!(
+            check(etc.path(), None, Some("wlan0"), 8317)
+                .unwrap()
+                .commands,
+            ["sudo ufw allow in on wlan0 to any port 8317 proto tcp"]
+        );
+
+        let denies = "-A ufw-user-input -i eth0 -p tcp --dport 8317 -j DROP
+-A ufw-user-input -i eth1 -p tcp --dport 8317 -j DROP
+";
+        let etc = ufw_at("yes", Some("ACCEPT"), Some(denies));
+        let v = check(etc.path(), None, Some("eth0"), 8317).unwrap();
+        assert_eq!(v.open, Some(false));
+        assert_eq!(
+            v.commands,
+            ["sudo ufw insert 1 allow in on eth0 to any port 8317 proto tcp"]
+        );
 
         let negated = "-A ufw-user-input ! -i eth0 -p tcp --dport 8317 -j ACCEPT\n";
         let etc = ufw_at("yes", Some("DROP"), Some(negated));
