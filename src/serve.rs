@@ -1312,7 +1312,10 @@ mod tests {
         let port = state["running"].as_u64().unwrap();
         assert_eq!(
             state["firewall"]["commands"],
-            json!([format!("sudo ufw allow {port}/tcp")])
+            json!([
+                "sudo ufw status numbered",
+                format!("sudo ufw allow {port}/tcp")
+            ])
         );
         assert_eq!(
             state["baseUrls"]["claude"],
@@ -1361,18 +1364,22 @@ mod tests {
         std::fs::create_dir_all(&bin).unwrap();
         let started = e.tmp.path().join("started");
         let release = e.tmp.path().join("release");
+        let finished = e.tmp.path().join("finished");
         let stub = bin.join("firewall-cmd");
         std::fs::write(
             &stub,
             format!(
                 "#!/bin/sh\n\
+                 [ \"$1\" = --get-active-zones ] && {{ echo public; exit 0; }}\n\
                  [ \"$1\" = --state ] || {{ echo no; exit 1; }}\n\
                  touch '{}'\n\
                  i=0\n\
-                 while [ ! -e '{}' ] && [ $i -lt 40 ]; do sleep 0.1; i=$((i+1)); done\n\
+                 while [ ! -e '{}' ] && [ $i -lt 45 ]; do sleep 0.1; i=$((i+1)); done\n\
+                 touch '{}'\n\
                  echo running\n",
                 started.display(),
-                release.display()
+                release.display(),
+                finished.display()
             ),
         )
         .unwrap();
@@ -1404,17 +1411,12 @@ mod tests {
         }
         assert!(started.exists(), "the firewall was never asked");
 
-        let blocked = Instant::now();
         let (status, state) = call(&app, "GET", "/api/state", Value::Null);
         assert_eq!(status, 200);
         assert_eq!(state["proxy"]["firewall"], Value::Null);
         let (status, _) = call(&app, "POST", "/api/proxy/keys", json!({"name": "laptop"}));
         assert_eq!(status, 200);
-        assert!(
-            blocked.elapsed() < Duration::from_secs(1),
-            "{:?}",
-            blocked.elapsed()
-        );
+        assert!(!finished.exists(), "the requests waited on firewall-cmd");
         std::fs::write(&release, "").unwrap();
 
         let firewall = (0..100)

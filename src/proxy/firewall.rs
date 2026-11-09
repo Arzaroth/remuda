@@ -50,10 +50,16 @@ fn ufw(etc: &Path, interface: Option<&str>, port: u16) -> Option<Verdict> {
     } = open.unwrap_or(Ruled {
         open: None,
         denied: false,
-        some_kept_out: false,
+        some_kept_out: true,
     });
-    let allow = if denied { "insert 1 allow" } else { "allow" };
-    let mut commands = vec![format!("sudo ufw {allow} {port}/tcp")];
+    let allow = match (denied, some_kept_out) {
+        (true, true) => format!(
+            "sudo ufw insert N allow {port}/tcp  # N: the first DENY from Anywhere that covers {port}"
+        ),
+        (true, false) => format!("sudo ufw insert 1 allow {port}/tcp"),
+        (false, _) => format!("sudo ufw allow {port}/tcp"),
+    };
+    let mut commands = vec![allow];
     if some_kept_out {
         commands.insert(0, "sudo ufw status numbered".to_owned());
     }
@@ -69,10 +75,11 @@ struct Ruled {
     /// rules limited to some machines let only some in.
     open: Option<bool>,
     /// A rule refusing every machine decides the port, so an appended allow
-    /// would come after it.
+    /// would come after it, and one inserted first would overtake the rules
+    /// refusing only some machines before it.
     denied: bool,
-    /// A rule refuses some machines, which an allow for all, appended, leaves
-    /// refused; `ufw status numbered` shows which.
+    /// A rule refuses some machines, or the rules cannot be read;
+    /// `ufw status numbered` shows them.
     some_kept_out: bool,
 }
 
@@ -186,6 +193,8 @@ fn firewalld(search: &OsStr, interface: Option<&str>, port: u16) -> Option<Verdi
             _ => None,
         }
     });
+    let open =
+        open.filter(|_| ask("--get-active-zones").is_some_and(|r| r.ok && !by_source(&r.out)));
     let zoned = match (&zone, interface) {
         (Some(Some(z)), _) => format!(" --zone={z}"),
         (None, Some(i)) => format!(" --zone=$(firewall-cmd --get-zone-of-interface={i})"),
@@ -198,6 +207,16 @@ fn firewalld(search: &OsStr, interface: Option<&str>, port: u16) -> Option<Verdi
             format!("sudo firewall-cmd --permanent{zoned} --add-port={port}/tcp"),
             "sudo firewall-cmd --reload".to_owned(),
         ],
+    })
+}
+
+/// Whether an active zone is bound to source addresses, which takes the
+/// machines it names away from the interface's zone.
+fn by_source(zones: &[u8]) -> bool {
+    String::from_utf8_lossy(zones).lines().any(|l| {
+        l.trim()
+            .strip_prefix("sources:")
+            .is_some_and(|s| !s.trim().is_empty())
     })
 }
 
@@ -267,6 +286,10 @@ COMMIT
         assert_eq!(open(&etc, 8317), None);
         let etc = ufw_at("yes", Some("DROP"), None);
         assert_eq!(open(&etc, 8317), None);
+        assert_eq!(
+            check(etc.path(), None, None, 8317).unwrap().commands,
+            ["sudo ufw status numbered", "sudo ufw allow 8317/tcp"]
+        );
         let etc = ufw_at("yes", None, Some(""));
         assert_eq!(open(&etc, 8317), None);
     }
@@ -323,6 +346,23 @@ COMMIT
     }
 
     #[test]
+    fn a_deny_for_all_after_a_limited_one_is_overtaken_in_its_place() {
+        let rules = "-A ufw-user-input -p tcp --dport 8317 -s 192.168.1.9 -j DROP
+-A ufw-user-input -p tcp --dport 8317 -j DROP
+";
+        let etc = ufw_at("yes", Some("ACCEPT"), Some(rules));
+        let v = check(etc.path(), None, None, 8317).unwrap();
+        assert_eq!(v.open, Some(false));
+        assert_eq!(
+            v.commands,
+            [
+                "sudo ufw status numbered",
+                "sudo ufw insert N allow 8317/tcp  # N: the first DENY from Anywhere that covers 8317"
+            ]
+        );
+    }
+
+    #[test]
     fn no_firewall_when_ufw_is_off_and_firewalld_absent() {
         let etc = ufw_at("no", Some("DROP"), Some(RULES));
         assert_eq!(check(etc.path(), None, None, 8317), None);
@@ -374,6 +414,7 @@ esac"#,
         let (_bin, dir) = firewall_cmd(
             r#"case "$*" in
 --state) echo running ;;
+--get-active-zones) printf 'home\n  interfaces: eth0\n' ;;
 --get-zone-of-interface=eth0) echo home ;;
 --get-zone-of-interface=*) echo 'no zone'; exit 2 ;;
 "--zone=home --query-port=8317/tcp") echo yes ;;
@@ -391,6 +432,7 @@ esac"#,
         let (_bin, dir) = firewall_cmd(
             r#"case "$*" in
 --state) echo running ;;
+--get-active-zones) echo work ;;
 --get-zone-of-interface=*) echo work ;;
 *) echo no; exit 1 ;;
 esac"#,
@@ -408,6 +450,7 @@ esac"#,
         let (_bin, dir) = firewall_cmd(
             r#"case "$*" in
 --state) echo running ;;
+--get-active-zones) echo public ;;
 --get-zone-of-interface=eth0) echo 'no zone'; exit 2 ;;
 --get-zone-of-interface=*) echo 'dbus error' >&2; exit 252 ;;
 *) echo no; exit 1 ;;
@@ -421,6 +464,29 @@ esac"#,
             v.commands[0],
             "sudo firewall-cmd --permanent --zone=$(firewall-cmd --get-zone-of-interface=wlan0) --add-port=8317/tcp"
         );
+    }
+
+    #[test]
+    fn a_zone_bound_to_sources_leaves_the_verdict_open() {
+        let empty = tempfile::tempdir().unwrap();
+        let (_bin, dir) = firewall_cmd(
+            r#"case "$1" in
+--state) echo running ;;
+--get-active-zones) printf 'public\n  interfaces: eth0\nblock\n  sources: 192.168.1.0/24\n' ;;
+--query-port=*) echo yes ;;
+esac"#,
+        );
+        let v = check(empty.path(), Some(dir.as_os_str()), None, 8317).unwrap();
+        assert_eq!(v.open, None);
+        let (_bin, dir) = firewall_cmd(
+            r#"case "$1" in
+--state) echo running ;;
+--get-active-zones) echo 'dbus error' >&2; exit 252 ;;
+--query-port=*) echo yes ;;
+esac"#,
+        );
+        let v = check(empty.path(), Some(dir.as_os_str()), None, 8317).unwrap();
+        assert_eq!(v.open, None);
     }
 
     #[test]
