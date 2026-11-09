@@ -57,13 +57,14 @@ machines out, reading only what needs no root:
 
 | Firewall | On when | Port open when | Opened by |
 | --- | --- | --- | --- |
-| ufw | `ENABLED=yes` in `/etc/ufw/ufw.conf` | the first `ufw-user-input` rule in `/etc/ufw/user.rules` for TCP on the port that is not limited (`-s`, `-d`, a negated `! -i`, or `-i` naming another interface than the default route's) accepts it, else `DEFAULT_INPUT_POLICY` in `/etc/default/ufw` is `ACCEPT` | `sudo ufw allow <port>/tcp`, or `sudo ufw insert 1 allow <port>/tcp` when a deny rule for every machine matched, since an appended allow would come after it; a deny limited to some machines is left in place, with `sudo ufw status numbered` first to show it |
-| firewalld | `firewall-cmd --state` succeeds | `firewall-cmd --zone=<zone> --query-port=<port>/tcp` says `yes`, the zone being that of the default route's interface (`proxy::default_interface`, from `/proc/net/route`), or the default zone when firewall-cmd says `no zone` | `sudo firewall-cmd --permanent --zone=<zone> --add-port=<port>/tcp`, then `--reload`; when the zone lookup failed, `--zone=$(firewall-cmd --get-zone-of-interface=<interface>)`, so the shell asks again |
+| ufw | `ENABLED=yes` in `/etc/ufw/ufw.conf` | the first `ufw-user-input` rule in `/etc/ufw/user.rules` for TCP on the port that is not limited (`-s`, `-d`, a negated `! -i`, or `-i` naming another interface than the default route's) accepts it, or, when no such rule matches, `DEFAULT_INPUT_POLICY` in `/etc/default/ufw` is `ACCEPT` | `sudo ufw allow <port>/tcp`, or `sudo ufw insert 1 allow <port>/tcp` when a deny rule for every machine matched, since an appended allow would come after it. A deny limited to some machines is left in place, with `sudo ufw status numbered` first to show it; when one comes before the deny for every machine, the allow is `sudo ufw insert N`, N being that deny's number, so it overtakes only that deny. Rules that cannot be read get `sudo ufw status numbered` too |
+| firewalld | `firewall-cmd --state` succeeds | `firewall-cmd --zone=<zone> --query-port=<port>/tcp` says `yes`, the zone being that of the default route's interface (`proxy::default_interface`, from `/proc/net/route`), or the default zone when firewall-cmd says `no zone`, and `--get-active-zones` names no zone bound to `sources:`, since such a zone takes the machines it names away from the interface's | `sudo firewall-cmd --permanent --zone=<zone> --add-port=<port>/tcp`, then `--reload`; when the zone lookup failed, `--zone=$(firewall-cmd --get-zone-of-interface=<interface>)`, so the shell asks again |
 
 ufw is looked at first. `open` is null when ufw's rules or policy cannot be
 read, when limited rules let some machines in that the verdict would keep out
-(or the reverse), when the interface's zone cannot be learnt, or when
-firewall-cmd's answer is neither yes nor no. A port opened by a firewalld service counts as closed;
+(or the reverse), when the interface's zone or the active zones cannot be
+learnt, when an active zone is bound to sources, or when firewall-cmd's
+answer is neither yes nor no. A port opened by a firewalld service counts as closed;
 nftables or iptables set by hand are not read.
 
 `/api/state` runs under the store's lock, so it never asks: `App::firewall`
