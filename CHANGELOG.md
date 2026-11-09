@@ -7,7 +7,8 @@
 - The API proxy card has a "Reachable from other machines" switch (`lan` in
   `.proxy.json`): the proxy listens on every interface and its base URLs carry
   the machine's LAN address. When ufw or firewalld blocks the port, the card
-  shows the commands that open it.
+  shows the commands that open it on the LAN interface, and says when a rule
+  for some machines may still keep them out.
 
 ### Fixed
 
