@@ -33,7 +33,17 @@ pub fn check(
 }
 
 fn ufw(etc: &Path, interface: Option<&str>, port: u16) -> Option<Verdict> {
-    let conf = std::fs::read_to_string(etc.join("ufw/ufw.conf")).ok()?;
+    let conf = match std::fs::read_to_string(etc.join("ufw/ufw.conf")) {
+        Ok(conf) => conf,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(_) => {
+            return Some(Verdict {
+                name: "ufw",
+                open: None,
+                commands: vec!["sudo ufw status numbered".to_owned()],
+            });
+        }
+    };
     if !setting(&conf, "ENABLED").is_some_and(|v| v.eq_ignore_ascii_case("yes")) {
         return None;
     }
@@ -53,11 +63,11 @@ fn ufw(etc: &Path, interface: Option<&str>, port: u16) -> Option<Verdict> {
         some_kept_out: true,
     });
     let rule = match interface {
-        Some(i) => format!("allow in on {i} to any port {port} proto tcp"),
+        Some(i) => format!("allow in on {} to any port {port} proto tcp", quoted(i)),
         None => format!("allow in on IFACE to any port {port} proto tcp"),
     };
     let on = match interface {
-        Some(i) => format!("on {i} or on no interface"),
+        Some(i) => format!("on {} or on no interface", quoted(i)),
         None => "on any interface".to_owned(),
     };
     let mut commands = match denied {
@@ -108,8 +118,11 @@ fn ufw_rules(rules: &str, port: u16, interface: Option<&str>, policy: Option<boo
     let mut throttled = false;
     let mut decided = None;
     for rule in rules.lines().filter_map(|l| ufw_rule(l, port, interface)) {
+        if rule.elsewhere {
+            continue;
+        }
         if rule.throttles {
-            throttled |= decided.is_none() && !rule.elsewhere;
+            throttled = true;
             continue;
         }
         match (decided, rule.restricted) {
@@ -118,7 +131,7 @@ fn ufw_rules(rules: &str, port: u16, interface: Option<&str>, policy: Option<boo
                 some_kept_out |= !rule.accepts;
             }
             (None, false) => decided = Some(rule.accepts),
-            (Some(_), _) => kept_out_after |= rule.restricted && !rule.accepts && !rule.elsewhere,
+            (Some(_), _) => kept_out_after |= rule.restricted && !rule.accepts,
         }
     }
     let verdict = match decided.or(policy) {
@@ -179,6 +192,8 @@ fn ufw_rule(line: &str, port: u16, interface: Option<&str>) -> Option<Rule> {
         accepts,
         restricted: after("-s").is_some()
             || after("-d").is_some()
+            || after("--sport").is_some()
+            || after("--sports").is_some()
             || negated("-i")
             || after("-i").is_some_and(|i| Some(i) != interface),
         elsewhere: interface.is_some()
@@ -201,10 +216,15 @@ fn covers(range: &str, port: u16) -> bool {
 fn firewalld(search: &OsStr, interface: Option<&str>, port: u16) -> Option<Verdict> {
     let program = which("firewall-cmd", search)?;
     let ask = |arg: &str| child::run("firewall-cmd", &program, &[arg], ASK_FOR, 4096).ok();
-    if !ask("--state")?.ok {
+    let state = ask("--state");
+    if state.as_ref().is_some_and(|r| !r.ok) {
         return None;
     }
-    let zone = match interface.map(|i| ask(&format!("--get-zone-of-interface={i}"))) {
+    let zone = match interface.map(|i| {
+        state
+            .as_ref()
+            .and(ask(&format!("--get-zone-of-interface={i}")))
+    }) {
         None => Some(None),
         Some(Some(r)) => {
             let said = String::from_utf8_lossy(&r.out).trim().to_owned();
@@ -216,7 +236,7 @@ fn firewalld(search: &OsStr, interface: Option<&str>, port: u16) -> Option<Verdi
         }
         Some(None) => None,
     };
-    let open = zone.as_ref().and_then(|zone| {
+    let open = zone.as_ref().filter(|_| state.is_some()).and_then(|zone| {
         let mut args = vec![format!("--query-port={port}/tcp")];
         if let Some(z) = zone {
             args.insert(0, format!("--zone={z}"));
@@ -231,19 +251,35 @@ fn firewalld(search: &OsStr, interface: Option<&str>, port: u16) -> Option<Verdi
     });
     let open =
         open.filter(|_| ask("--get-active-zones").is_some_and(|r| r.ok && !by_source(&r.out)));
-    let zoned = match (&zone, interface) {
-        (Some(Some(z)), _) => format!(" --zone={z}"),
-        (None, Some(i)) => format!(" --zone=$(firewall-cmd --get-zone-of-interface={i})"),
-        _ => String::new(),
+    let add = match (&zone, interface) {
+        (Some(Some(z)), _) => format!(
+            "sudo firewall-cmd --permanent --zone={} --add-port={port}/tcp",
+            quoted(z)
+        ),
+        (None, Some(i)) => format!(
+            "Z=$(firewall-cmd --get-zone-of-interface={}) && [ -n \"$Z\" ] && sudo firewall-cmd --permanent --zone=\"$Z\" --add-port={port}/tcp",
+            quoted(i)
+        ),
+        _ => format!("sudo firewall-cmd --permanent --add-port={port}/tcp"),
     };
     Some(Verdict {
         name: "firewalld",
         open,
-        commands: vec![
-            format!("sudo firewall-cmd --permanent{zoned} --add-port={port}/tcp"),
-            "sudo firewall-cmd --reload".to_owned(),
-        ],
+        commands: vec![add, "sudo firewall-cmd --reload".to_owned()],
     })
+}
+
+/// `word` as the shell reads it back.
+fn quoted(word: &str) -> String {
+    if !word.is_empty()
+        && word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._-@+".contains(c))
+    {
+        word.to_owned()
+    } else {
+        format!("'{}'", word.replace('\'', r"'\''"))
+    }
 }
 
 /// Whether an active zone is bound to source addresses, which takes the
@@ -363,7 +399,7 @@ COMMIT
         let etc = ufw_at("yes", Some("DROP"), Some(rules));
         let open_on = |interface, port| check(etc.path(), None, interface, port).unwrap().open;
         assert_eq!(open_on(Some("eth0"), 8317), Some(true));
-        assert_eq!(open_on(Some("wlan0"), 8317), None);
+        assert_eq!(open_on(Some("wlan0"), 8317), Some(false));
         assert_eq!(open_on(None, 8317), None);
         assert_eq!(open_on(Some("eth0"), 9000), None);
         assert_eq!(
@@ -446,6 +482,45 @@ COMMIT
                 "sudo ufw status numbered  # N: the first DENY or REJECT IN for 8317 to Anywhere from Anywhere, on eth0 or on no interface; move any DENY or LIMIT for some machines above it",
                 "sudo ufw insert N allow in on eth0 to any port 8317 proto tcp"
             ]
+        );
+    }
+
+    #[test]
+    fn a_source_port_limits_a_rule() {
+        let rules = "-A ufw-user-input -p tcp --dport 8317 --sport 1024 -j ACCEPT\n";
+        let etc = ufw_at("yes", Some("DROP"), Some(rules));
+        assert_eq!(open(&etc, 8317), None);
+    }
+
+    #[test]
+    fn an_unreadable_ufw_conf_is_an_unknown_ufw() {
+        let etc = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(etc.path().join("ufw/ufw.conf")).unwrap();
+        let v = check(etc.path(), None, None, 8317).unwrap();
+        assert_eq!((v.name, v.open), ("ufw", None));
+        assert_eq!(v.commands, ["sudo ufw status numbered"]);
+    }
+
+    #[test]
+    fn an_odd_interface_name_is_quoted() {
+        let etc = ufw_at("yes", Some("DROP"), Some(""));
+        let v = check(etc.path(), None, Some("e;x"), 8317).unwrap();
+        assert_eq!(
+            v.commands,
+            ["sudo ufw allow in on 'e;x' to any port 8317 proto tcp"]
+        );
+    }
+
+    #[test]
+    fn a_rate_limit_behind_the_deny_for_all_is_not_overtaken_blindly() {
+        let rules = "-A ufw-user-input -p tcp --dport 8317 -j DROP
+-A ufw-user-input -p tcp --dport 8317 -s 192.168.1.9 -j ufw-user-limit
+";
+        let etc = ufw_at("yes", Some("ACCEPT"), Some(rules));
+        let v = check(etc.path(), None, None, 8317).unwrap();
+        assert!(
+            v.commands[1].starts_with("sudo ufw insert N allow"),
+            "{v:?}"
         );
     }
 
@@ -590,7 +665,7 @@ esac"#,
         assert_eq!(v.open, None);
         assert_eq!(
             v.commands[0],
-            "sudo firewall-cmd --permanent --zone=$(firewall-cmd --get-zone-of-interface=wlan0) --add-port=8317/tcp"
+            "Z=$(firewall-cmd --get-zone-of-interface=wlan0) && [ -n \"$Z\" ] && sudo firewall-cmd --permanent --zone=\"$Z\" --add-port=8317/tcp"
         );
     }
 
