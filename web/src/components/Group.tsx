@@ -486,7 +486,7 @@ function Row(props: { c: Credential; live: Live | undefined }) {
                 <button
                   class="btn"
                   data-armed={confirms.signout.text() ? '1' : undefined}
-                  title="Take this login out of the CLI and keep it here, so no login is in use"
+                  title="Take this login out of the CLI's own files and keep it here; a remuda run session keeps its own"
                   onClick={signOut}
                 >
                   {confirms.signout.text() ?? 'Sign out'}

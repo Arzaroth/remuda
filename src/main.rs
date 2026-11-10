@@ -133,7 +133,7 @@ enum Cmd {
         #[arg(long)]
         discard: bool,
     },
-    /// Sign a CLI out, keeping its login in the store, so no login is in use.
+    /// Take the login out of a CLI's own files, keeping it in the store.
     Signout {
         #[arg(value_parser = PROVIDERS)]
         provider: String,
