@@ -592,7 +592,8 @@ fn hook(store: &Store, claude: &Claude, what: &str) -> Result<()> {
         None => artifacts::Seat::Live,
     };
     let pause = || std::thread::sleep(std::time::Duration::from_millis(500));
-    match artifacts::hook(store, claude, seat, &raw, &pause) {
+    let nudge = || gauge::nudge(&paths::tokengauge_snapshot());
+    match artifacts::hook(store, claude, seat, &raw, &pause, &nudge) {
         Ok(Some(out)) => println!("{out}"),
         Ok(None) => {}
         Err(e) => eprintln!("remuda hook artifact: {e:#}"),

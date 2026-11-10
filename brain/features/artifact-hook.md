@@ -66,9 +66,11 @@ on `on`: something else moved it meanwhile, and the hook leaves it there.
 A restore no event came for (the session died mid-call) is made by the next
 hook of another session once it is 10 minutes old.
 
-Each switch is an ordinary one: it starts auto mode's dwell and waits for
-TokenGauge's next fetch, which keeps auto mode from moving the CLI under the
-call. The other open sessions run on the publishing login for its length.
+Each switch is an ordinary one and starts auto mode's dwell. The switch to the
+publishing login also waits for TokenGauge's next fetch, which keeps auto mode
+from moving the CLI under the call; the switch back nudges TokenGauge to fetch
+(`gauge::nudge`), as `remuda use` does, since the call is over. The other open
+sessions run on the publishing login for the call's length.
 
 ## Run sessions
 

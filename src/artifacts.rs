@@ -115,21 +115,23 @@ fn said(event: &str, text: String) -> Value {
 
 /// Handles one Claude Code hook event on an artifact tool, given its JSON;
 /// what to print back, if anything. `pause` is called, the store unlocked,
-/// while another session's call holds the login this one must leave.
+/// while another session's call holds the login this one must leave, and
+/// `nudge` once a call's login is switched back.
 pub fn hook(
     store: &Store,
     p: &dyn Provider,
     seat: Seat,
     raw: &str,
     pause: &dyn Fn(),
+    nudge: &dyn Fn(),
 ) -> Result<Option<Value>> {
     let input: Input = serde_json::from_str(raw)?;
     if !TOOLS.contains(&input.tool_name.as_str()) {
         return Ok(None);
     }
     match input.hook_event_name.as_str() {
-        "PreToolUse" => before(store, p, &seat, &input, pause),
-        "PostToolUse" | "PostToolUseFailure" => after(store, p, &seat, &input),
+        "PreToolUse" => before(store, p, &seat, &input, pause, nudge),
+        "PostToolUse" | "PostToolUseFailure" => after(store, p, &seat, &input, nudge),
         _ => Ok(None),
     }
 }
@@ -148,13 +150,14 @@ fn before(
     seat: &Seat,
     input: &Input,
     pause: &dyn Fn(),
+    nudge: &dyn Fn(),
 ) -> Result<Option<Value>> {
     const EVENT: &str = "PreToolUse";
     let started = now_ms();
     loop {
         let lock = store.lock()?;
         let mut ledger = load(store);
-        restore_stale(store, p, &mut ledger, &input.session_id)?;
+        restore_stale(store, p, &mut ledger, &input.session_id, nudge)?;
         let session = ledger.sessions.entry(input.session_id.clone()).or_default();
         session.seen = now_ms();
         let Some(owner) = target(input, session).and_then(|k| ledger.owners.get(&k).cloned())
@@ -235,7 +238,13 @@ fn before(
     }
 }
 
-fn after(store: &Store, p: &dyn Provider, seat: &Seat, input: &Input) -> Result<Option<Value>> {
+fn after(
+    store: &Store,
+    p: &dyn Provider,
+    seat: &Seat,
+    input: &Input,
+    nudge: &dyn Fn(),
+) -> Result<Option<Value>> {
     const EVENT: &str = "PostToolUse";
     let _lock = store.lock()?;
     let mut ledger = load(store);
@@ -258,7 +267,7 @@ fn after(store: &Store, p: &dyn Provider, seat: &Seat, input: &Input) -> Result<
         save(store, &ledger);
         return Ok(None);
     };
-    let said_back = put_back(store, p, &restore, account.as_ref());
+    let said_back = put_back(store, p, &restore, account.as_ref(), nudge);
     save(store, &ledger);
     Ok(Some(said(
         if input.hook_event_name == "PostToolUseFailure" {
@@ -277,6 +286,7 @@ fn put_back(
     p: &dyn Provider,
     restore: &Restore,
     now_on: Option<&Login>,
+    nudge: &dyn Fn(),
 ) -> Result<String> {
     if now_on.is_none_or(|l| l.name != restore.on) {
         return Ok(format!(
@@ -288,10 +298,13 @@ fn put_back(
     match ops::switch_when(store, p, &restore.back, false, By::Hook, Some(why), &|| {
         Ok(())
     }) {
-        Ok(_) => Ok(format!(
-            "remuda switched Claude Code back to {} after the artifact call.",
-            restore.back
-        )),
+        Ok(_) => {
+            nudge();
+            Ok(format!(
+                "remuda switched Claude Code back to {} after the artifact call.",
+                restore.back
+            ))
+        }
         Err(e) => Ok(format!(
             "remuda could not switch Claude Code back to {} ({e:#}); it stays on {} until auto mode or `remuda use` moves it.",
             restore.back, restore.on
@@ -299,7 +312,13 @@ fn put_back(
     }
 }
 
-fn restore_stale(store: &Store, p: &dyn Provider, ledger: &mut Ledger, except: &str) -> Result<()> {
+fn restore_stale(
+    store: &Store,
+    p: &dyn Provider,
+    ledger: &mut Ledger,
+    except: &str,
+    nudge: &dyn Fn(),
+) -> Result<()> {
     let now = now_ms();
     let stale: Vec<String> = ledger
         .sessions
@@ -314,7 +333,7 @@ fn restore_stale(store: &Store, p: &dyn Provider, ledger: &mut Ledger, except: &
             continue;
         };
         let current = live(store, p)?;
-        put_back(store, p, &restore, current.as_ref())?;
+        put_back(store, p, &restore, current.as_ref(), nudge)?;
     }
     ledger
         .sessions
@@ -422,7 +441,20 @@ mod tests {
     }
 
     fn run(e: &Env, raw: &str) -> Option<Value> {
-        hook(&e.store, &e.claude, Seat::Live, raw, &|| panic!("no wait")).unwrap()
+        counted(e, raw, &Cell::new(0))
+    }
+
+    fn counted(e: &Env, raw: &str, nudges: &Cell<u32>) -> Option<Value> {
+        let nudge = || nudges.set(nudges.get() + 1);
+        hook(
+            &e.store,
+            &e.claude,
+            Seat::Live,
+            raw,
+            &|| panic!("no wait"),
+            &nudge,
+        )
+        .unwrap()
     }
 
     fn context(v: &Option<Value>) -> &str {
@@ -465,15 +497,23 @@ mod tests {
 
         ops::switch(&e.store, &e.claude, "work", false).unwrap();
         let again = json!({"file_path": "/s/page.html"});
-        let said = run(&e, &event("PreToolUse", "s1", again.clone(), Value::Null));
+        let nudges = Cell::new(0);
+        let said = counted(
+            &e,
+            &event("PreToolUse", "s1", again.clone(), Value::Null),
+            &nudges,
+        );
         assert_eq!(active(&e), "perso");
         assert!(context(&said).contains("from work to perso"), "{said:?}");
+        assert_eq!(nudges.get(), 0);
 
-        let said = run(
+        let said = counted(
             &e,
             &event("PostToolUse", "s1", again, published("Abc", "/s/page.html")),
+            &nudges,
         );
         assert_eq!(active(&e), "work");
+        assert_eq!(nudges.get(), 1);
         assert!(context(&said).contains("back to work"), "{said:?}");
         let switches: Vec<_> = crate::logbook::read(&e.store)
             .into_iter()
@@ -596,6 +636,7 @@ mod tests {
                 Seat::Live,
                 &event("PostToolUse", "a", read_p.clone(), Value::Null),
                 &|| {},
+                &|| {},
             )
             .unwrap();
         };
@@ -605,6 +646,7 @@ mod tests {
             Seat::Live,
             &event("PreToolUse", "b", read_w, Value::Null),
             &pause,
+            &|| {},
         )
         .unwrap();
         assert_eq!(waits.get(), 1);
@@ -624,6 +666,7 @@ mod tests {
             &e.claude,
             Seat::Run("work"),
             &event("PreToolUse", "s2", read, Value::Null),
+            &|| panic!(),
             &|| panic!(),
         )
         .unwrap();
