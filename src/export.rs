@@ -357,8 +357,18 @@ pub fn restore(
                 continue;
             }
             let account = carried.meta.get("accountId").and_then(Value::as_str);
-            if let Some(other) = store
-                .list(p.id())?
+            let stored = match store.list(p.id()) {
+                Ok(stored) => stored,
+                Err(e) => {
+                    writeln!(
+                        out,
+                        "skipped {at}: the logins stored here cannot be listed: {e:#}"
+                    )?;
+                    set_aside_carried(store, p, carried, out)?;
+                    continue;
+                }
+            };
+            if let Some(other) = stored
                 .into_iter()
                 .find(|e| Some(e.meta.account_id.as_str()) == account && e.name != carried.name)
             {
@@ -368,7 +378,9 @@ pub fn restore(
                     other.qualified()
                 )?;
                 if store
-                    .files(p.id(), &other.name)?
+                    .files(p.id(), &other.name)
+                    .ok()
+                    .flatten()
                     .is_none_or(|(creds, _)| creds != carried.creds)
                 {
                     set_aside_carried(store, p, carried, out)?;
@@ -405,9 +417,14 @@ pub fn restore(
     }
 
     let mut names: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut listed = Ok(());
     for p in providers {
-        for entry in store.list(p.id())? {
-            names.entry(p.id().to_owned()).or_default().push(entry.name);
+        match store.list(p.id()) {
+            Ok(stored) => names
+                .entry(p.id().to_owned())
+                .or_default()
+                .extend(stored.into_iter().map(|e| e.name)),
+            Err(e) => listed = Err(e.context("the logins stored here cannot be listed")),
         }
     }
     for login in &bundle.sign_in {
@@ -417,7 +434,8 @@ pub fn restore(
             .push(login.name.clone());
     }
     if let Some(text) = &bundle.config
-        && let Err(e) = restore_config(places.config, text, &names, providers, force, out)
+        && let Err(e) =
+            listed.and_then(|()| restore_config(places.config, text, &names, providers, force, out))
     {
         writeln!(out, "kept config.toml as it is here: {e:#}")?;
     }
@@ -453,8 +471,18 @@ pub fn restore(
                 continue;
             }
         }
-        if let Some(other) = store
-            .list(p.id())?
+        let stored = match store.list(p.id()) {
+            Ok(stored) => stored,
+            Err(e) => {
+                writeln!(
+                    out,
+                    "skipped {}: the logins stored here cannot be listed: {e:#}",
+                    login.qualified()
+                )?;
+                continue;
+            }
+        };
+        if let Some(other) = stored
             .into_iter()
             .find(|e| e.meta.account_id == login.account_id)
         {
