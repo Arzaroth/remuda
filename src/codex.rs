@@ -1080,7 +1080,10 @@ mod tests {
             .begin_login(true)
             .err()
             .unwrap();
-        assert!(err.to_string().contains("404"), "{err}");
+        assert_eq!(
+            err.to_string(),
+            "device code login is not enabled for this Codex server (404 Not Found): sign in by callback instead, without --paste or `paste = true` under [login], or with --no-paste"
+        );
     }
 
     #[test]
