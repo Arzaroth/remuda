@@ -324,6 +324,30 @@ mod tests {
     }
 
     #[test]
+    fn tokens_cut_off_in_transit_are_asked_for_again() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/device")
+            .with_body(json!({"device_code": "dc", "verification_uri_complete": "https://x", "interval": 1}).to_string())
+            .create();
+        let cut = server
+            .mock("POST", "/token")
+            .with_chunked_body(|w| {
+                w.write_all(br#"{"access_token":"#)?;
+                Err(std::io::Error::other("dropped"))
+            })
+            .expect(1)
+            .create();
+        server
+            .mock("POST", "/token")
+            .with_body(r#"{"access_token":"at","refresh_token":"rt"}"#)
+            .create();
+        let done = flow(&server.url()).begin().unwrap().finish(None).unwrap();
+        cut.assert();
+        assert_eq!(done.creds["refresh_token"], "rt");
+    }
+
+    #[test]
     fn a_refused_device_login_says_so() {
         let mut server = mockito::Server::new();
         server

@@ -531,4 +531,28 @@ mod tests {
         down.assert();
         assert!(err.to_string().contains("502"), "{err}");
     }
+
+    #[test]
+    fn tokens_cut_off_in_transit_are_asked_for_again() {
+        let mut server = mockito::Server::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let c = Cursor::at(tmp.path(), Api::local(&server.url()));
+        let cut = server
+            .mock("GET", "/auth/poll")
+            .match_query(Matcher::Any)
+            .with_chunked_body(|w| {
+                w.write_all(br#"{"accessToken":"#)?;
+                Err(std::io::Error::other("dropped"))
+            })
+            .expect(1)
+            .create();
+        server
+            .mock("GET", "/auth/poll")
+            .match_query(Matcher::Any)
+            .with_body(json!({"accessToken": token("u7", "a"), "refreshToken": "r7"}).to_string())
+            .create();
+        let login = c.begin_login(false).unwrap().finish(None).unwrap();
+        cut.assert();
+        assert_eq!(login.creds["refreshToken"], "r7");
+    }
 }

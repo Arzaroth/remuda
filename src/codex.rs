@@ -1134,6 +1134,48 @@ mod tests {
     }
 
     #[test]
+    fn a_device_sign_in_asks_again_for_an_approval_cut_off_in_transit() {
+        let mut server = mockito::Server::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let c = codex(tmp.path(), &server.url());
+        server
+            .mock("POST", "/api/accounts/deviceauth/usercode")
+            .with_body(
+                json!({"device_auth_id": "da-1", "user_code": "WXYZ", "interval": 1}).to_string(),
+            )
+            .create();
+        let cut = server
+            .mock("POST", "/api/accounts/deviceauth/token")
+            .with_chunked_body(|w| {
+                w.write_all(br#"{"authorization_code":"#)?;
+                Err(std::io::Error::other("dropped"))
+            })
+            .expect(1)
+            .create();
+        let approved = server
+            .mock("POST", "/api/accounts/deviceauth/token")
+            .with_body(
+                json!({"authorization_code": "auth-1", "code_verifier": "ver-1"}).to_string(),
+            )
+            .create();
+        server
+            .mock("POST", "/oauth/token")
+            .with_body(
+                json!({
+                    "id_token": id_token("acct-9", "plus"),
+                    "access_token": access_token("acct-9", "device", 1_900_000_000),
+                    "refresh_token": "r-device",
+                })
+                .to_string(),
+            )
+            .create();
+        let login = c.begin_login(true).unwrap().finish(None).unwrap();
+        cut.assert();
+        approved.assert();
+        assert_eq!(login.creds["tokens"]["refresh_token"], "r-device");
+    }
+
+    #[test]
     fn a_device_code_the_server_refuses_to_issue_is_an_error() {
         let mut server = mockito::Server::new();
         let tmp = tempfile::tempdir().unwrap();
