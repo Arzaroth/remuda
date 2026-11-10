@@ -1074,6 +1074,61 @@ mod tests {
     }
 
     #[test]
+    fn a_device_sign_in_rides_out_two_busy_answers_but_not_a_third() {
+        let mut server = mockito::Server::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let c = codex(tmp.path(), &server.url());
+        server
+            .mock("POST", "/api/accounts/deviceauth/usercode")
+            .with_body(
+                json!({"device_auth_id": "da-1", "user_code": "WXYZ", "interval": 1}).to_string(),
+            )
+            .create();
+        let busy: Vec<_> = [503, 429]
+            .into_iter()
+            .map(|status| {
+                server
+                    .mock("POST", "/api/accounts/deviceauth/token")
+                    .with_status(status)
+                    .expect(1)
+                    .create()
+            })
+            .collect();
+        let approved = server
+            .mock("POST", "/api/accounts/deviceauth/token")
+            .with_body(
+                json!({"authorization_code": "auth-1", "code_verifier": "ver-1"}).to_string(),
+            )
+            .create();
+        server
+            .mock("POST", "/oauth/token")
+            .with_body(
+                json!({
+                    "id_token": id_token("acct-9", "plus"),
+                    "access_token": access_token("acct-9", "device", 1_900_000_000),
+                    "refresh_token": "r-device",
+                })
+                .to_string(),
+            )
+            .create();
+        let login = c.begin_login(true).unwrap().finish(None).unwrap();
+        busy.iter().for_each(|m| m.assert());
+        approved.assert();
+        assert_eq!(login.creds["tokens"]["refresh_token"], "r-device");
+        approved.remove();
+
+        let down = server
+            .mock("POST", "/api/accounts/deviceauth/token")
+            .with_status(502)
+            .with_body("bad gateway")
+            .expect(3)
+            .create();
+        let err = c.begin_login(true).unwrap().finish(None).err().unwrap();
+        down.assert();
+        assert!(err.to_string().contains("502"), "{err}");
+    }
+
+    #[test]
     fn a_device_code_the_server_refuses_to_issue_is_an_error() {
         let mut server = mockito::Server::new();
         let tmp = tempfile::tempdir().unwrap();

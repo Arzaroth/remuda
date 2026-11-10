@@ -488,4 +488,42 @@ mod tests {
         assert_eq!(login.identity.account_id, "u7");
         assert_eq!(login.creds["refreshToken"], "r7");
     }
+
+    #[test]
+    fn a_sign_in_rides_out_two_busy_answers_but_not_a_third() {
+        let mut server = mockito::Server::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let c = Cursor::at(tmp.path(), Api::local(&server.url()));
+        let busy: Vec<_> = [503, 429]
+            .into_iter()
+            .map(|status| {
+                server
+                    .mock("GET", "/auth/poll")
+                    .match_query(Matcher::Any)
+                    .with_status(status)
+                    .expect(1)
+                    .create()
+            })
+            .collect();
+        let approved = server
+            .mock("GET", "/auth/poll")
+            .match_query(Matcher::Any)
+            .with_body(json!({"accessToken": token("u7", "a"), "refreshToken": "r7"}).to_string())
+            .create();
+        let login = c.begin_login(false).unwrap().finish(None).unwrap();
+        busy.iter().for_each(|m| m.assert());
+        approved.assert();
+        assert_eq!(login.identity.account_id, "u7");
+        approved.remove();
+
+        let down = server
+            .mock("GET", "/auth/poll")
+            .match_query(Matcher::Any)
+            .with_status(502)
+            .expect(3)
+            .create();
+        let err = c.begin_login(false).unwrap().finish(None).err().unwrap();
+        down.assert();
+        assert!(err.to_string().contains("502"), "{err}");
+    }
 }

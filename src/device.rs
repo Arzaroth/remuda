@@ -275,6 +275,48 @@ mod tests {
     }
 
     #[test]
+    fn a_token_endpoint_is_asked_again_after_two_busy_answers_but_not_a_third() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/device")
+            .with_body(json!({"device_code": "dc", "verification_uri_complete": "https://x", "interval": 1}).to_string())
+            .create();
+        let busy: Vec<_> = [503, 429]
+            .into_iter()
+            .map(|status| {
+                server
+                    .mock("POST", "/token")
+                    .with_status(status)
+                    .expect(1)
+                    .create()
+            })
+            .collect();
+        let approved = server
+            .mock("POST", "/token")
+            .with_body(r#"{"access_token":"at","refresh_token":"rt"}"#)
+            .create();
+        let done = flow(&server.url()).begin().unwrap().finish(None).unwrap();
+        busy.iter().for_each(|m| m.assert());
+        assert_eq!(done.creds["refresh_token"], "rt");
+        approved.remove();
+
+        let down = server
+            .mock("POST", "/token")
+            .with_status(502)
+            .with_body("bad gateway")
+            .expect(3)
+            .create();
+        let err = flow(&server.url())
+            .begin()
+            .unwrap()
+            .finish(None)
+            .err()
+            .unwrap();
+        down.assert();
+        assert!(err.to_string().contains("502"), "{err}");
+    }
+
+    #[test]
     fn a_refused_device_login_says_so() {
         let mut server = mockito::Server::new();
         server
