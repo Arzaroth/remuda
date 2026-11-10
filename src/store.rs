@@ -191,7 +191,10 @@ impl Store {
     fn write_pair(&self, provider: &str, name: &str, creds: &str, meta: &Value) -> Result<()> {
         let meta_path = self.meta_path(provider, name);
         let creds_path = self.creds_path(provider, name);
-        let legacy = read_json(&meta_path)?.is_some_and(|m| m.get("credsDigest").is_none());
+        let legacy = read_json(&meta_path)
+            .ok()
+            .flatten()
+            .is_some_and(|m| m.get("credsDigest").is_none());
         if legacy {
             write_json(&meta_path, meta)?;
             return write_private(&creds_path, creds);
