@@ -365,8 +365,7 @@ pub fn restore(
                 }
                 continue;
             }
-            if p.renews()
-                && let Some(old) = store.get(p.id(), &carried.name)?
+            if let Some(old) = store.get(p.id(), &carried.name)?
                 && here.is_some_and(|(creds, _)| creds != carried.creds)
             {
                 let kept = store.set_aside(p.id(), &old.meta.account_id, &old.creds)?;
