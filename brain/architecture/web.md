@@ -133,7 +133,7 @@ access to anything, and it ends when they stop.
 | `POST /api/label` `{name, text?}` / `rename` `{name, to}` / `remove` `{name}` | As the commands |
 | `POST /api/refresh` `{name?, force?}` | Refresh inactive credentials, then nudge TokenGauge |
 | `POST /api/reset` `{name}` | Spend one of a Claude login's banked usage-limit resets with its own token, then nudge TokenGauge |
-| `POST /api/login` `{provider?, name, force?, paste?}` | Begin a sign-in, opening nothing yet: `{id, url, needsCode, asksFor, localOnly, machine, opensIn}`, `machine` being the hostname a callback sign-in's browser must be on; `paste` defaults to `[login] paste` |
+| `POST /api/login` `{provider?, name, force?, paste?}` | Begin a sign-in, opening nothing yet: `{id, url, needsCode, asksFor, localOnly, userCode, machine, opensIn}`, `userCode` being the device code to type at `url` (null when there is none), `machine` being the hostname a callback sign-in's browser must be on; `paste` defaults to `[login] paste` |
 | `POST /api/login/open` `{id}` | Open its link where `[login]` says: `{opened}` |
 | `GET`/`POST /api/login/settings` `{browser?, window?, paste?}` | Read or save `[login]`: `{browsers, browser, window, paste, opensIn}` |
 | `POST /api/login/finish` `{id, code?}` | Finish it and store the result |
