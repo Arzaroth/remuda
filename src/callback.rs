@@ -21,18 +21,21 @@ pub struct Callback {
 impl Callback {
     /// 127.0.0.1 and, when the machine has it, [::1]: the redirect names
     /// `localhost`, which a browser may resolve to either, and a port left
-    /// free on one of them is a port another local user could answer on. A
-    /// port still held by an attempt that is shutting down gets a moment to be
+    /// free on one of them is a port another local user could answer on, so a
+    /// port held on either is taken and an ephemeral one is drawn again. A port
+    /// still held by an attempt that is shutting down gets a moment to be
     /// released. `busy` says what probably holds a port that stays taken.
     pub fn bind(port: u16, path: &'static str, state: String, busy: &str) -> Result<Self> {
         let deadline = Instant::now() + Duration::from_secs(2);
-        let v4 = loop {
-            match TcpListener::bind(("127.0.0.1", port)) {
-                Ok(listener) => break listener,
+        let listeners = loop {
+            match both(port) {
+                Ok(listeners) => break listeners,
                 Err(e)
                     if e.kind() == std::io::ErrorKind::AddrInUse && Instant::now() < deadline =>
                 {
-                    std::thread::sleep(Duration::from_millis(100));
+                    if port != 0 {
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
                 }
                 Err(e) if port == 0 => {
                     return Err(e)
@@ -43,11 +46,6 @@ impl Callback {
                 }
             }
         };
-        let port = v4.local_addr()?.port();
-        let mut listeners = vec![v4];
-        if let Ok(v6) = TcpListener::bind(("::1", port)) {
-            listeners.push(v6);
-        }
         for listener in &listeners {
             listener.set_nonblocking(true)?;
         }
@@ -118,6 +116,16 @@ impl Callback {
             }
             std::thread::sleep(Duration::from_millis(50));
         }
+    }
+}
+
+fn both(port: u16) -> std::io::Result<Vec<TcpListener>> {
+    let v4 = TcpListener::bind(("127.0.0.1", port))?;
+    let port = v4.local_addr()?.port();
+    match TcpListener::bind(("::1", port)) {
+        Ok(v6) => Ok(vec![v4, v6]),
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => Err(e),
+        Err(_) => Ok(vec![v4]),
     }
 }
 
