@@ -211,6 +211,14 @@ impl Provider for Kimi {
         })
     }
 
+    fn signs_out(&self) -> bool {
+        true
+    }
+
+    fn sign_out(&self, outgoing: &Value) -> Result<()> {
+        crate::fsx::remove_json_if(&self.creds_path(), outgoing)
+    }
+
     fn refresh(&self, creds: &mut Value) -> Result<Option<String>> {
         let refresh_token = text(creds, "refresh_token")
             .context("credential has no refresh token")?
@@ -227,7 +235,7 @@ impl Provider for Kimi {
         Ok(self.me(access).ok().map(|id| id.account_id))
     }
 
-    fn begin_login(&self) -> Result<Box<dyn PendingLogin>> {
+    fn begin_login(&self, _paste: bool) -> Result<Box<dyn PendingLogin>> {
         let api = self.api.clone();
         let headers = self.headers();
         let me = Kimi {
@@ -420,6 +428,28 @@ mod tests {
     }
 
     #[test]
+    fn signing_out_removes_the_file_once_its_login_is_stored() {
+        let mut server = mockito::Server::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let k = Kimi::at(tmp.path(), Api::local(&server.url()));
+        let creds = file("a-work", "r-work");
+        me_mock(&mut server, "a-work", "u-1");
+        let identity = k.identify(&creds).unwrap();
+        store
+            .save(&Entry::new("kimi", "work", creds, identity, 1))
+            .unwrap();
+        let work = store.get("kimi", "work").unwrap().unwrap();
+        k.install(&work, None).unwrap();
+
+        let said = ops::sign_out(&store, &k, false, crate::logbook::By::Cli).unwrap();
+
+        assert_eq!(said, "signed Kimi out of work");
+        assert!(!tmp.path().join("credentials/kimi-code.json").exists());
+        assert!(store.get("kimi", "work").unwrap().is_some());
+    }
+
+    #[test]
     fn switching_replaces_the_file_whole() {
         let mut server = mockito::Server::new();
         let tmp = tempfile::tempdir().unwrap();
@@ -516,7 +546,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let k = Kimi::at(tmp.path(), Api::local(&server.url()));
 
-        let pending = k.begin_login().unwrap();
+        let pending = k.begin_login(false).unwrap();
         assert!(pending.url().ends_with("user_code=K1"));
         let login = pending.finish(None).unwrap();
 

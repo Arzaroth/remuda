@@ -135,14 +135,18 @@ pub const REFRESH_BEFORE_MS: i64 = 5 * 60 * 1000;
 /// Finishes the provider's `remuda run` sessions whose processes all ended
 /// first, so nothing acts on a login whose newest tokens are still in one.
 pub fn sync_live(store: &Store, p: &dyn Provider) -> Result<LiveState> {
-    let live = sync_live_files(store, p)?;
-    crate::attribution::noticed(store, p, &live);
-    Ok(live)
+    Ok(sync_live_read(store, p)?.0)
 }
 
-fn sync_live_files(store: &Store, p: &dyn Provider) -> Result<LiveState> {
+fn sync_live_read(store: &Store, p: &dyn Provider) -> Result<(LiveState, Option<Value>)> {
     crate::session::recover(store, &[p]);
     let live = p.live()?;
+    let state = sync_live_files(store, p, live.clone())?;
+    crate::attribution::noticed(store, p, &state);
+    Ok((state, live))
+}
+
+fn sync_live_files(store: &Store, p: &dyn Provider, live: Option<Value>) -> Result<LiveState> {
     heal(store, p, live.as_ref())?;
     let Some(creds) = live else {
         return Ok(match p.foreign_login()? {
@@ -291,6 +295,90 @@ pub fn refresh_entry(store: &Store, p: &dyn Provider, entry: &mut Entry) -> Resu
     Ok(())
 }
 
+/// Takes the live login out of the CLI's files once it is safe in the store,
+/// so every login is remuda's to refresh and sign in again.
+pub fn sign_out(store: &Store, p: &dyn Provider, discard: bool, by: By) -> Result<String> {
+    let already = || Ok(format!("{} is already signed out", p.name()));
+    let live = sync_live(store, p)?;
+    if live == LiveState::SignedOut {
+        return already();
+    }
+    signed_in_as(p, &live)?;
+    refuse_to_replace(p, live, discard)?;
+    let _live = p.lock_live()?;
+    let mut attempts = 0;
+    let was = loop {
+        let (live, outgoing) = sync_live_read(store, p)?;
+        let was = signed_in_as(p, &live)?;
+        let Some(outgoing) = outgoing else {
+            return already();
+        };
+        refuse_to_replace(p, live, discard)?;
+        match p.sign_out(&outgoing) {
+            Err(e) if e.is::<crate::fsx::Changed>() && attempts < 3 => attempts += 1,
+            result => {
+                result?;
+                break was;
+            }
+        }
+    };
+    crate::runs::switched(store, p.id(), now_ms());
+    crate::attribution::noticed(store, p, &LiveState::SignedOut);
+    let message = match &was {
+        Some(name) => format!("signed {} out of {name}", p.name()),
+        None => format!("signed {} out, dropping its login", p.name()),
+    };
+    logbook::note(
+        store,
+        Event::new(Kind::Switch, true, &message)
+            .about(p.id(), was.as_deref())
+            .by(by),
+    );
+    Ok(message)
+}
+
+fn signed_in_as(p: &dyn Provider, live: &LiveState) -> Result<Option<String>> {
+    match live {
+        LiveState::Foreign { what } => {
+            bail!(
+                "{} is signed in with {what}, which remuda does not sign out",
+                p.name()
+            )
+        }
+        LiveState::Unreadable { error } => bail!("could not read {}'s login: {error}", p.name()),
+        LiveState::Stored { name, .. } => Ok(Some(name.clone())),
+        LiveState::SignedOut | LiveState::Unstored { .. } => Ok(None),
+    }
+}
+
+fn refuse_to_replace(p: &dyn Provider, live: LiveState, discard: bool) -> Result<()> {
+    match live {
+        LiveState::Stored {
+            synced: false,
+            name: current,
+        } if !discard => {
+            bail!(
+                "the live {} login looks like {current} but could not be confirmed, so replacing it could lose its newest tokens; retry online or pass --discard",
+                p.name()
+            );
+        }
+        LiveState::Foreign { what } if !discard => {
+            bail!(
+                "{} is signed in with {what}, which remuda cannot store; pass --discard to replace it",
+                p.name()
+            );
+        }
+        LiveState::Unstored { email } if !discard => {
+            let who = email.map(|e| format!(" ({e})")).unwrap_or_default();
+            bail!(
+                "the live {} login{who} is not in the store: `remuda import` it first, or pass --discard to drop it",
+                p.name()
+            );
+        }
+        _ => Ok(()),
+    }
+}
+
 fn guards_live(discard: bool, live: &LiveState) -> bool {
     !discard || matches!(live, LiveState::Stored { synced: true, .. })
 }
@@ -328,34 +416,10 @@ pub fn switch_when(
         .with_context(|| format!("no credential named {}/{name}", p.id()))?;
     let live = sync_live(store, p)?;
     let guarded = guards_live(discard, &live);
-    match live {
-        LiveState::Stored { name: current, .. } if current == name => {
-            return Ok(format!("{} is already active", target.qualified()));
-        }
-        LiveState::Stored {
-            synced: false,
-            name: current,
-        } if !discard => {
-            bail!(
-                "the live {} login looks like {current} but could not be confirmed, so switching could lose its newest tokens; retry online or pass --discard",
-                p.name()
-            );
-        }
-        LiveState::Foreign { what } if !discard => {
-            bail!(
-                "{} is signed in with {what}, which remuda cannot store; pass --discard to replace it",
-                p.name()
-            );
-        }
-        LiveState::Unstored { email } if !discard => {
-            let who = email.map(|e| format!(" ({e})")).unwrap_or_default();
-            bail!(
-                "the live {} login{who} is not in the store: `remuda import` it first, or pass --discard to drop it",
-                p.name()
-            );
-        }
-        _ => {}
+    if live.active_name() == Some(name) {
+        return Ok(format!("{} is already active", target.qualified()));
     }
+    refuse_to_replace(p, live, discard)?;
     target = store
         .get(p.id(), name)?
         .with_context(|| format!("no credential named {}/{name}", p.id()))?;
@@ -517,7 +581,7 @@ mod tests {
     use super::testing::*;
     use super::*;
     use crate::claude::OAUTH_KEY;
-    use crate::fsx::read_json;
+    use crate::fsx::{read_json, write_json};
     use serde_json::json;
 
     #[test]
@@ -820,6 +884,127 @@ mod tests {
             .unwrap();
         assert_eq!(config["oauthAccount"]["accountUuid"], "u-perso");
         assert_eq!(config["numStartups"], 7);
+    }
+
+    #[test]
+    fn signing_out_syncs_the_login_back_and_takes_only_it_out_of_the_cli() {
+        let server = confirming("u-work");
+        let e = env(&server.url());
+        e.stored("work", "u-work", HOUR);
+        e.sign_in(oauth("a2", "r2", 2 * HOUR), account("u-work"));
+
+        let said = sign_out(&e.store, &e.claude, false, By::Cli).unwrap();
+
+        assert_eq!(said, "signed Claude Code out of work");
+        assert_eq!(e.stored_refresh_token("work").as_deref(), Some("r2"));
+        assert_eq!(e.claude.live().unwrap(), None);
+        let creds = read_json(&e.tmp.path().join(".credentials.json"))
+            .unwrap()
+            .unwrap();
+        assert!(creds.get(OAUTH_KEY).is_none());
+        assert_eq!(creds["mcpOAuth"]["srv"]["t"], 1);
+        let config = read_json(&e.tmp.path().join(".claude.json"))
+            .unwrap()
+            .unwrap();
+        assert!(config.get("oauthAccount").is_none());
+        assert_eq!(config["numStartups"], 7);
+        assert!(crate::runs::switches(&e.store)["claude"] > now_ms() - 60_000);
+        assert_eq!(
+            sync_live(&e.store, &e.claude).unwrap(),
+            LiveState::SignedOut
+        );
+    }
+
+    #[test]
+    fn a_refresh_during_the_sign_out_is_synced_before_its_tokens_leave_the_cli() {
+        let mut server = mockito::Server::new();
+        let e = env(&server.url());
+        let path = e.tmp.path().join(".credentials.json");
+        let refreshed = std::sync::atomic::AtomicBool::new(false);
+        server
+            .mock("GET", "/api/oauth/profile")
+            .with_body_from_request(move |_| {
+                if !refreshed.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                    let mut file = oauth("a3", "r3", 3 * HOUR);
+                    file["mcpOAuth"] = json!({"srv": {"t": 1}});
+                    write_json(&path, &file).unwrap();
+                }
+                profile_body("u-work").into_bytes()
+            })
+            .create();
+        e.stored("work", "u-work", HOUR);
+        e.sign_in(oauth("a2", "r2", 2 * HOUR), account("u-work"));
+
+        sign_out(&e.store, &e.claude, false, By::Cli).unwrap();
+
+        assert_eq!(e.claude.live().unwrap(), None);
+        assert_eq!(e.stored_refresh_token("work").as_deref(), Some("r3"));
+    }
+
+    #[test]
+    fn a_login_gone_before_the_lock_is_already_signed_out() {
+        let mut server = mockito::Server::new();
+        let e = env(&server.url());
+        let path = e.tmp.path().join(".credentials.json");
+        server
+            .mock("GET", "/api/oauth/profile")
+            .with_body_from_request(move |_| {
+                let _ = std::fs::remove_file(&path);
+                profile_body("u-work").into_bytes()
+            })
+            .create();
+        e.stored("work", "u-work", HOUR);
+        e.sign_in(oauth("a2", "r2", 2 * HOUR), account("u-work"));
+
+        let said = sign_out(&e.store, &e.claude, false, By::Cli).unwrap();
+
+        assert_eq!(said, "Claude Code is already signed out");
+        assert_eq!(e.stored_refresh_token("work").as_deref(), Some("r2"));
+        assert!(!crate::runs::switches(&e.store).contains_key("claude"));
+    }
+
+    #[test]
+    fn signing_out_a_login_nobody_stored_needs_discard() {
+        let server = confirming("u-other");
+        let e = env(&server.url());
+        e.stored("work", "u-work", HOUR);
+        e.sign_in(oauth("a9", "r9", HOUR), account("u-other"));
+
+        let err = sign_out(&e.store, &e.claude, false, By::Cli).unwrap_err();
+        assert!(err.to_string().contains("--discard"), "{err}");
+        assert_eq!(e.live_refresh_token().as_deref(), Some("r9"));
+
+        let said = sign_out(&e.store, &e.claude, true, By::Cli).unwrap();
+        assert_eq!(said, "signed Claude Code out, dropping its login");
+        assert_eq!(e.claude.live().unwrap(), None);
+        assert_eq!(e.stored_refresh_token("work").as_deref(), Some("r-work"));
+    }
+
+    #[test]
+    fn signing_out_a_signed_out_cli_changes_nothing() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+
+        let said = sign_out(&e.store, &e.claude, false, By::Cli).unwrap();
+
+        assert_eq!(said, "Claude Code is already signed out");
+        assert!(!e.tmp.path().join(".credentials.json").exists());
+        assert!(!e.tmp.path().join(".claude.json").exists());
+    }
+
+    #[test]
+    fn a_sign_out_refuses_a_live_login_that_moved() {
+        let e = env(&OFFLINE);
+        e.sign_in(oauth("a2", "r2-rotated", HOUR), account("u-work"));
+
+        let err = e.claude.sign_out(&oauth("a1", "r1", HOUR)).unwrap_err();
+
+        assert!(err.is::<crate::fsx::Changed>(), "{err}");
+        assert_eq!(e.live_refresh_token().as_deref(), Some("r2-rotated"));
+        let config = read_json(&e.tmp.path().join(".claude.json"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(config["oauthAccount"]["accountUuid"], "u-work");
     }
 
     #[test]

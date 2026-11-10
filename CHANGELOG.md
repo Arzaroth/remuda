@@ -12,11 +12,30 @@
   does to them, the hook and its settings, and the commands.
 - `remuda doctor` checks that the artifact hook is installed once two Claude
   logins are stored.
+- `remuda signout <cli>`, and Sign out on the page, take the login out of a
+  CLI's own files, keeping it in the store. remuda can then refresh and sign in again
+  every login, even a lone one, without going through the CLI.
+- Signing in shows the link before anything opens, so you choose where it
+  goes: Enter in the terminal, or Open on the page, opens it here, and Grok,
+  Kimi, Cursor and Claude with `--paste` can be signed in from a browser on
+  another machine.
+- Where a sign-in opens is a setting, `[login]` in config.toml, which the Add
+  a login dialog sets too, and `--browser` / `--window` for one run: any
+  browser remuda knows rather than only the default one, and a private window
+  as before, a normal window, or a profile of the login's own, kept under the
+  store, which stays signed in for the next time.
 - A banked Claude reset says what it resets: `1 Fable reset` with a Reset
   Fable limit button, from TokenGauge's `bankedResets.kinds`.
 
 ### Changed
 
+- Claude signs in the way Claude Code does: the browser calls back to remuda,
+  with nothing to paste. `--paste`, `paste = true` under `[login]`, or the
+  checkbox on the page brings the code to paste back, for a browser on another
+  machine. `remuda login` pastes by default over SSH, or on Linux with no
+  display, where the callback could not arrive, and `--no-paste` asks for the
+  callback anyway. The page names the machine a callback sign-in's browser must
+  be on.
 - Spending a banked reset skips one whose limits are all at 0%, as claude.ai
   does, rather than burning it on nothing.
 

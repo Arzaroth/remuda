@@ -68,7 +68,8 @@ the components are checked by hand against a scratch store.
 most uncovered lines. Uncovered on purpose: `main.rs`'s process surface
 (`--update`, stdin in `login`, binding in `serve`, starting the service in
 `open`) and `browser.rs` starting a
-browser; which browser and flag it picks is tested through `launcher`.
+browser; which browser it picks and the arguments it passes for each window
+are tested through `launcher`, `installed_as` and `arguments`.
 
 ## Sources
 

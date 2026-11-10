@@ -329,7 +329,7 @@ impl Provider for ApiKey {
         bail!("an API key does not refresh")
     }
 
-    fn begin_login(&self) -> Result<Box<dyn PendingLogin>> {
+    fn begin_login(&self, _paste: bool) -> Result<Box<dyn PendingLogin>> {
         Ok(Box::new(KeyPending {
             url: self.key_page.to_owned(),
         }))
@@ -968,5 +968,6 @@ mod tests {
         assert!(p.install(&work, None).is_err());
         assert_eq!(p.live().unwrap(), None);
         assert!(!p.renews());
+        assert!(!p.signs_out());
     }
 }

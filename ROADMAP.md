@@ -54,6 +54,84 @@ second way still needs is TLS, a satellite-side remuda that sets its
 CLIs up, and a choice of LAN interface on a machine with several: today the
 address shown and the ufw rule follow the default route.
 
+## Setting up another machine
+
+Give a new machine the same accounts and settings as this one, and enrol it in
+TokenGauge's fleet sync, in one step. It needs no browser on the new machine
+and sends no password to it. Keeping machines in step afterwards is not this
+item: that is hub and satellites.
+
+`remuda export` builds one bundle and hands it to whichever transfer tool is
+installed, rather than remuda carrying its own:
+
+- **wyrmyon** (`wyrm`) first, then the Python **magic-wormhole** (`wormhole`):
+  `export` sends the bundle and prints the code, and `remuda restore` on the
+  new machine asks for the code and receives it. The code goes to the tool on
+  stdin (wyrm reads a piped code), never on a command line. The wormhole is
+  already sealed end to end under the code, so the bundle needs no
+  passphrase; it lands in a private directory and is deleted once applied.
+- **A file**, when neither is installed: `export <file>` seals it with a
+  passphrase read from the terminal or a private file, in age's format so the
+  `age` CLI can open it too, and `restore <file>` opens it. The file moves
+  however the user likes.
+
+What the bundle carries, and how each part lands:
+
+- **API keys** (GLM, opencode) as stored, byte for byte, so `credsDigest` and
+  `accountId` still hold. A key works from any machine.
+- **Cursor logins** as they are. Cursor's refresh answers with an access token
+  and no new refresh token, and the refresh token is a long-lived JWT, so two
+  machines can both keep refreshing (read from open-source clients that call
+  it, since cursor-agent is closed).
+- **Claude Code, Codex, Grok and Kimi logins as a list, signed in again.**
+  Their refresh is single use: two machines holding one token race, and the
+  first refresh signs the other out. Kimi kills the old token at once; Grok's
+  server keeps it about a minute, then treats a second use as theft and
+  revokes the new token too, signing out both machines (grok-build,
+  `xai-grok-login/src/oidc/refresh.rs`). So `restore` starts each sign-in on
+  the new machine and prints its URL and a QR code, to approve from any
+  browser: Grok, Kimi and Codex use a device code and the new machine polls;
+  Claude's `code#state` is pasted back. Each login is filed only once
+  `Provider::identify` names the expected account. The new machine gets its
+  own session, and this one keeps its own. `export --move <name>` carries a
+  login's tokens instead, for a machine being retired: it leaves this store
+  once the bundle is sent, and the active login is refused.
+- **`config.toml`** whole: schedules, auto mode, keep-warm. Logins keep their
+  names, so the names in it still resolve; `Config::check` runs on it before it
+  is written, and a config already there is not replaced without `--force`.
+- **The proxy's settings**, without its client keys: a client points at one
+  host and gets a new key there.
+- **Fleet sync**, with everything the new machine needs to join on its own:
+  the fleet key, the `[sync]` transport (`transport`, `[sync.dir] path` with
+  this home rewritten to the new one, `[sync.s3]`, `[sync.providers]`,
+  `retention_days`) and the S3 access keys. `restore` hands all of it to
+  TokenGauge on stdin and runs `tokengauge --sync-test`; remuda never writes
+  TokenGauge's files itself. Never the device id, which would make two
+  machines write one object and break the single-writer rule, and never
+  `label`, which names a device. A machine already in another fleet is refused
+  without `--force`, since joining drops that fleet's peers. The S3 keys go
+  across by default; `export --without-s3-keys` leaves them out.
+
+Never carried: the log, the attribution ledger and the proxy's request log (this
+machine's history, which TokenGauge bills by), `.dirs.json`, `.pins.json`
+(paths on this machine; allowing a pin again is one prompt), `.runs/`, the
+`.last-*` records and `.set-aside-*` files.
+
+It needs, first:
+
+- **Codex sign-in by device code.** remuda waits for a callback on
+  `localhost:1455` today, so the browser must be on the machine signing in.
+  codex-cli has `codex login --device-auth` (0.167.0); its endpoints get read
+  out of the binary like the others.
+- **From TokenGauge**, a join that takes the transport as well as the key
+  (`--sync-join -` reading both) and an export of the same, so each side only
+  touches its own files; and S3 keys kept in a private file beside
+  `tokengauge-sync-key` (mode 0600) rather than read from `AWS_ACCESS_KEY_ID`
+  and `AWS_SECRET_ACCESS_KEY`. Those come from `environment.d` today, which
+  puts the keys in every process's environment, has no counterpart on macOS
+  or Windows, and claims the names every other S3 client reads, so no other
+  tool on the machine can use different keys.
+
 ## Banked resets: what is left
 
 A Claude login's banked resets are in its details, and the page spends one

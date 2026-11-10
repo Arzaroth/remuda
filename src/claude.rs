@@ -5,6 +5,7 @@ use selvedge::plans::{Seat, max_plan, team_seat, tier_multiplier};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
+use crate::callback::{Callback, page, redirect, respond};
 use crate::fsx::{Changed, now_ms, read_json, update_json};
 use crate::oauth;
 use crate::paths;
@@ -12,11 +13,12 @@ use crate::pkce;
 use crate::provider::{Copied, Format, Identity, Login, PendingLogin, Provider, RunSpec, Upstream};
 use crate::store::Entry;
 
-const MIRRORS: &str = "2.1.282";
+const MIRRORS: &str = "2.1.322";
 const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const AUTHORIZE_URL: &str = "https://claude.com/cai/oauth/authorize";
 const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
 const REDIRECT_URI: &str = "https://platform.claude.com/oauth/code/callback";
+const SIGNED_IN_URL: &str = "https://platform.claude.com/oauth/code/success?app=claude-code";
 const API_URL: &str = "https://api.anthropic.com";
 const CLI_USER_AGENT: &str = "claude-cli/2.1.304 (external, cli)";
 const INFERENCE_BETAS: &str =
@@ -304,13 +306,15 @@ fn subscription_type(org_type: Option<&str>) -> Value {
 
 struct Pkce {
     pub url: String,
+    redirect_uri: String,
     verifier: String,
     state: String,
 }
 
-fn start_login() -> Result<Pkce> {
+/// `redirect_uri` is Claude's page that shows the code to paste, or a local
+/// callback.
+fn start_login(redirect_uri: &str, state: String) -> Result<Pkce> {
     let verifier = pkce::random()?;
-    let state = pkce::random()?;
     let challenge = pkce::challenge(&verifier);
     let url = reqwest::Url::parse_with_params(
         AUTHORIZE_URL,
@@ -318,7 +322,7 @@ fn start_login() -> Result<Pkce> {
             ("code", "true"),
             ("client_id", CLIENT_ID),
             ("response_type", "code"),
-            ("redirect_uri", REDIRECT_URI),
+            ("redirect_uri", redirect_uri),
             ("scope", &LOGIN_SCOPES.join(" ")),
             ("code_challenge", &challenge),
             ("code_challenge_method", "S256"),
@@ -328,6 +332,7 @@ fn start_login() -> Result<Pkce> {
     .to_string();
     Ok(Pkce {
         url,
+        redirect_uri: redirect_uri.to_owned(),
         verifier,
         state,
     })
@@ -339,7 +344,7 @@ struct ClaudeLogin {
 }
 
 /// Exchanges the `code#state` string the callback page shows.
-fn finish_login(api: &Api, pkce: &Pkce, pasted: &str) -> Result<ClaudeLogin> {
+fn finish_pasted(api: &Api, pkce: &Pkce, pasted: &str) -> Result<ClaudeLogin> {
     let pasted = pasted.trim();
     let (code, state) = pasted
         .split_once('#')
@@ -347,15 +352,19 @@ fn finish_login(api: &Api, pkce: &Pkce, pasted: &str) -> Result<ClaudeLogin> {
     if state != pkce.state {
         bail!("the pasted code belongs to another login attempt");
     }
+    finish_login(api, pkce, code)
+}
+
+fn finish_login(api: &Api, pkce: &Pkce, code: &str) -> Result<ClaudeLogin> {
     let t = post_token(
         api,
         &json!({
             "grant_type": "authorization_code",
             "code": code,
-            "redirect_uri": REDIRECT_URI,
+            "redirect_uri": pkce.redirect_uri,
             "client_id": CLIENT_ID,
             "code_verifier": pkce.verifier,
-            "state": state,
+            "state": pkce.state,
         }),
     )?;
     let p = profile(api, &t.access_token)?;
@@ -573,6 +582,31 @@ impl Provider for Claude {
         written
     }
 
+    fn signs_out(&self) -> bool {
+        true
+    }
+
+    /// The login goes first and the account second, the reverse of
+    /// [`Self::install`], so Claude Code never shows an account it has no
+    /// login for.
+    fn sign_out(&self, outgoing: &Value) -> Result<()> {
+        let expected = outgoing.get(OAUTH_KEY);
+        update_json(&self.creds_path, |file| {
+            if file.get(OAUTH_KEY) != expected {
+                return Err(Changed.into());
+            }
+            file.as_object_mut().map(|f| f.remove(OAUTH_KEY));
+            Ok(())
+        })?;
+        if read_json(&self.config_path)?.is_some_and(|c| c.get("oauthAccount").is_some()) {
+            update_json(&self.config_path, |config| {
+                config.as_object_mut().map(|c| c.remove("oauthAccount"));
+                Ok(())
+            })?;
+        }
+        Ok(())
+    }
+
     fn mirrors(&self) -> Option<&'static str> {
         Some(MIRRORS)
     }
@@ -629,10 +663,22 @@ impl Provider for Claude {
         Ok(format!("{}: banked reset {result}", entry.qualified()))
     }
 
-    fn begin_login(&self) -> Result<Box<dyn PendingLogin>> {
+    fn begin_login(&self, paste: bool) -> Result<Box<dyn PendingLogin>> {
+        let state = pkce::random()?;
+        if paste {
+            return Ok(Box::new(ClaudePending {
+                api: self.api.clone(),
+                pkce: start_login(REDIRECT_URI, state)?,
+                callback: None,
+            }));
+        }
+        let callback = Callback::bind(0, "/callback", state.clone(), "")?;
+        let redirect_uri = format!("http://localhost:{}/callback", callback.port());
+        let pkce = start_login(&redirect_uri, state)?;
         Ok(Box::new(ClaudePending {
             api: self.api.clone(),
-            pkce: start_login()?,
+            pkce,
+            callback: Some(callback),
         }))
     }
 
@@ -694,6 +740,7 @@ impl Provider for Claude {
 struct ClaudePending {
     api: Api,
     pkce: Pkce,
+    callback: Option<Callback>,
 }
 
 impl PendingLogin for ClaudePending {
@@ -702,12 +749,48 @@ impl PendingLogin for ClaudePending {
     }
 
     fn needs_code(&self) -> bool {
-        true
+        self.callback.is_none()
+    }
+
+    fn local_only(&self) -> bool {
+        self.callback.is_some()
+    }
+
+    fn canceller(&self) -> Box<dyn Fn() + Send + Sync> {
+        match &self.callback {
+            Some(callback) => callback.canceller(),
+            None => Box::new(|| {}),
+        }
     }
 
     fn finish(self: Box<Self>, code: Option<&str>) -> Result<Login> {
-        let code = code.context("Claude needs the code the sign-in page shows")?;
-        let done = finish_login(&self.api, &self.pkce, code)?;
+        let done = match &self.callback {
+            None => {
+                let code = code.context("Claude needs the code the sign-in page shows")?;
+                finish_pasted(&self.api, &self.pkce, code)?
+            }
+            Some(callback) => {
+                let (stream, query) = callback.wait()?;
+                let param = |k: &str| query.get(k).and_then(Value::as_str);
+                let done = match (param("error"), param("code")) {
+                    (Some(error), _) => Err(anyhow::anyhow!(
+                        "the sign-in was refused: {}",
+                        param("error_description").unwrap_or(error)
+                    )),
+                    (None, None) => Err(anyhow::anyhow!("the callback carried no code")),
+                    (None, Some(code)) => finish_login(&self.api, &self.pkce, code),
+                };
+                match &done {
+                    Ok(_) => redirect(&stream, SIGNED_IN_URL),
+                    Err(e) => respond(
+                        &stream,
+                        "400 Bad Request",
+                        &page(&format!("Sign-in failed: {e}")),
+                    ),
+                }
+                done?
+            }
+        };
         Ok(Login {
             creds: json!({ OAUTH_KEY: done.oauth }),
             identity: identity_of(done.oauth_account)?,
@@ -770,6 +853,115 @@ fn reported_seat(e: &Entry) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn browse(url: &str) -> String {
+        use std::io::{Read, Write};
+        let url = reqwest::Url::parse(url).unwrap();
+        let mut stream = std::net::TcpStream::connect(("127.0.0.1", url.port().unwrap())).unwrap();
+        let target = format!("{}?{}", url.path(), url.query().unwrap_or_default());
+        write!(stream, "GET {target} HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
+        let mut answer = String::new();
+        stream.read_to_string(&mut answer).unwrap();
+        answer
+    }
+
+    fn param(url: &str, key: &str) -> String {
+        reqwest::Url::parse(url)
+            .unwrap()
+            .query_pairs()
+            .find(|(k, _)| k == key)
+            .unwrap()
+            .1
+            .into_owned()
+    }
+
+    #[test]
+    fn a_sign_in_calls_back_to_a_local_port_and_lands_on_claudes_page() {
+        let mut server = mockito::Server::new();
+        let claude = Claude::at(
+            std::path::Path::new("/nonexistent"),
+            Api::local(&server.url()),
+        );
+        let pending = claude.begin_login(false).unwrap();
+        assert!(!pending.needs_code());
+        assert!(pending.local_only());
+        let url = pending.url().to_owned();
+        let redirect = param(&url, "redirect_uri");
+        assert!(redirect.starts_with("http://localhost:"), "{redirect}");
+        assert!(redirect.ends_with("/callback"), "{redirect}");
+        assert_eq!(param(&url, "code"), "true");
+        let state = param(&url, "state");
+        let exchange = server
+            .mock("POST", "/v1/oauth/token")
+            .match_body(mockito::Matcher::PartialJson(json!({
+                "grant_type": "authorization_code",
+                "code": "the-code",
+                "redirect_uri": redirect,
+                "state": state,
+            })))
+            .with_body(
+                json!({"access_token": "a-new", "refresh_token": "r-new", "expires_in": 28800})
+                    .to_string(),
+            )
+            .create();
+        server
+            .mock("GET", "/api/oauth/profile")
+            .with_body(crate::ops::testing::profile_body("u-new"))
+            .create();
+
+        let browser = std::thread::spawn(move || {
+            let local = redirect.replace("localhost", "127.0.0.1");
+            let forged = browse(&format!("{local}?code=x&state=forged"));
+            let done = browse(&format!("{local}?code=the-code&state={state}"));
+            (forged, done)
+        });
+        let login = pending.finish(None).unwrap();
+        let (forged, done) = browser.join().unwrap();
+
+        exchange.assert();
+        assert!(forged.starts_with("HTTP/1.1 400"), "{forged}");
+        assert!(done.starts_with("HTTP/1.1 302"), "{done}");
+        assert!(
+            done.contains(&format!("Location: {SIGNED_IN_URL}")),
+            "{done}"
+        );
+        assert_eq!(login.identity.account_id, "u-new");
+        assert_eq!(login.creds[OAUTH_KEY]["refreshToken"], "r-new");
+    }
+
+    #[test]
+    fn a_refused_callback_ends_the_sign_in_and_says_why() {
+        let claude = Claude::at(
+            std::path::Path::new("/nonexistent"),
+            Api::local("http://127.0.0.1:1"),
+        );
+        let pending = claude.begin_login(false).unwrap();
+        let local = param(pending.url(), "redirect_uri").replace("localhost", "127.0.0.1");
+        let state = param(pending.url(), "state");
+        let browser = std::thread::spawn(move || {
+            browse(&format!(
+                "{local}?error=access_denied&error_description=no%20thanks&state={state}"
+            ))
+        });
+
+        let err = pending.finish(None).err().unwrap();
+
+        assert!(err.to_string().contains("no thanks"), "{err}");
+        let answer = browser.join().unwrap();
+        assert!(answer.starts_with("HTTP/1.1 400"), "{answer}");
+    }
+
+    #[test]
+    fn pasting_keeps_claudes_own_redirect_and_no_local_port() {
+        let claude = Claude::at(
+            std::path::Path::new("/nonexistent"),
+            Api::local("http://127.0.0.1:1"),
+        );
+        let pending = claude.begin_login(true).unwrap();
+        assert!(pending.needs_code());
+        assert!(!pending.local_only());
+        assert_eq!(param(pending.url(), "redirect_uri"), REDIRECT_URI);
+    }
 
     #[test]
     fn another_clients_request_opens_with_claude_codes_line() {
@@ -960,7 +1152,7 @@ mod tests {
 
     #[test]
     fn the_authorize_url_carries_pkce() {
-        let pkce = start_login().unwrap();
+        let pkce = start_login(REDIRECT_URI, "s".into()).unwrap();
         let url = reqwest::Url::parse(&pkce.url).unwrap();
         let q: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
         assert_eq!(q["code_challenge_method"], "S256");

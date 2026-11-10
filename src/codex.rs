@@ -1,13 +1,9 @@
-use std::io::{BufRead, BufReader, Write};
-use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value, json};
 
+use crate::callback::{Callback, page, respond};
 use crate::fsx::{Changed, lock_file, now_ms, read_json, rfc3339, update_json};
 use crate::oauth::{self, claims};
 use crate::paths;
@@ -22,7 +18,6 @@ const CALLBACK_PORT: u16 = 1455;
 const LOGIN_SCOPE: &str =
     "openid profile email offline_access api.connectors.read api.connectors.invoke";
 const REFRESH_SCOPE: &str = "openid profile email";
-const LOGIN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const AUTH_CLAIMS: &str = "https://api.openai.com/auth";
 const INFERENCE: &str = "https://chatgpt.com/backend-api/codex";
 
@@ -227,6 +222,14 @@ impl Provider for Codex {
         })
     }
 
+    fn signs_out(&self) -> bool {
+        true
+    }
+
+    fn sign_out(&self, outgoing: &Value) -> Result<()> {
+        crate::fsx::remove_json_if(&self.auth_path, outgoing)
+    }
+
     /// Codex never re-reads auth.json while it runs, and a refresh in flight
     /// writes the old account's tokens into the new file.
     fn sessions(&self) -> &'static [&'static str] {
@@ -286,12 +289,16 @@ impl Provider for Codex {
         Ok(seat_of(&access, fresh("id_token").as_deref()))
     }
 
-    fn begin_login(&self) -> Result<Box<dyn PendingLogin>> {
-        let listeners = bind_callback(self.callback_port)?;
-        let port = listeners[0].local_addr()?.port();
-        let redirect_uri = format!("http://localhost:{port}/auth/callback");
-        let verifier = pkce::random()?;
+    fn begin_login(&self, _paste: bool) -> Result<Box<dyn PendingLogin>> {
         let state = pkce::random()?;
+        let callback = Callback::bind(
+            self.callback_port,
+            "/auth/callback",
+            state.clone(),
+            "is `codex login` running?",
+        )?;
+        let redirect_uri = format!("http://localhost:{}/auth/callback", callback.port());
+        let verifier = pkce::random()?;
         let url = reqwest::Url::parse_with_params(
             &format!("{}/oauth/authorize", self.api.issuer),
             &[
@@ -310,11 +317,9 @@ impl Provider for Codex {
         .to_string();
         Ok(Box::new(CodexPending {
             api: self.api.clone(),
-            cancelled: Arc::new(AtomicBool::new(false)),
-            listeners,
+            callback,
             redirect_uri,
             verifier,
-            state,
             url,
         }))
     }
@@ -372,122 +377,13 @@ impl Provider for Codex {
 
 struct CodexPending {
     api: Api,
-    cancelled: Arc<AtomicBool>,
-    listeners: Vec<TcpListener>,
+    callback: Callback,
     redirect_uri: String,
     verifier: String,
-    state: String,
     url: String,
 }
 
-/// 127.0.0.1 and, when the machine has it, [::1]: the redirect names
-/// `localhost`, which a browser may resolve to either, and a port left free on
-/// one of them is a port another local user could answer on. A port still held
-/// by an attempt that is shutting down gets a moment to be released.
-fn bind_callback(port: u16) -> Result<Vec<TcpListener>> {
-    let deadline = Instant::now() + Duration::from_secs(2);
-    let v4 = loop {
-        match TcpListener::bind(("127.0.0.1", port)) {
-            Ok(listener) => break listener,
-            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse && Instant::now() < deadline => {
-                std::thread::sleep(Duration::from_millis(100));
-            }
-            Err(e) => {
-                return Err(e)
-                    .with_context(|| format!("port {port} is taken; is `codex login` running?"));
-            }
-        }
-    };
-    let port = v4.local_addr()?.port();
-    let mut listeners = vec![v4];
-    if let Ok(v6) = TcpListener::bind(("::1", port)) {
-        listeners.push(v6);
-    }
-    for listener in &listeners {
-        listener.set_nonblocking(true)?;
-    }
-    Ok(listeners)
-}
-
-fn read_request(stream: &TcpStream) -> Option<reqwest::Url> {
-    stream.set_nonblocking(false).ok()?;
-    stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
-    let mut line = String::new();
-    BufReader::new(std::io::Read::take(stream, 8192))
-        .read_line(&mut line)
-        .ok()?;
-    let target = line.split_whitespace().nth(1)?;
-    reqwest::Url::parse(&format!("http://localhost{target}")).ok()
-}
-
-fn respond(mut stream: &TcpStream, status: &str, body: &str) {
-    let _ = write!(
-        stream,
-        "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
-}
-
-fn page(message: &str) -> String {
-    let message = message
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;");
-    format!(
-        "<!doctype html><meta charset=utf-8><title>remuda</title><body style=\"font:16px system-ui;margin:3rem\"><p>{message}</p>"
-    )
-}
-
 impl CodexPending {
-    /// The query of the first request to `/auth/callback` carrying this
-    /// attempt's state. Anything else on the port, whether another path, a
-    /// stale or forged state, or a connection that never sends a request, is
-    /// answered or dropped and the wait goes on.
-    fn wait_for_callback(&self) -> Result<(TcpStream, Map<String, Value>)> {
-        let deadline = Instant::now() + LOGIN_TIMEOUT;
-        loop {
-            let mut accepted = false;
-            for listener in &self.listeners {
-                let stream = match listener.accept() {
-                    Ok((stream, _)) => stream,
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
-                    Err(e) => return Err(e).context("callback listener failed"),
-                };
-                accepted = true;
-                let Some(url) = read_request(&stream) else {
-                    continue;
-                };
-                if url.path() != "/auth/callback" {
-                    respond(&stream, "404 Not Found", &page("Not found."));
-                    continue;
-                }
-                let query: Map<String, Value> = url
-                    .query_pairs()
-                    .map(|(k, v)| (k.into_owned(), json!(v.into_owned())))
-                    .collect();
-                if query.get("state").and_then(Value::as_str) != Some(self.state.as_str()) {
-                    respond(
-                        &stream,
-                        "400 Bad Request",
-                        &page("This is not the sign-in remuda is waiting for."),
-                    );
-                    continue;
-                }
-                return Ok((stream, query));
-            }
-            if accepted {
-                continue;
-            }
-            if self.cancelled.load(Ordering::Relaxed) {
-                bail!("the sign-in was cancelled");
-            }
-            if Instant::now() > deadline {
-                bail!("gave up waiting for the browser to finish signing in");
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
-    }
-
     fn exchange(&self, code: &str) -> Result<Value> {
         let answer = oauth::token_request(self.api.client.post(self.api.token_url()).form(&[
             ("grant_type", "authorization_code"),
@@ -531,12 +427,15 @@ impl PendingLogin for CodexPending {
     }
 
     fn canceller(&self) -> Box<dyn Fn() + Send + Sync> {
-        let cancelled = Arc::clone(&self.cancelled);
-        Box::new(move || cancelled.store(true, Ordering::Relaxed))
+        self.callback.canceller()
+    }
+
+    fn local_only(&self) -> bool {
+        true
     }
 
     fn finish(self: Box<Self>, _code: Option<&str>) -> Result<Login> {
-        let (stream, query) = self.wait_for_callback()?;
+        let (stream, query) = self.callback.wait()?;
         let param = |k: &str| query.get(k).and_then(Value::as_str);
         let outcome = (|| {
             if let Some(error) = param("error") {
@@ -574,6 +473,8 @@ mod tests {
     use crate::ops::{self, LiveState};
     use crate::store::Store;
     use mockito::Matcher;
+    use std::io::Write;
+    use std::net::{TcpListener, TcpStream};
 
     use crate::oauth::fake_jwt as jwt;
 
@@ -724,6 +625,26 @@ mod tests {
     }
 
     #[test]
+    fn signing_out_removes_auth_json_once_its_login_is_stored() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let c = codex(tmp.path(), &OFFLINE);
+        let creds = auth("acct-1", "work", "r-work", 1_900_000_000);
+        let identity = c.live_identity(&creds).unwrap().unwrap();
+        store
+            .save(&Entry::new("codex", "work", creds, identity, 1))
+            .unwrap();
+        let work = store.get("codex", "work").unwrap().unwrap();
+        c.install(&work, None).unwrap();
+
+        let said = ops::sign_out(&store, &c, false, crate::logbook::By::Cli).unwrap();
+
+        assert_eq!(said, "signed Codex out of work");
+        assert!(!tmp.path().join("auth.json").exists());
+        assert!(store.get("codex", "work").unwrap().is_some());
+    }
+
+    #[test]
     fn switching_replaces_auth_json_whole() {
         let tmp = tempfile::tempdir().unwrap();
         let store = Store::open(&tmp.path().join("store"));
@@ -856,7 +777,7 @@ mod tests {
         let mut server = mockito::Server::new();
         let tmp = tempfile::tempdir().unwrap();
         let c = codex(tmp.path(), &server.url());
-        let pending = c.begin_login().unwrap();
+        let pending = c.begin_login(false).unwrap();
         assert!(!pending.needs_code());
         let url = pending.url().to_owned();
         assert!(url.starts_with(&format!("{}/oauth/authorize?", server.url())));
@@ -918,7 +839,7 @@ mod tests {
     fn stray_connections_do_not_end_the_wait_and_a_refusal_does() {
         let tmp = tempfile::tempdir().unwrap();
         let c = codex(tmp.path(), &OFFLINE);
-        let pending = c.begin_login().unwrap();
+        let pending = c.begin_login(false).unwrap();
         let redirect = param(pending.url(), "redirect_uri").replace("localhost", "127.0.0.1");
         let state = param(pending.url(), "state");
         let browser = std::thread::spawn(move || {
@@ -958,12 +879,14 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let store = Store::open(&tmp.path().join("store"));
         let c = codex(tmp.path(), &server.url());
-        let open = |url: &str| {
+        let open = |url: &str, _: &std::path::Path| {
             let redirect = param(url, "redirect_uri").replace("localhost", "127.0.0.1");
             let state = param(url, "state");
             std::thread::spawn(move || browse(&format!("{redirect}?code=c&state={state}")));
             true
         };
+        let (tx, lines) = std::sync::mpsc::channel();
+        tx.send(String::new()).unwrap();
         let mut out = Vec::new();
         crate::commands::login(
             &store,
@@ -972,17 +895,22 @@ mod tests {
             false,
             crate::commands::Prompt {
                 open: &open,
-                read_code: &mut || unreachable!(),
+                opens_in: Some("a test browser".into()),
+                lines,
+                paste: false,
             },
             &mut out,
         )
         .unwrap();
         let out = String::from_utf8(out).unwrap();
+        assert!(out.starts_with("Sign in to Codex"), "{out}");
         assert!(
-            out.starts_with("Opened a private window to sign in to"),
+            out.contains(
+                "Waiting for the browser to finish, or press Enter to open it in a test browser"
+            ),
             "{out}"
         );
-        assert!(out.contains("Waiting for the browser"), "{out}");
+        assert!(out.contains("Opened it in a test browser."), "{out}");
         assert!(
             out.ends_with("stored codex/nine (seat-9@example.com, pro)\n"),
             "{out}"
@@ -1014,7 +942,7 @@ mod tests {
         }
         let tmp = tempfile::tempdir().unwrap();
         let c = codex(tmp.path(), &OFFLINE);
-        let pending = c.begin_login().unwrap();
+        let pending = c.begin_login(false).unwrap();
         let port = reqwest::Url::parse(&param(pending.url(), "redirect_uri"))
             .unwrap()
             .port()
@@ -1024,12 +952,24 @@ mod tests {
     }
 
     #[test]
+    fn a_callback_port_held_on_the_ipv6_loopback_is_taken() {
+        let Ok(held) = TcpListener::bind(("::1", 0)) else {
+            return;
+        };
+        let port = held.local_addr().unwrap().port();
+        let tmp = tempfile::tempdir().unwrap();
+        let c = Codex::at(tmp.path(), Api::local(&OFFLINE), port);
+        let err = c.begin_login(false).err().unwrap();
+        assert!(err.to_string().contains("codex login"), "{err}");
+    }
+
+    #[test]
     fn a_taken_callback_port_says_what_is_probably_holding_it() {
         let held = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let port = held.local_addr().unwrap().port();
         let tmp = tempfile::tempdir().unwrap();
         let c = Codex::at(tmp.path(), Api::local(&OFFLINE), port);
-        let err = c.begin_login().err().unwrap();
+        let err = c.begin_login(false).err().unwrap();
         assert!(err.to_string().contains("codex login"), "{err}");
     }
 }

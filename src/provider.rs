@@ -80,6 +80,10 @@ pub trait PendingLogin: Send {
     fn canceller(&self) -> Box<dyn Fn() + Send + Sync> {
         Box::new(|| {})
     }
+    /// The browser must be on this machine: it calls back to a local port.
+    fn local_only(&self) -> bool {
+        false
+    }
 }
 
 /// One coding CLI whose login remuda keeps copies of. `creds` is always the
@@ -126,6 +130,15 @@ pub trait Provider: Send + Sync {
     /// `outgoing` (store shape); otherwise fails with [`crate::fsx::Changed`]
     /// and writes nothing. `None` replaces whatever is there.
     fn install(&self, entry: &Entry, outgoing: Option<&Value>) -> Result<()>;
+    fn signs_out(&self) -> bool {
+        false
+    }
+    /// Takes the login out of the CLI's files and leaves the rest, but only
+    /// while the live login is still `outgoing` (store shape); otherwise fails
+    /// with [`crate::fsx::Changed`] and writes nothing.
+    fn sign_out(&self, _outgoing: &Value) -> Result<()> {
+        anyhow::bail!("remuda does not sign {} out", self.name())
+    }
     /// The file the live login is read from. Its mtime dates a login that
     /// changed outside remuda, which remuda only notices later.
     fn live_file(&self) -> Option<std::path::PathBuf> {
@@ -166,7 +179,9 @@ pub trait Provider: Send + Sync {
     fn redeem_reset(&self, _entry: &Entry) -> Result<String> {
         bail!("{} has no banked resets", self.name())
     }
-    fn begin_login(&self) -> Result<Box<dyn PendingLogin>>;
+    /// `paste` asks for a sign-in that ends with a code to paste rather than a
+    /// callback, where the CLI offers one, so the browser can be anywhere.
+    fn begin_login(&self, paste: bool) -> Result<Box<dyn PendingLogin>>;
     /// The formats the CLI's inference endpoint takes for `model`, best
     /// first. Empty when the proxy cannot spend this login.
     fn formats(&self, _model: &str) -> Vec<Format> {

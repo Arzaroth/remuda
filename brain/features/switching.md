@@ -36,6 +36,45 @@ Running Claude Code sessions watch their credential files and adopt the new
 login. A running Codex session may keep the login it started with until it is
 restarted.
 
+## Signing out
+
+`remuda signout <cli> [--discard]` and the page's Sign out, on the login in
+use, leave the CLI's own files with no login (`ops::sign_out`); a `remuda run`
+session keeps the one it started on, and Grok an API key. Every login is then
+the store's alone, so remuda refreshes it and signs it in again, even when it
+is the only one; the page offers Sign in again only on a login the CLI is not
+using. `remuda use` puts one back.
+
+It syncs the live login back first and refuses as a switch does (unstored,
+unconfirmed, `--discard` drops it). A login remuda cannot store, such as an API
+key, is never signed out. Under `Provider::lock_live` it syncs again and
+calls `Provider::sign_out` against the very login that sync read, so what
+leaves the CLI is what the store holds, retrying up to three times when the CLI
+rotated it meanwhile:
+
+- **Claude Code**: removes `claudeAiOauth` from `.credentials.json`, then
+  `oauthAccount` from `.claude.json`, keeping every other key (`mcpOAuth`).
+- **Codex, Kimi, Cursor**: removes the file that is the login (`auth.json`,
+  `credentials/kimi-code.json`), as their own logout does. The file is moved
+  aside before it is compared, so a rotation that lands meanwhile is put back
+  rather than removed unsynced. A file that is a link is refused rather than
+  removed (`fsx::remove_json_if`).
+- **Grok**: removes the `auth.x.ai::` entries from `auth.json`, refusing
+  when any of them differs from what sync read. An API key the
+  file holds stays, so Grok keeps using it and remuda reports it as a login it
+  cannot store.
+- **GLM, opencode Go**: refused; they have no `signs_out`, so the page shows
+  no Sign out for them.
+
+What that last sync read is what it reports: a login gone meanwhile is already
+signed out, and the message names the login it took out. It notes the time in
+`.last-switch.json`, writes a ledger line with no account,
+and logs a `switch` event. With auto mode on for that CLI, the message says
+auto mode will put a login back: the next round picks one unless it holds,
+as when TokenGauge has no figures, every login it may pick is full with no
+fallback, or a session of the CLI has to end first, so the CLI can stay
+signed out for longer.
+
 ## Whose spend it is
 
 A transcript names no login, so remuda writes down which one each CLI's files
@@ -65,8 +104,9 @@ login also carries its `oauthAccount` block and email back (Claude). See
 ## Sources
 
 - [src/ops.rs](../../src/ops.rs)
-- [src/claude.rs](../../src/claude.rs) `install`
-- [src/codex.rs](../../src/codex.rs) `install`
+- [src/claude.rs](../../src/claude.rs) `install`, `sign_out`
+- [src/codex.rs](../../src/codex.rs) `install`, `sign_out`
+- [src/fsx.rs](../../src/fsx.rs) `remove_json_if`
 - [src/runs.rs](../../src/runs.rs) `switched`
 - [src/attribution.rs](../../src/attribution.rs) `switched`, `noticed`
 - [src/logbook.rs](../../src/logbook.rs), each switch logged with who made it ([log.md](log.md))

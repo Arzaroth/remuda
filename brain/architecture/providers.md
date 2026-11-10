@@ -13,6 +13,8 @@ from a CLI. `creds` is always the store's shape for that CLI.
 | `live_identity` | Who the CLI's own files say that login is (`Identity`) |
 | `identify` | Whose tokens these are, per the tokens or the provider, never a file beside them |
 | `install` | Make an entry the live login |
+| `signs_out` | Whether `sign_out` is implemented, which the page's Sign out follows (false by default) |
+| `sign_out` | Take the live login out of the CLI's files and keep the rest ([../features/switching.md](../features/switching.md#signing-out)); refused by default, as for an API key |
 | `lock_live` | A lock other writers of the live login share, held by a switch (none by default) |
 | `refresh` | Rotate the tokens in place; returns the account the endpoint answered for |
 | `renews` | False for an API key, which `refresh` skips (true by default) |
@@ -42,11 +44,15 @@ refresh token into "sign this credential in again".
   login is its seat ("team premium"), never its tier's multiplier. Anything
   else is `subscriptionType` plus the tier's `Nx` suffix ("enterprise 5x"),
   or `subscriptionType` alone.
-- OAuth (from Claude Code 2.1.282): client id `9d1c250a-e61b-44d9-88ed-5944d1962f5e`,
+- OAuth (from Claude Code 2.1.322): client id `9d1c250a-e61b-44d9-88ed-5944d1962f5e`,
   authorize at `claude.com/cai/oauth/authorize`, token at
   `platform.claude.com/v1/oauth/token` (JSON body), profile at
   `api.anthropic.com/api/oauth/profile`. Sign-in redirects to
-  `platform.claude.com/oauth/code/callback`, which shows a `code#state` to paste.
+  `http://localhost:<port>/callback` on a free port, and the browser is then
+  sent on to `platform.claude.com/oauth/code/success?app=claude-code`; pasting
+  redirects to `platform.claude.com/oauth/code/callback`, which shows a
+  `code#state`. Both keep `code=true` in the authorize URL, and the token
+  request repeats the `redirect_uri` used.
 - A banked usage-limit reset is spent by asking
   `api.anthropic.com/api/oauth/usage?cedar_ember=1` which grant it would accept
   (`next_grant_id` while it is usable, else any usable one, never one whose
@@ -88,8 +94,9 @@ refresh token into "sign this credential in again".
   a JSON body with scope `openid profile email`, keeping any token the answer
   leaves out, and stamps `last_refresh`.
 - A sign-in listens on 127.0.0.1:1455 and, when the machine has it, [::1]:1455
-  (the redirect says `localhost`), for up to 10 minutes. A port an attempt
-  being cancelled still holds gets two seconds to free up. It reads each
+  (the redirect says `localhost`), for up to 10 minutes. The port is taken
+  when either is, so another process on [::1] cannot get the callback. A port
+  an attempt being cancelled still holds gets two seconds to free up. It reads each
   connection's request line with a 2 s timeout and an 8 KiB cap, drops what it
   cannot read, answers other paths with a 404 and a callback with another
   state with a 400, and keeps waiting; only a callback with this attempt's
@@ -101,8 +108,8 @@ refresh token into "sign this credential in again".
 - File: `auth.json` under `GROK_HOME`, else `~/.grok`, or `GROK_AUTH_PATH`
   itself. An object keyed by `<issuer>::<client id>`; the login is the entry
   whose key starts `https://auth.x.ai::` and has a `key`. The whole file is
-  stored; `install` replaces only the `auth.x.ai::` entries, compared and
-  swapped on them, so an API key under another scope survives a switch. An entry under any other scope with a `key` and no OIDC entry is an
+  stored; `install` replaces only the `auth.x.ai::` entries, refusing when
+  any of them differs from the outgoing login, so an API key under another scope survives a switch. An entry under any other scope with a `key` and no OIDC entry is an
   API key, reported by `foreign_login`.
 - Identity: the access token's own `sub`. Email from the entry. Expiry: the
   token's `exp`.

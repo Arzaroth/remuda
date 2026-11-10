@@ -10,6 +10,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use toml_edit::{ArrayOfTables, DocumentMut, InlineTable, Item, Table, Value};
 
+use crate::browser::Window;
 use crate::fsx;
 
 pub const OTHERWISE: &str = "otherwise";
@@ -27,6 +28,30 @@ pub struct Config {
     /// closes.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub warm: BTreeMap<String, Vec<String>>,
+    #[serde(default, skip_serializing_if = "Login::is_default")]
+    pub login: Login,
+}
+
+/// Where a sign-in opens.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Login {
+    /// A browser remuda knows (`browser::BROWSERS`); none is the desktop's
+    /// default one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser: Option<String>,
+    #[serde(default, skip_serializing_if = "Window::is_private")]
+    pub window: Window,
+    /// Sign in by pasting a code where the CLI offers it (Claude Code), so
+    /// the browser can be on another machine; by default it calls back here.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub paste: bool,
+}
+
+impl Login {
+    fn is_default(&self) -> bool {
+        *self == Login::default()
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -332,6 +357,15 @@ impl Config {
         }
         let is_schedule = |s: &str| s != OTHERWISE && self.schedules.contains_key(s);
 
+        if let Some(browser) = &self.login.browser
+            && !crate::browser::BROWSERS.iter().any(|b| b.id == browser)
+        {
+            flag(
+                "login.browser",
+                format!("remuda does not know a browser called {browser:?}"),
+            );
+        }
+
         for (provider, auto) in &self.auto {
             let at = format!("auto.{provider}");
             let Some(stored) = logins(provider) else {
@@ -547,6 +581,24 @@ impl Config {
             }
             doc["warm"] = Item::Table(all);
         }
+        if !self.login.is_default() {
+            let mut t = Table::new();
+            if let Some(browser) = &self.login.browser {
+                t["browser"] = toml_edit::value(browser.as_str());
+            }
+            if !self.login.window.is_private() {
+                let window = match self.login.window {
+                    Window::Private => "private",
+                    Window::Profile => "profile",
+                    Window::Normal => "normal",
+                };
+                t["window"] = toml_edit::value(window);
+            }
+            if self.login.paste {
+                t["paste"] = toml_edit::value(true);
+            }
+            doc["login"] = Item::Table(t);
+        }
         doc
     }
 }
@@ -645,6 +697,18 @@ fn update(path: &Path, edit: impl FnOnce(&mut Config)) -> Result<()> {
     let before = config.clone();
     edit(&mut config);
     if config != before {
+        write(path, &text, &config)?;
+    }
+    Ok(())
+}
+
+/// Sets where sign-ins open, starting the file when there is none.
+pub fn set_login(path: &Path, login: Login) -> Result<()> {
+    let _lock = lock(path)?;
+    let text = read(path)?.unwrap_or_default();
+    let mut config = parse(path, &text)?;
+    if config.login != login {
+        config.login = login;
         write(path, &text, &config)?;
     }
     Ok(())
@@ -977,6 +1041,49 @@ reserve = { work = "workday" }
         assert_eq!(auto.margin, 0.25);
         assert_eq!(auto.rules[1].reserve["work"], "workday");
         assert_eq!(c.check(&stored), []);
+    }
+
+    #[test]
+    fn where_sign_ins_open_is_kept_and_checked() {
+        let c: Config =
+            toml_edit::de::from_str("[login]\nbrowser = \"firefox\"\nwindow = \"profile\"\n")
+                .unwrap();
+        assert_eq!(c.login.browser.as_deref(), Some("firefox"));
+        assert_eq!(c.login.window, Window::Profile);
+        assert_eq!(c.check(&stored), []);
+        let text = "[login]\nbrowser = \"firefox\"\nwindow = \"profile\"\n";
+        assert_eq!(written(text, &c), text);
+
+        let odd: Config = toml_edit::de::from_str("[login]\nbrowser = \"lynx\"\n").unwrap();
+        assert_eq!(odd.check(&stored)[0].at, "login.browser");
+        assert!(toml_edit::de::from_str::<Config>("[login]\nwindow = \"tab\"\n").is_err());
+        assert!(toml_edit::de::from_str::<Config>("[login]\ncolour = 1\n").is_err());
+    }
+
+    #[test]
+    fn setting_where_sign_ins_open_starts_the_file_and_keeps_the_rest() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("remuda/config.toml");
+        let profile = Login {
+            browser: Some("chromium".into()),
+            window: Window::Profile,
+            ..Login::default()
+        };
+
+        set_login(&path, profile.clone()).unwrap();
+        assert_eq!(load(&path).unwrap().config.login, profile);
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(
+            &path,
+            format!("{text}\n# mine\n[warm]\nclaude = [\"work\"]\n"),
+        )
+        .unwrap();
+        set_login(&path, Login::default()).unwrap();
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(after.contains("# mine\n[warm]"), "{after}");
+        assert!(!after.contains("[login]"), "{after}");
+        assert_eq!(load(&path).unwrap().config.warm["claude"], ["work"]);
     }
 
     #[test]

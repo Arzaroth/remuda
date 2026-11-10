@@ -1,4 +1,4 @@
-export type Provider = { id: string; name: string; warm?: boolean };
+export type Provider = { id: string; name: string; warm?: boolean; signsOut?: boolean };
 
 export type Credential = {
   id: string;

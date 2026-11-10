@@ -174,6 +174,14 @@ impl Provider for Cursor {
         })
     }
 
+    fn signs_out(&self) -> bool {
+        true
+    }
+
+    fn sign_out(&self, outgoing: &Value) -> Result<()> {
+        crate::fsx::remove_json_if(&self.auth_path, outgoing)
+    }
+
     /// Cursor usually renews only the access token and keeps the refresh
     /// token; a session it will not renew answers 200 with `shouldLogout`.
     fn refresh(&self, creds: &mut Value) -> Result<Option<String>> {
@@ -202,7 +210,7 @@ impl Provider for Cursor {
         Ok(user_of(&access))
     }
 
-    fn begin_login(&self) -> Result<Box<dyn PendingLogin>> {
+    fn begin_login(&self, _paste: bool) -> Result<Box<dyn PendingLogin>> {
         let verifier = pkce::random()?;
         let uuid = pkce::uuid()?;
         let url = reqwest::Url::parse_with_params(
@@ -359,6 +367,26 @@ mod tests {
     }
 
     #[test]
+    fn signing_out_removes_auth_json_once_its_login_is_stored() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let c = Cursor::at(tmp.path(), Api::local(&OFFLINE));
+        let creds = auth("u1", "work", "r-work");
+        let identity = c.identify(&creds).unwrap();
+        store
+            .save(&Entry::new("cursor", "work", creds, identity, 1))
+            .unwrap();
+        let work = store.get("cursor", "work").unwrap().unwrap();
+        c.install(&work, None).unwrap();
+
+        let said = ops::sign_out(&store, &c, false, crate::logbook::By::Cli).unwrap();
+
+        assert_eq!(said, "signed Cursor out of work");
+        assert!(!tmp.path().join("auth.json").exists());
+        assert!(store.get("cursor", "work").unwrap().is_some());
+    }
+
+    #[test]
     fn switching_replaces_auth_json_whole() {
         let tmp = tempfile::tempdir().unwrap();
         let store = Store::open(&tmp.path().join("store"));
@@ -427,7 +455,7 @@ mod tests {
         let mut server = mockito::Server::new();
         let tmp = tempfile::tempdir().unwrap();
         let c = Cursor::at(tmp.path(), Api::local(&server.url()));
-        let pending = c.begin_login().unwrap();
+        let pending = c.begin_login(false).unwrap();
         let url = reqwest::Url::parse(pending.url()).unwrap();
         assert_eq!(url.path(), "/loginDeepControl");
         let param = |k: &str| {

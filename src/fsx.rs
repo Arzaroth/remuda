@@ -103,6 +103,49 @@ fn read_text(path: &Path) -> Result<Option<String>> {
     }
 }
 
+/// Removes a file another program writes when it still holds `expected`, and
+/// refuses with [`Changed`] when it holds something else. The file is moved
+/// aside before it is read, so what is removed is what was compared; one that
+/// differs goes back unless the program has written a newer one since. A link
+/// is refused: removing it would undo the user's own setup, and removing what
+/// it points at would leave it dangling.
+pub fn remove_json_if(path: &Path, expected: &Value) -> Result<()> {
+    if fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
+        anyhow::bail!("{} is a link, which remuda does not remove", path.display());
+    }
+    let name = path
+        .file_name()
+        .context("path has no file name")?
+        .to_string_lossy();
+    let aside = path.with_file_name(format!(".{name}.remuda-out-{}", std::process::id()));
+    match fs::rename(path, &aside) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e).with_context(|| format!("failed to remove {}", path.display())),
+        Ok(()) => {}
+    }
+    let held = read_json(&aside);
+    if matches!(&held, Ok(Some(held)) if held == expected) {
+        return fs::remove_file(&aside)
+            .with_context(|| format!("failed to remove {}", aside.display()));
+    }
+    match fs::hard_link(&aside, path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => {
+            return Err(e).with_context(|| {
+                format!(
+                    "failed to put {} back; it is at {}",
+                    path.display(),
+                    aside.display()
+                )
+            });
+        }
+    }
+    let _ = fs::remove_file(&aside);
+    held.with_context(|| format!("failed to read {}", path.display()))?;
+    Err(Changed.into())
+}
+
 /// Rewrites a JSON object another program also writes, and takes no lock on:
 /// read, edit, and rename into place only if the file still holds what was
 /// read, starting over otherwise. A read caught halfway through the other
@@ -221,6 +264,53 @@ pub fn lock(dir: &Path) -> Result<File> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_file_is_removed_only_while_it_holds_what_was_read() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("auth.json");
+        write_json(&path, &serde_json::json!({"v": 2})).unwrap();
+
+        let moved = remove_json_if(&path, &serde_json::json!({"v": 1}));
+        assert!(moved.unwrap_err().is::<Changed>());
+        assert!(path.exists());
+
+        remove_json_if(&path, &serde_json::json!({"v": 2})).unwrap();
+        assert!(!path.exists());
+        remove_json_if(&path, &serde_json::json!({"v": 2})).unwrap();
+    }
+
+    #[test]
+    fn a_file_that_changed_stays_as_it_is_with_nothing_beside_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("auth.json");
+        write_json(&path, &serde_json::json!({"v": 2})).unwrap();
+        let before = fs::read(&path).unwrap();
+
+        let moved = remove_json_if(&path, &serde_json::json!({"v": 1}));
+
+        assert!(moved.unwrap_err().is::<Changed>());
+        assert_eq!(fs::read(&path).unwrap(), before);
+        let names: Vec<_> = fs::read_dir(tmp.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["auth.json"]);
+    }
+
+    #[test]
+    fn a_linked_file_is_never_removed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let real = tmp.path().join("real.json");
+        let link = tmp.path().join("link.json");
+        write_json(&real, &serde_json::json!({"v": 1})).unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let err = remove_json_if(&link, &serde_json::json!({"v": 1})).unwrap_err();
+
+        assert!(err.to_string().contains("is a link"), "{err}");
+        assert!(real.exists() && link.exists());
+    }
 
     #[test]
     fn a_symlinked_file_is_written_through_its_link() {
