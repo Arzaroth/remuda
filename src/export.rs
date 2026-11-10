@@ -563,24 +563,31 @@ fn join_fleet(
     if force {
         join.arg("--sync-force");
     }
-    let mut child = join
-        .stdin(Stdio::piped())
-        .spawn()
-        .with_context(|| format!("could not run {}", program.display()))?;
+    let mut child = match join.stdin(Stdio::piped()).spawn() {
+        Ok(child) => child,
+        Err(e) => {
+            writeln!(
+                out,
+                "TokenGauge did not join the fleet (could not run {}: {e}); the rest is restored",
+                program.display()
+            )?;
+            return Ok(());
+        }
+    };
     let handed = child
         .stdin
         .take()
         .context("no stdin to hand TokenGauge the fleet on")?
         .write_all(serde_json::to_string(fleet)?.as_bytes());
-    if !child.wait()?.success() || handed.is_err() {
+    if !child.wait().is_ok_and(|s| s.success()) || handed.is_err() {
         writeln!(
             out,
             "TokenGauge did not join the fleet; the rest is restored"
         )?;
         return Ok(());
     }
-    let tested = Command::new(program).arg("--sync-test").status()?;
-    if !tested.success() {
+    let tested = Command::new(program).arg("--sync-test").status();
+    if !tested.is_ok_and(|s| s.success()) {
         writeln!(
             out,
             "TokenGauge joined the fleet, but its round trip failed"
