@@ -298,31 +298,30 @@ pub fn refresh_entry(store: &Store, p: &dyn Provider, entry: &mut Entry) -> Resu
 /// Takes the live login out of the CLI's files once it is safe in the store,
 /// so every login is remuda's to refresh and sign in again.
 pub fn sign_out(store: &Store, p: &dyn Provider, discard: bool, by: By) -> Result<String> {
+    let already = || Ok(format!("{} is already signed out", p.name()));
     let live = sync_live(store, p)?;
-    let was = match &live {
-        LiveState::SignedOut => return Ok(format!("{} is already signed out", p.name())),
-        LiveState::Foreign { what } => {
-            bail!(
-                "{} is signed in with {what}, which remuda does not sign out",
-                p.name()
-            )
-        }
-        LiveState::Unreadable { error } => bail!("could not read {}'s login: {error}", p.name()),
-        LiveState::Stored { name, .. } => Some(name.clone()),
-        LiveState::Unstored { .. } => None,
-    };
+    if live == LiveState::SignedOut {
+        return already();
+    }
+    signed_in_as(p, &live)?;
     refuse_to_replace(p, live, discard)?;
     let _live = p.lock_live()?;
     let mut attempts = 0;
-    loop {
+    let was = loop {
         let (live, outgoing) = sync_live_read(store, p)?;
-        let Some(outgoing) = outgoing else { break };
+        let was = signed_in_as(p, &live)?;
+        let Some(outgoing) = outgoing else {
+            return already();
+        };
         refuse_to_replace(p, live, discard)?;
         match p.sign_out(&outgoing) {
             Err(e) if e.is::<crate::fsx::Changed>() && attempts < 3 => attempts += 1,
-            result => break result?,
+            result => {
+                result?;
+                break was;
+            }
         }
-    }
+    };
     crate::runs::switched(store, p.id(), now_ms());
     crate::attribution::noticed(store, p, &LiveState::SignedOut);
     let message = match &was {
@@ -336,6 +335,20 @@ pub fn sign_out(store: &Store, p: &dyn Provider, discard: bool, by: By) -> Resul
             .by(by),
     );
     Ok(message)
+}
+
+fn signed_in_as(p: &dyn Provider, live: &LiveState) -> Result<Option<String>> {
+    match live {
+        LiveState::Foreign { what } => {
+            bail!(
+                "{} is signed in with {what}, which remuda does not sign out",
+                p.name()
+            )
+        }
+        LiveState::Unreadable { error } => bail!("could not read {}'s login: {error}", p.name()),
+        LiveState::Stored { name, .. } => Ok(Some(name.clone())),
+        LiveState::SignedOut | LiveState::Unstored { .. } => Ok(None),
+    }
 }
 
 fn refuse_to_replace(p: &dyn Provider, live: LiveState, discard: bool) -> Result<()> {
