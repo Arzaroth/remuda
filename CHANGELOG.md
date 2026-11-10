@@ -39,8 +39,8 @@
 - The same switch signs Codex in by device code, as `codex login --device-auth`
   does: remuda shows a code to type at auth.openai.com/codex/device from any
   machine's browser, so Codex no longer needs the browser on this machine.
-  `remuda login` does so by default over SSH or with no display, as it pastes
-  for Claude, and `--no-paste` keeps the callback. Its sign-in constants now
+  `remuda login` does so by default over SSH or, on Linux, with no display, as
+  it pastes for Claude, and `--no-paste` keeps the callback. Its sign-in constants now
   follow codex-cli 0.167.0.
 - Spending a banked reset skips one whose limits are all at 0%, as claude.ai
   does, rather than burning it on nothing.
