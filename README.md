@@ -104,6 +104,8 @@ take `-p <cli>`: `claude` (the default), `codex`, `cursor`, `glm`, `grok`,
 | `remuda import <name> [-p <cli>]` | Store the login the CLI is signed into right now |
 | `remuda login <name> [-p <cli>] [--no-browser] [--browser <id>] [--window private\|profile\|normal] [--paste\|--no-paste]` | Sign another account in through the browser and store it, without touching the CLI. Prints the link first; Enter opens it where `[login]` in config.toml says, unless `--no-browser` is given or there is no display (`DISPLAY` or `WAYLAND_DISPLAY`), when you open it yourself. Claude and Codex call back to this machine; `--paste` lets a browser elsewhere finish, with a code to paste (Claude) or a device code (Codex), the default over SSH or, on Linux, with no display, and `--no-paste` asks for the callback anyway |
 | `remuda use <name>` | Make a stored credential the one its CLI uses |
+| `remuda export [file] [--move <name>] [--without-s3-keys]` | Send this machine's logins and settings to another one, through wyrmyon or magic-wormhole, or sealed into a file under a passphrase |
+| `remuda restore [file] [--force] [--no-sign-in] [--paste\|--no-paste]` | Set this machine up from what `export` sent, then sign in again the logins that cannot be copied |
 | `remuda signout <cli>` | Sign the CLI out, keeping its login in the store, so remuda can refresh and sign in again every login |
 | `remuda run <name> [-- args]` | Start Claude Code or Codex on a stored login for this session only, without switching; `remuda claude <name>` is the same |
 | `remuda pin [name] [--remove <cli>] [--allow]` | Pin a login to this directory in `.remuda.toml`, show the pins in force, or trust a `.remuda.toml` as it is |
@@ -141,6 +143,25 @@ asks for the callback anyway, as when port forwarding brings it back. Grok and
 Kimi show a code to approve and Cursor a confirmation, and remuda waits for the
 provider to say it is done, from any machine's browser. GLM and opencode Go
 open their key page and ask for the key.
+
+## Another machine
+
+`remuda export` on this machine and `remuda restore` on the new one copy the
+logins, `config.toml`, the proxy's settings (without its client keys) and
+TokenGauge's fleet, S3 keys included unless `--without-s3-keys`, so the new
+machine joins the fleet on its own. With wyrmyon or magic-wormhole installed,
+export prints a code and restore asks for it; otherwise `remuda export
+<file>` seals everything into a file in age's format, under a passphrase, and
+`remuda restore <file>` opens it.
+
+API keys and Cursor logins go across as they are. Claude Code, Codex, Grok and
+Kimi logins do not: their refresh tokens are single use, so two machines
+sharing one would sign each other out. restore signs each in again instead,
+the way `remuda login` does (from a browser on any machine over SSH or, on
+Linux, with no display, or with `--paste`), and stores it only if it is the
+same account.
+`--move <name>` carries a login's tokens anyway and drops it here, for a
+machine you are retiring.
 
 ## A login per session, and per repository
 

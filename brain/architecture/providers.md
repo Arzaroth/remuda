@@ -18,6 +18,7 @@ from a CLI. `creds` is always the store's shape for that CLI.
 | `lock_live` | A lock other writers of the live login share, held by a switch (none by default) |
 | `refresh` | Rotate the tokens in place; returns the account the endpoint answered for |
 | `renews` | False for an API key, which `refresh` skips (true by default) |
+| `portable` | Its tokens work from two machines at once, so `export` copies them rather than listing the login to sign in again: `!renews()` by default, true for Cursor |
 | `env_line` | The `export` line `remuda env` prints, for a key read from the environment |
 | `begin_login` | Start a sign-in, returning a `PendingLogin` |
 | `redeem_reset` | Spend one of the login's banked usage-limit resets (Claude only; the others refuse) |

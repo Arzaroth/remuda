@@ -54,6 +54,11 @@ seat. Tokens rotate; this does not.
 finished (`provider::PendingLogin`). Claude's finishes with a callback or a
 pasted code, Codex's with a callback or a device code.
 
+**Portable login**: one whose tokens work from two machines at once
+(`Provider::portable`): an API key, or Cursor's, whose refresh never rotates
+the refresh token. `remuda export` copies those and lists the rest to sign in
+again on the new machine.
+
 **Store**: the directory of credentials, `$REMUDA_STORE` or
 `$XDG_DATA_HOME/remuda/credentials`.
 

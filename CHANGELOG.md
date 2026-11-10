@@ -27,6 +27,15 @@
 - A banked Claude reset says what it resets: `1 Fable reset` with a Reset
   Fable limit button, from TokenGauge's `bankedResets.kinds`.
 
+- `remuda export` and `remuda restore` set another machine up in one step:
+  the logins, config.toml, the proxy's settings and TokenGauge's fleet with its
+  S3 keys (`--without-s3-keys` leaves them out), through wyrmyon or
+  magic-wormhole, or a file sealed in age's format under a passphrase. API keys
+  and Cursor logins go across as they are; Claude Code, Codex, Grok and Kimi
+  logins are signed in again over there from any browser, since their refresh
+  tokens are single use, and `--move` carries one's tokens for a machine being
+  retired. Joining the fleet needs TokenGauge with `--sync-export`.
+
 ### Changed
 
 - Claude signs in the way Claude Code does: the browser calls back to remuda,
