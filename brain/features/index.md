@@ -15,4 +15,5 @@
 | The log | [log.md](log.md) | `log`, the page's Log |
 | The doctor | [doctor.md](doctor.md) | `doctor`, the page's Status |
 | Running without switching, and pins | [run.md](run.md) | `run`, `pin`, `shell-init`, `remuda claude <name>` |
+| The artifact hook and the skill | [artifact-hook.md](artifact-hook.md) | `hook artifact`, `help skill`, Claude Code's hooks |
 | Completions and self-update | [completions-and-update.md](completions-and-update.md) | `completions`, `--update`, `--check-update` |

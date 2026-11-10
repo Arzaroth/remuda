@@ -11,7 +11,7 @@ whole store:
 
 | Kind | When |
 | --- | --- |
-| `switch` | A switch, with who made it (`cli`, `page` or `auto`) and, for auto mode, why. A switch to the login already in use is not one. An auto mode switch that fails is logged against the CLI |
+| `switch` | A switch, with who made it (`cli`, `page`, `auto`, or `hook` for the [artifact hook](artifact-hook.md)) and, for auto mode and the hook, why. A switch to the login already in use is not one. An auto mode switch that fails is logged against the CLI |
 | `auto` | Auto mode's decision for a CLI changed kind or target, or its config cannot be read: the same changes the service's log gets |
 | `refresh` | A credential was refreshed, or could not be: by the CLI, the timer or the page, and before a switch or a keep-warm ping (`ops::refresh_saved`) |
 | `warm` | A keep-warm ping opened a window, or failed |

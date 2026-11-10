@@ -119,6 +119,7 @@ take `-p <cli>`: `claude` (the default), `codex`, `cursor`, `glm`, `grok`,
 | `remuda doctor [--json]` | Check what remuda relies on (the service, the refresh timer, TokenGauge, the logins, the CLIs' versions) and say how to fix what is wrong |
 | `remuda serve [--port N] [--no-browser]` | Do all of the above from a page in the browser, and run auto mode |
 | `remuda open [--no-browser] [--add]` | Open the page a running `serve` shows; `--add` opens it on the add-account sheet |
+| `remuda help skill` | Print a SKILL.md that tells Claude Code sessions how to live with remuda, with the artifact hook's settings |
 | `remuda completions <shell>` | Print a completion script |
 | `remuda --update` | Replace the binary with the latest release |
 | `remuda --check-update` | Report whether a newer release exists |
@@ -161,6 +162,22 @@ claude                                      # Claude Code on work, here only
 Elsewhere, `claude` runs as it always did. A `.remuda.toml` that `remuda pin`
 did not write, one that came with a clone say, is ignored until `remuda pin
 --allow` trusts it.
+
+## Claude Code artifacts
+
+A switch moves every open Claude Code session to the other account, and an
+artifact belongs to the account that published it: after a switch, a session
+can no longer update its own page. remuda's artifact hook fixes that. It notes
+which login publishes or lists each artifact, and for a call on one that
+another login published, it switches Claude Code to that login, then back once
+the call returns. Every open session is on that login while the call runs.
+
+```bash
+remuda help skill > ~/.claude/skills/remuda/SKILL.md   # or wherever your skills live
+```
+
+The skill tells sessions what a switch does to them, and holds the hook lines
+to add to `~/.claude/settings.json`. `remuda doctor` says whether they are in.
 
 ## The page
 
