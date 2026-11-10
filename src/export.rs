@@ -328,11 +328,11 @@ pub fn restore(
                     .entry(p.id())
                     .or_insert_with(|| ops::sync_live(store, p).map_err(|e| format!("{e:#}")));
             }
-            let here = match store
+            let (here, old) = match store
                 .files(p.id(), &carried.name)
-                .and_then(|files| store.get(p.id(), &carried.name).map(|_| files))
+                .and_then(|files| store.get(p.id(), &carried.name).map(|old| (files, old)))
             {
-                Ok(here) => here,
+                Ok(read) => read,
                 Err(e) => {
                     writeln!(out, "kept {at}: the one stored here cannot be read: {e:#}")?;
                     set_aside_carried(store, p, carried, out)?;
@@ -375,7 +375,7 @@ pub fn restore(
                 }
                 continue;
             }
-            if let Some(old) = store.get(p.id(), &carried.name)?
+            if let Some(old) = old
                 && here.is_some_and(|(creds, _)| creds != carried.creds)
             {
                 let kept = store.set_aside(p.id(), &old.meta.account_id, &old.creds)?;
