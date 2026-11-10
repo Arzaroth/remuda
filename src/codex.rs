@@ -1082,6 +1082,34 @@ mod tests {
     }
 
     #[test]
+    fn a_device_sign_in_cancelled_while_it_polls_skips_the_exchange() {
+        let mut server = mockito::Server::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let c = codex(tmp.path(), &server.url());
+        server
+            .mock("POST", "/api/accounts/deviceauth/usercode")
+            .with_body(
+                json!({"device_auth_id": "da-1", "user_code": "WXYZ", "interval": 1}).to_string(),
+            )
+            .create();
+        let exchange = server.mock("POST", "/oauth/token").expect(0).create();
+        let pending = c.begin_login(true).unwrap();
+        let cancel = pending.canceller();
+        server
+            .mock("POST", "/api/accounts/deviceauth/token")
+            .with_body_from_request(move |_| {
+                cancel();
+                json!({"authorization_code": "auth-1", "code_verifier": "ver-1"})
+                    .to_string()
+                    .into_bytes()
+            })
+            .create();
+        let err = pending.finish(None).err().unwrap();
+        assert!(err.to_string().contains("cancelled"), "{err}");
+        exchange.assert();
+    }
+
+    #[test]
     fn a_device_sign_in_rides_out_two_busy_answers_but_not_a_third() {
         let mut server = mockito::Server::new();
         let tmp = tempfile::tempdir().unwrap();
