@@ -1,6 +1,7 @@
 import { createSignal, For, Match, onMount, Show, Switch } from 'solid-js';
 import { createConfirm } from '../confirm';
-import { ago, date, DAY, HOUR, plural, span, until, usedTone } from '../format';
+import { describeBanked } from '../banked';
+import { ago, date, DAY, HOUR, span, until, usedTone } from '../format';
 import { openSheet } from '../sheet';
 import { act, now, store } from '../state';
 import type { Credential, Live, Provider, Window } from '../types';
@@ -184,7 +185,7 @@ function Banked(props: { c: Credential }) {
       {(r) => (
         <div class="banked">
           <span class="aside">
-            {plural(r().available, 'banked reset')}
+            {describeBanked(r()).label}
             <Show when={r().expiresAt && !Number.isNaN(Date.parse(r().expiresAt!)) && r().expiresAt}>
               {(at) => <span title={date(Date.parse(at()))}>, expires {until(Date.parse(at()), now())}</span>}
             </Show>
@@ -192,11 +193,11 @@ function Banked(props: { c: Credential }) {
           <button
             class="btn"
             data-armed={confirm.text() ? '1' : undefined}
-            title={held() ? 'Waiting for TokenGauge to report what is left' : 'Clears the session and weekly limits now'}
+            title={held() ? 'Waiting for TokenGauge to report what is left' : describeBanked(r()).title}
             disabled={held()}
             onClick={spend}
           >
-            {confirm.text() ?? 'Reset limits'}
+            {confirm.text() ?? describeBanked(r()).button}
           </button>
         </div>
       )}

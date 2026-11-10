@@ -43,8 +43,15 @@ export type Usage = {
   planWeight?: number | null;
   plan?: string | null;
   windows: Window[];
-  bankedResets?: { available: number; expiresAt: string | null } | null;
+  bankedResets?: Banked | null;
   accounts?: Record<string, Usage>;
+};
+
+export type ResetKind = 'session' | 'weekly' | 'full' | 'fable';
+export type Banked = {
+  available: number;
+  expiresAt: string | null;
+  kinds?: { kind: ResetKind; count: number; expiresAt: string | null }[];
 };
 
 export type Shown = Usage & { passive?: boolean; missing?: boolean; behind?: boolean };

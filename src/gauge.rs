@@ -210,10 +210,33 @@ fn provider<'t>(p: &Value, now: Timestamp, trail: &dyn Fn(&str) -> Option<&'t Tr
 
 fn banked(resets: Option<&Value>) -> Value {
     match resets.and_then(|r| r.get("available")?.as_u64()) {
-        Some(available) if available > 0 => json!({
-            "available": available,
-            "expiresAt": resets.and_then(|r| r.get("expiresAt")?.as_str()),
-        }),
+        Some(available) if available > 0 => {
+            let mut out = json!({
+                "available": available,
+                "expiresAt": resets.and_then(|r| r.get("expiresAt")?.as_str()),
+            });
+            let kinds: Vec<Value> = resets
+                .and_then(|r| r.get("kinds")?.as_array())
+                .into_iter()
+                .flatten()
+                .filter_map(|k| {
+                    let kind = k
+                        .get("kind")?
+                        .as_str()
+                        .filter(|k| ["session", "weekly", "full", "fable"].contains(k))?;
+                    let count = k.get("count")?.as_u64().filter(|&n| n > 0)?;
+                    Some(json!({
+                        "kind": kind,
+                        "count": count,
+                        "expiresAt": k.get("expiresAt").and_then(Value::as_str),
+                    }))
+                })
+                .collect();
+            if !kinds.is_empty() {
+                out["kinds"] = Value::Array(kinds);
+            }
+            out
+        }
         _ => Value::Null,
     }
 }
@@ -351,6 +374,32 @@ mod tests {
         for name in ["spent", "odd", "none"] {
             assert!(accounts[name]["bankedResets"].is_null(), "{name}");
         }
+    }
+
+    #[test]
+    fn banked_resets_say_their_kind_when_tokengauge_does() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("tokengauge-usage.json");
+        let at = "2027-03-09T07:59:00+00:00";
+        std::fs::write(
+            &file,
+            json!({"payloads": [{"provider": "claude", "credential": "work", "usage": {"bankedResets": {
+                "available": 1, "expiresAt": at,
+                "kinds": [
+                    {"kind": "fable", "count": 1, "expiresAt": at},
+                    {"kind": "lunar", "count": 1},
+                    {"kind": "weekly", "count": 0},
+                ],
+            }}}]})
+            .to_string(),
+        )
+        .unwrap();
+        let usage = read(&file).unwrap();
+        assert_eq!(
+            usage["providers"]["claude"]["accounts"]["work"]["bankedResets"],
+            json!({"available": 1, "expiresAt": at,
+                   "kinds": [{"kind": "fable", "count": 1, "expiresAt": at}]})
+        );
     }
 
     #[test]
