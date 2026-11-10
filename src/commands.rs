@@ -489,10 +489,12 @@ pub fn login(
     if let Some((account, email)) = prompt.expect
         && done.identity.account_id != account
     {
+        let kept = store.set_aside(p.id(), &done.identity.account_id, &done.creds)?;
         bail!(
-            "that is {}, not {email}, the account {}/{name} was; nothing was stored",
+            "that is {}, not {email}, the account {}/{name} was; nothing was stored, and its tokens are set aside in {}",
             done.identity.email,
-            p.id()
+            p.id(),
+            kept.display()
         );
     }
     let entry = save_login(store, p, name, force, done)?;
@@ -1559,11 +1561,17 @@ mod tests {
             &mut Vec::new(),
         )
         .unwrap_err();
+        let error = error.to_string();
+        let (said, kept) = error
+            .split_once(", and its tokens are set aside in ")
+            .unwrap();
         assert_eq!(
-            error.to_string(),
+            said,
             "that is u-new@example.com, not old@example.com, the account claude/work was; nothing was stored"
         );
         assert!(e.store.get("claude", "work").unwrap().is_none());
+        let kept: Value = serde_json::from_str(&std::fs::read_to_string(kept).unwrap()).unwrap();
+        assert!(kept[OAUTH_KEY]["refreshToken"].is_string(), "{kept}");
     }
 
     #[test]
