@@ -378,15 +378,29 @@ pub fn restore(
             if let Some(old) = old
                 && here.is_some_and(|(creds, _)| creds != carried.creds)
             {
-                let kept = store.set_aside(p.id(), &old.meta.account_id, &old.creds)?;
-                writeln!(
-                    out,
-                    "set the tokens {at} held here aside in {}",
-                    kept.display()
-                )?;
+                match store.set_aside(p.id(), &old.meta.account_id, &old.creds) {
+                    Ok(kept) => writeln!(
+                        out,
+                        "set the tokens {at} held here aside in {}",
+                        kept.display()
+                    )?,
+                    Err(e) => {
+                        writeln!(
+                            out,
+                            "kept {at}: what it holds here could not be set aside: {e:#}"
+                        )?;
+                        set_aside_carried(store, p, carried, out)?;
+                        continue;
+                    }
+                }
             }
-            store.put_files(p.id(), &carried.name, &carried.creds, &carried.meta)?;
-            writeln!(out, "stored {at}")?;
+            match store.put_files(p.id(), &carried.name, &carried.creds, &carried.meta) {
+                Ok(()) => writeln!(out, "stored {at}")?,
+                Err(e) => {
+                    writeln!(out, "could not store {at}: {e:#}")?;
+                    set_aside_carried(store, p, carried, out)?;
+                }
+            }
         }
     }
 
