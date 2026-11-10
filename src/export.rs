@@ -314,21 +314,25 @@ pub fn restore(
         let _lock = store.lock()?;
         for carried in &bundle.carried {
             let at = format!("{}/{}", carried.provider, carried.name);
-            if known(&carried.provider).is_none() {
+            let Some(p) = known(&carried.provider) else {
                 writeln!(
                     out,
                     "skipped {at}: this remuda does not know {}",
                     carried.provider
                 )?;
                 continue;
-            }
-            if !force && store.get(&carried.provider, &carried.name)?.is_some() {
+            };
+            let here = store.files(p.id(), &carried.name)?;
+            if !force && let Some((creds, _)) = &here {
                 writeln!(out, "kept {at}, already stored here (--force replaces it)")?;
+                if *creds != carried.creds {
+                    set_aside_carried(store, p, carried, out)?;
+                }
                 continue;
             }
             let account = carried.meta.get("accountId").and_then(Value::as_str);
             if let Some(other) = store
-                .list(&carried.provider)?
+                .list(p.id())?
                 .into_iter()
                 .find(|e| Some(e.meta.account_id.as_str()) == account && e.name != carried.name)
             {
@@ -337,14 +341,15 @@ pub fn restore(
                     "skipped {at}: its account is stored here as {}",
                     other.qualified()
                 )?;
+                if store
+                    .files(p.id(), &other.name)?
+                    .is_none_or(|(creds, _)| creds != carried.creds)
+                {
+                    set_aside_carried(store, p, carried, out)?;
+                }
                 continue;
             }
-            store.put_files(
-                &carried.provider,
-                &carried.name,
-                &carried.creds,
-                &carried.meta,
-            )?;
+            store.put_files(p.id(), &carried.name, &carried.creds, &carried.meta)?;
             writeln!(out, "stored {at}")?;
         }
     }
@@ -398,6 +403,33 @@ pub fn restore(
         left.push(login);
     }
     Ok(Restored { sign_in: left })
+}
+
+/// Keeps the tokens of a carried login that is not stored, when its provider
+/// renews them: they may be the only copy, the sender's having been moved.
+fn set_aside_carried(
+    store: &Store,
+    p: &dyn Provider,
+    carried: &Carried,
+    out: &mut dyn Write,
+) -> Result<()> {
+    if !p.renews() {
+        return Ok(());
+    }
+    let creds = serde_json::from_str(&carried.creds)
+        .unwrap_or_else(|_| Value::String(carried.creds.clone()));
+    let account = carried
+        .meta
+        .get("accountId")
+        .and_then(Value::as_str)
+        .unwrap_or(&carried.name);
+    let kept = store.set_aside(p.id(), account, &creds)?;
+    writeln!(
+        out,
+        "  the tokens it carried are set aside in {}",
+        kept.display()
+    )?;
+    Ok(())
 }
 
 fn restore_config(
