@@ -402,11 +402,15 @@ pub fn restore(
             .or_default()
             .push(login.name.clone());
     }
-    if let Some(text) = &bundle.config {
-        restore_config(places.config, text, &names, providers, force, out)?;
+    if let Some(text) = &bundle.config
+        && let Err(e) = restore_config(places.config, text, &names, providers, force, out)
+    {
+        writeln!(out, "kept config.toml as it is here: {e:#}")?;
     }
-    if let Some(proxy) = &bundle.proxy {
-        restore_proxy(places.proxy, proxy, force, out)?;
+    if let Some(proxy) = &bundle.proxy
+        && let Err(e) = restore_proxy(places.proxy, proxy, force, out)
+    {
+        writeln!(out, "kept the proxy's settings here: {e:#}")?;
     }
     if let Some(fleet) = &bundle.fleet {
         join_fleet(places.tokengauge, fleet, force, out)?;
@@ -544,24 +548,19 @@ fn restore_config(
 fn restore_proxy(path: &Path, proxy: &Value, force: bool, out: &mut dyn Write) -> Result<()> {
     if force || !path.exists() {
         let mut settings: crate::proxy::settings::Settings =
-            serde_json::from_value(proxy.clone()).context("the proxy settings are malformed")?;
-        match crate::proxy::settings::File::at(path.to_owned()).read() {
-            Err(e) => writeln!(
+            serde_json::from_value(proxy.clone()).context("the ones sent are malformed")?;
+        settings.keys = crate::proxy::settings::File::at(path.to_owned())
+            .read()
+            .context("they cannot be read")?
+            .keys;
+        crate::fsx::write_json(path, &serde_json::to_value(&settings)?)?;
+        if settings.keys.is_empty() {
+            writeln!(out, "set the proxy up as it was, with no client keys yet")?;
+        } else {
+            writeln!(
                 out,
-                "kept the proxy's settings here: they cannot be read: {e:#}"
-            )?,
-            Ok(here) => {
-                settings.keys = here.keys;
-                crate::fsx::write_json(path, &serde_json::to_value(&settings)?)?;
-                if settings.keys.is_empty() {
-                    writeln!(out, "set the proxy up as it was, with no client keys yet")?;
-                } else {
-                    writeln!(
-                        out,
-                        "set the proxy up as it was, keeping its client keys here"
-                    )?;
-                }
-            }
+                "set the proxy up as it was, keeping its client keys here"
+            )?;
         }
     } else {
         writeln!(
