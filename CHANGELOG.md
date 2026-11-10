@@ -34,8 +34,9 @@
   logins are signed in again over there, since their refresh tokens are single
   use, and `--move` carries one's tokens for a machine being
   retired. Joining the fleet needs TokenGauge with `--sync-export` on the
-  sending machine and `--sync-join` on the new one; without it, export goes
-  on without the fleet. No
+  sending machine and `--sync-join` on the new one; when the sending one
+  cannot export the fleet, export goes on without it, and when the new one
+  cannot join it, restore says so and restores the rest. No
   refresh token is lost on the way: a moved login is set aside before it is
   removed, and stays when a refresh changed it meanwhile; `restore --force`
   keeps the login a CLI or a `remuda run` session uses and the proxy's client
