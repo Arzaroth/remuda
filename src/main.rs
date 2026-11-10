@@ -491,9 +491,14 @@ fn restore(
         }
         Err(e) => return Err(e),
     };
-    if let Some(kept) = file.filter(|f| export::was_kept(store, f)) {
-        std::fs::remove_file(kept)
-            .with_context(|| format!("could not remove {}", kept.display()))?;
+    if let Some(kept) = file.filter(|f| export::was_kept(store, f))
+        && let Err(e) = std::fs::remove_file(kept)
+    {
+        writeln!(
+            out,
+            "warning: could not remove {}: {e}; remove it yourself",
+            kept.display()
+        )?;
     }
     if restored.sign_in.is_empty() {
         return Ok(());
@@ -536,8 +541,10 @@ fn restore(
         };
         match commands::login(store, p, &login.name, false, prompt, out) {
             Ok(()) => {
-                if let Some(label) = &login.label {
-                    commands::label(store, p, &login.name, Some(label), out)?;
+                if let Some(label) = &login.label
+                    && let Err(e) = commands::label(store, p, &login.name, Some(label), out)
+                {
+                    writeln!(out, "{e:#}")?;
                 }
             }
             Err(e) => {
