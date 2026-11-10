@@ -132,6 +132,7 @@ export function AddAccount(props: { provider?: string; again?: string }) {
       try {
         const r = await api<{ opened: boolean }>('/api/login/open', { id: l.id });
         if (r.opened) return toast(`Opened it in ${l.opensIn}`);
+        toast(`Could not open ${l.opensIn}; use the link above if no tab opens`, true);
       } catch (e) {
         return toast((e as Error).message, true);
       }
