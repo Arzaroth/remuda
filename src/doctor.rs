@@ -201,10 +201,15 @@ fn artifact_hook(c: &Checkup) -> Option<Vital> {
         return None;
     }
     const TITLE: &str = "Claude Code artifact hook";
-    let settings = crate::fsx::read_json(c.claude_settings)
-        .ok()
-        .flatten()
-        .unwrap_or(Value::Null);
+    let settings = match crate::fsx::read_json(c.claude_settings) {
+        Ok(settings) => settings.unwrap_or(Value::Null),
+        Err(e) => {
+            return Some(
+                Vital::new("artifact-hook", Level::Warn, TITLE, format!("{e:#}"))
+                    .fix(format!("fix {}", c.claude_settings.display())),
+            );
+        }
+    };
     let on = hooked(&settings);
     if on.len() == HOOK_EVENTS.len() {
         return Some(Vital::new(
@@ -1157,5 +1162,11 @@ mod tests {
         hooks(&HOOK_EVENTS);
         let v = check(&e, &s, on("work"), Some(OURS));
         assert_eq!(find(&v, "artifact-hook").level, Level::Ok);
+
+        std::fs::write(e.tmp.path().join("settings.json"), "{ torn").unwrap();
+        let v = check(&e, &s, on("work"), Some(OURS));
+        let hook = find(&v, "artifact-hook");
+        assert_eq!(hook.level, Level::Warn);
+        assert!(hook.detail.contains("is not valid JSON"), "{}", hook.detail);
     }
 }
