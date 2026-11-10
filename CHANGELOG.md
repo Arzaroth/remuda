@@ -12,6 +12,13 @@
   does to them, the hook and its settings, and the commands.
 - `remuda doctor` checks that the artifact hook is installed once two Claude
   logins are stored.
+- A banked Claude reset says what it resets: `1 Fable reset` with a Reset
+  Fable limit button, from TokenGauge's `bankedResets.kinds`.
+
+### Changed
+
+- Spending a banked reset skips one whose limits are all at 0%, as claude.ai
+  does, rather than burning it on nothing.
 
 ## [0.38.0] - 2026-11-10
 

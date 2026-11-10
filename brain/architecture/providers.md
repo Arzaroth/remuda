@@ -49,7 +49,9 @@ refresh token into "sign this credential in again".
   `platform.claude.com/oauth/code/callback`, which shows a `code#state` to paste.
 - A banked usage-limit reset is spent by asking
   `api.anthropic.com/api/oauth/usage?cedar_ember=1` which grant it would accept
-  (`next_grant_id` while it is usable, else any usable one) and POSTing
+  (`next_grant_id` while it is usable, else any usable one, never one whose
+  `percent_used` puts every limit it clears at 0%, which claude.ai greys out
+  too) and POSTing
   `{program: "cedar_ember", grant_id, request_id}` to
   `/api/organizations/<organizationUuid>/reset_rate_limits`. Both send Claude
   Code's own user agent, `claude-cli/2.1.304 (external, cli)`, as TokenGauge does: the endpoint
