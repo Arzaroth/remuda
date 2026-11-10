@@ -14,8 +14,8 @@ sorts every stored login:
 
 - **Carried as they are**: those whose `Provider::portable` holds, meaning their
   tokens work from two machines at once. That is the API keys (nothing to
-  refresh) and Cursor (its refresh answers with an access token and never a new
-  refresh token). Both files go across byte for byte (`Store::files`,
+  refresh) and Cursor (its refresh answers with an access token, and has not
+  been seen to return a new refresh token; one that does is kept). Both files go across byte for byte (`Store::files`,
   `Store::put_files`), so `credsDigest` and `accountId` still hold.
 - **Listed, to sign in again**: Claude Code, Codex, Grok and Kimi, whose
   refresh is single use. Two machines holding one refresh token race, and the
@@ -23,8 +23,13 @@ sorts every stored login:
   about a minute as theft and revokes both. The list holds the provider, name,
   account id, email and label, and no token.
 - **`--move NAME`** carries a login's tokens instead, for a machine being
-  retired, and removes it here once the bundle has gone. The login a CLI uses,
-  or one in a `remuda run` session, is refused before anything is sent.
+  retired. The login a CLI uses, or one in a `remuda run` session, is refused
+  before anything is sent. The bundle is read under the store lock; once it
+  has gone, `export::drop_moved` takes the lock again, sets the login's tokens
+  aside (`Store::set_aside`, path printed) and removes it, unless its
+  credential file is no longer the one sent: a running `serve` may have
+  refreshed it while the other side was typing the code, leaving the bundle
+  with a spent refresh token, so the login stays here with a warning.
 
 It also carries `config.toml` as text, the proxy's `.proxy.json` with its
 client keys emptied (a client points at one host and gets a new key there), and
@@ -34,8 +39,8 @@ label. `--without-s3-keys` drops the S3 keys. Without TokenGauge, or without a
 fleet key, export says so and goes on.
 
 Never carried: the log, the attribution ledger, the proxy's request log,
-`.dirs.json`, `.pins.json`, `.runs/`, the `.last-*` records and `.set-aside-*`
-files.
+`.dirs.json`, `.pins.json`, `.runs/`, the `.last-*` records, `.received-*`
+and `.set-aside-*` files.
 
 ## How it travels
 
@@ -49,9 +54,10 @@ files.
 - **A file**, when FILE is given: sealed in age's scrypt format
   ([seal.rs](../../src/seal.rs), the `age` crate), so `age -d` opens it too. The
   passphrase is typed twice at `/dev/tty` with echo off, or read from the first
-  line of `--passphrase-file`. The file is created 0600 and never written over.
-  Without FILE and without a wormhole client, export refuses and says to give
-  one.
+  line of `--passphrase-file`. The terminal's settings come back when the
+  prompt ends, and when a signal (Ctrl-C) ends remuda there. The file is
+  created 0600 and never written over. Without FILE and without a wormhole
+  client, export refuses and says to give one.
 
 ## Restoring
 
@@ -59,33 +65,50 @@ files.
 `--force`:
 
 - Carried logins are stored, except one whose name is taken (kept) or whose
-  account is stored here under another name (skipped).
+  account is stored here under another name (skipped). Either way, when the
+  provider renews tokens and the file here is not the same, the tokens carried
+  are set aside and the path printed: for a moved login they are the only
+  copy.
+- With `--force`, a login stored here is replaced only as a switch or a remove
+  would allow it: the live login is read back first (`ops::sync_live`), and
+  the one the CLI uses, one in a `remuda run` session, or any when which one
+  the CLI uses is unknown, is kept, the tokens carried set aside. The tokens a
+  replaced login held are set aside when its provider renews them.
 - `config.toml` is checked (`Config::check`) against the logins stored here plus
   those listed to sign in, since names do not change, and written only when it
   passes; problems are printed and the config here stays.
-- The proxy's settings are written when there are none.
+- The proxy's settings are written when there are none; `--force` replaces
+  them but keeps the client keys here, since the bundle carries none.
 - The fleet goes to `tokengauge --sync-join -` on stdin (`--sync-force` with
-  `--force`), then `tokengauge --sync-test` runs. TokenGauge refuses a machine
-  already in another fleet unless forced, and writes its own files: remuda
-  never touches them.
+  `--force`), then `tokengauge --sync-test` runs. A TokenGauge that fails, or
+  exits before reading the fleet, is reported and the rest stays restored.
+  TokenGauge refuses a machine already in another fleet unless forced, and
+  writes its own files: remuda never touches them.
 
-Then each listed login not stored here yet is offered in turn ("Sign claude/work
-in again, as me@example.com? [Y/n]"), through the same sign-in as `remuda
-login`, which pastes the way it does: by default over SSH or, on Linux, with no
-display (`browser::remote`), with `--paste` or `[login] paste = true`, never
-with `--no-paste`; Enter opens the link only where a window can be shown
-(`browser::displayed`). Pasting lets the browser be anywhere: Claude's code to paste,
-Codex's, Grok's and Kimi's device codes. The login is filed only when its tokens name the
-account the list says (`Prompt::expect`); another account is refused and
-nothing is stored. Its label comes back with it. Logins skipped, refused, or
+A bundle received over a wormhole that cannot be restored (another format, or
+an error partway) is kept in the store as `.received-<ms>.json`, 0600, and the
+path printed; `remuda restore <that file>` reads it unsealed and removes it
+once it succeeds.
+
+Then each listed login not stored here yet, and whose account is not stored
+here under another name (that is printed), is offered in turn ("Sign
+claude/work in again, as me@example.com? [Y/n]"), through the same sign-in as
+`remuda login`, which pastes the way it does: by default over SSH or, on
+Linux, with no display (`browser::remote`), with `--paste` or `[login] paste =
+true`, never with `--no-paste`; Enter opens the link only where a window can
+be shown (`browser::displayed`). Pasting lets the browser be anywhere: Claude's code to
+paste, Codex's, Grok's and Kimi's device codes. The login is filed only when
+its tokens name the account the list says (`Prompt::expect`); another account
+is refused, nothing is stored, and its tokens are set aside, as a refresh that
+answers for another account does. Its label comes back with it. Logins skipped, refused, or
 left when the input ends, and all of them with `--no-sign-in`, are printed as
 the `remuda login NAME -p CLI --paste` lines to run later.
 
 ## Sources
 
-- [src/export.rs](../../src/export.rs) `build`, `fleet`, `restore`, `Via`, `Private`
-- [src/seal.rs](../../src/seal.rs)
+- [src/export.rs](../../src/export.rs) `build`, `drop_moved`, `fleet`, `restore`, `keep_received`, `Via`, `Private`
+- [src/seal.rs](../../src/seal.rs) `Quiet`
 - [src/main.rs](../../src/main.rs) `export`, `restore`
-- [src/store.rs](../../src/store.rs) `files`, `put_files`
+- [src/store.rs](../../src/store.rs) `files`, `put_files`, `set_aside`
 - [src/provider.rs](../../src/provider.rs) `portable`
 - [src/commands.rs](../../src/commands.rs) `Prompt::expect`

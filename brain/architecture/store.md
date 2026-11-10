@@ -20,7 +20,8 @@
 <store>/glm/<name>.json           {"key": ...}
 <store>/opencode/<name>.json      {"key": ...}
 <store>/<cli>/<name>.meta.json
-<store>/<cli>/.set-aside-<account>-<ms>.json   tokens a refresh rotated for another account
+<store>/<cli>/.set-aside-<account>-<ms>.json   tokens no login holds: see "Set aside"
+<store>/.received-<ms>.json       a bundle restore received but could not restore
 ```
 
 A credential file has the shape of the CLI's own file, so a reader that parses

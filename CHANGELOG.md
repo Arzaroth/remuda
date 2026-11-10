@@ -32,9 +32,15 @@
   S3 keys (`--without-s3-keys` leaves them out), through wyrmyon or
   magic-wormhole, or a file sealed in age's format under a passphrase. API keys
   and Cursor logins go across as they are; Claude Code, Codex, Grok and Kimi
-  logins are signed in again over there from any browser, since their refresh
-  tokens are single use, and `--move` carries one's tokens for a machine being
-  retired. Joining the fleet needs TokenGauge with `--sync-export`.
+  logins are signed in again over there, since their refresh tokens are single
+  use, and `--move` carries one's tokens for a machine being
+  retired. Joining the fleet needs TokenGauge with `--sync-export`. No
+  refresh token is lost on the way: a moved login is set aside before it is
+  removed, and stays when a refresh changed it meanwhile; `restore --force`
+  keeps the login a CLI or a `remuda run` session uses and the proxy's client
+  keys, and sets aside the tokens it replaces or cannot store; a bundle
+  received that cannot be restored is kept. restore signs in the way `remuda
+  login` does, with `--paste` and `--no-paste`.
 
 ### Changed
 

@@ -161,7 +161,12 @@ the way `remuda login` does (from a browser on any machine over SSH or, on
 Linux, with no display, or with `--paste`), and stores it only if it is the
 same account.
 `--move <name>` carries a login's tokens anyway and drops it here, for a
-machine you are retiring.
+machine you are retiring; its tokens are set aside here first, and it stays
+when a refresh changed them while the bundle was on its way. restore keeps
+the logins already here; `--force` replaces them, but never the one a CLI or
+a `remuda run` session uses, and never the proxy's client keys. Tokens restore
+could not store or replaced go to a set-aside file whose path it prints, and
+a bundle received that it could not restore is kept for another try.
 
 ## A login per session, and per repository
 
