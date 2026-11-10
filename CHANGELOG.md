@@ -39,8 +39,8 @@
   cannot join it, restore says so and restores the rest. No
   refresh token is lost on the way: a moved login is set aside before it is
   removed, and stays when a refresh changed it meanwhile; `restore --force`
-  keeps the login a CLI or a `remuda run` session uses and the proxy's client
-  keys, and sets aside the tokens and API keys it replaces and the tokens,
+  keeps the login a CLI or a `remuda run` session uses, one stored here it
+  cannot read, and the proxy's client keys, and sets aside the tokens and API keys it replaces and the tokens,
   not the API keys, it cannot store, except a
   login of a provider it does not know, which stays on the sending machine,
   in its store or, once moved, set aside there; a bundle received that cannot be restored is kept. restore signs in the way `remuda

@@ -167,7 +167,8 @@ same account.
 machine you are retiring; its tokens are set aside here first, and it stays
 when a refresh changed them while the bundle was on its way. restore keeps
 the logins already here; `--force` replaces them, but never the one a CLI or
-a `remuda run` session uses, and never the proxy's client keys. Tokens restore
+a `remuda run` session uses, nor one it cannot read, and never the proxy's
+client keys. Tokens restore
 could not store, and those a login here held when `--force` replaced it, go
 to a set-aside file whose path it prints (an API key it keeps out is not set
 aside, since the sending machine still has it; one it replaces is), and

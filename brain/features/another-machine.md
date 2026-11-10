@@ -82,6 +82,10 @@ and `.set-aside-*` files.
   the CLI uses is unknown, is kept, the tokens carried set aside. What a
   replaced login held is set aside, an API key as well as tokens: the key
   here may be its only copy.
+- A login stored here that cannot be read (its sidecar missing, not JSON or
+  incomplete, or its credential file not JSON) is kept as it is, even with
+  `--force`, the tokens carried set aside, and the rest goes on; a listed
+  login under such a name is skipped instead of offered.
 - `config.toml` is checked (`Config::check`) against the logins stored here plus
   those listed to sign in, since names do not change, and written only when it
   passes; problems are printed and the config here stays.

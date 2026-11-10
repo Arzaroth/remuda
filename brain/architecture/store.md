@@ -61,7 +61,8 @@ A credential and its sidecar are two renames, so the sidecar records
 lowercase hex characters. The credential is written first, so a crash in
 between leaves a sidecar whose digest does not match. The one exception is a
 sidecar with no digest (written by 0.1.0), which would pass for anything: it
-is replaced first. `Store::put_files` writes in the same order, and gives a
+is replaced first. A sidecar that is not JSON is written over like one with
+a digest, the credential first. `Store::put_files` writes in the same order, and gives a
 sidecar it is handed without a digest the digest of the bytes it stores.
 `Store::get` marks a mismatched entry unverified, and
 `ops::heal` runs at the start of every sync, the CLI signed in or not: it asks
