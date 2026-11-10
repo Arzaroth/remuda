@@ -173,4 +173,45 @@ mod tests {
         std::fs::write(&file, "\n").unwrap();
         assert!(passphrase(Some(&file), false).is_err());
     }
+
+    fn echoes(fd: libc::c_int) -> bool {
+        let mut now = std::mem::MaybeUninit::<libc::termios>::uninit();
+        // SAFETY: fd is the test's open terminal.
+        let now = unsafe {
+            assert_eq!(libc::tcgetattr(fd, now.as_mut_ptr()), 0);
+            now.assume_init()
+        };
+        now.c_lflag & libc::ECHO != 0
+    }
+
+    #[test]
+    fn the_terminal_echoes_again_once_the_passphrase_is_read() {
+        let (mut leader, mut follower) = (-1, -1);
+        // SAFETY: both out-pointers are valid, and the rest may be null.
+        let opened = unsafe {
+            libc::openpty(
+                &mut leader,
+                &mut follower,
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        };
+        assert_eq!(opened, 0);
+        assert!(echoes(follower));
+
+        let quiet = Quiet::new(follower).unwrap();
+        assert!(!echoes(follower));
+        assert_eq!(QUIET_FD.load(Ordering::SeqCst), follower);
+        drop(quiet);
+
+        assert!(echoes(follower));
+        assert_eq!(QUIET_FD.load(Ordering::SeqCst), -1);
+        assert!(SAVED.load(Ordering::SeqCst).is_null());
+        // SAFETY: both are the descriptors openpty gave.
+        unsafe {
+            libc::close(follower);
+            libc::close(leader);
+        }
+    }
 }
