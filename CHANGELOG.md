@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- A Claude Code hook, `remuda hook artifact`: a call on an artifact another
+  stored login published switches Claude Code to that login for the call, then
+  back, instead of being refused after a switch. It learns who owns what from
+  each publish and list.
+- `remuda help skill` prints a SKILL.md for Claude Code sessions: what a switch
+  does to them, the hook and its settings, and the commands.
+- `remuda doctor` checks that the artifact hook is installed once two Claude
+  logins are stored.
+
 ## [0.38.0] - 2026-11-10
 
 ### Added

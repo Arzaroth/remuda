@@ -416,6 +416,21 @@ enables no unit, since a package must not write into a home and the timer
 needs `remuda ls` run first from the user's shell (see
 [architecture/distribution.md](architecture/distribution.md#packages)).
 
+## A switch reaches every session, so artifacts get a hook
+
+An artifact belongs to the claude.ai account that published it, and the
+Artifact tools sign in with whatever Claude Code's credential file holds at the
+call (tried: a list right after a switch shows the other account's artifacts).
+Pinning each such session with `remuda run` would work but must be chosen at
+start, and a proxy cannot help: artifact calls go to claude.ai with the OAuth
+token, never through `ANTHROPIC_BASE_URL`. A skill alone is loaded at the
+model's discretion, so it cannot promise anything. A Claude Code hook runs on
+every artifact call, so `remuda hook artifact` switches to the publishing
+login for the call and back, and the skill (`remuda help skill`) explains it.
+The cost is that every open session runs on that login for the call's length;
+the switches are ordinary ones, so auto mode's dwell keeps it from moving the
+CLI under the call.
+
 ## Sources
 
 - [src/ops.rs](../src/ops.rs)

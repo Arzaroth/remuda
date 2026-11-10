@@ -30,4 +30,5 @@ export const byLabel: Record<NonNullable<LogEvent['by']>, string> = {
   cli: 'from the CLI',
   page: 'from the page',
   auto: 'by auto mode',
+  hook: 'for an artifact',
 };

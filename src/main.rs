@@ -1,4 +1,5 @@
 mod apikey;
+mod artifacts;
 mod attribution;
 mod auto;
 mod browser;
@@ -56,7 +57,11 @@ use crate::store::Store;
 
 /// Keep several Claude Code and Codex logins and switch between them.
 #[derive(Parser)]
-#[command(version, args_conflicts_with_subcommands = true)]
+#[command(
+    version,
+    args_conflicts_with_subcommands = true,
+    disable_help_subcommand = true
+)]
 struct Cli {
     /// Replace this binary with the latest release.
     #[arg(long, conflicts_with = "check_update")]
@@ -204,6 +209,14 @@ enum Cmd {
     },
     /// Print a completion script for a shell.
     Completions { shell: clap_complete::Shell },
+    /// Show the help of a command, or a topic: skill (a SKILL.md that tells
+    /// Claude Code sessions how to live with remuda, and the artifact hook).
+    Help { topic: Vec<String> },
+    /// Run by Claude Code's hooks on its artifact tools: `remuda hook artifact`
+    /// reads the event on stdin and switches to the login that published the
+    /// artifact for the call. Never fails the call.
+    #[command(hide = true)]
+    Hook { what: String },
     /// Run by `--update` as the new binary: bring the installed units up to date.
     #[command(hide = true)]
     SyncUnits,
@@ -230,6 +243,8 @@ impl Cmd {
             | Cmd::Login { .. }
             | Cmd::Open { .. }
             | Cmd::Completions { .. }
+            | Cmd::Help { .. }
+            | Cmd::Hook { .. }
             | Cmd::SyncUnits
             | Cmd::Status => None,
         }
@@ -531,6 +546,61 @@ fn run(store: &Store, providers: &[&dyn Provider], target: &str, args: &[OsStrin
     exit_as(status.with_context(|| format!("failed to start {}", spec.command))?);
 }
 
+const SKILL: &str = include_str!("skill.md");
+
+fn help(topic: &[String]) -> Result<()> {
+    if topic == ["skill"] {
+        print!("{SKILL}");
+        return Ok(());
+    }
+    let mut cmd = Cli::command();
+    for word in topic {
+        cmd = cmd
+            .find_subcommand(word)
+            .cloned()
+            .with_context(|| format!("no command or help topic named {word}; topics: skill"))?;
+    }
+    cmd.print_long_help()?;
+    Ok(())
+}
+
+/// The login a `remuda run` session started this process on, from its
+/// directory: the hook must not move the CLI's own login for it.
+fn run_login(store: &Store) -> Option<String> {
+    std::env::var_os(paths::outer("CLAUDE_CONFIG_DIR"))?;
+    let dir = std::path::PathBuf::from(std::env::var_os("CLAUDE_CONFIG_DIR")?);
+    let rest = dir
+        .strip_prefix(store.root().join(".runs").join("claude"))
+        .ok()?;
+    let mut parts = rest.components();
+    let name = parts.next()?.as_os_str().to_str()?.to_owned();
+    (parts.next()?.as_os_str() == "home" && parts.next().is_none()).then_some(name)
+}
+
+fn hook(store: &Store, claude: &Claude, what: &str) -> Result<()> {
+    if what != "artifact" {
+        bail!("no hook named {what}; `remuda hook artifact` is the one there is");
+    }
+    let mut raw = String::new();
+    io::Read::read_to_string(&mut io::stdin(), &mut raw)?;
+    if !store.root().exists() {
+        return Ok(());
+    }
+    let pinned = run_login(store);
+    let seat = match &pinned {
+        Some(name) => artifacts::Seat::Run(name),
+        None => artifacts::Seat::Live,
+    };
+    let pause = || std::thread::sleep(std::time::Duration::from_millis(500));
+    let nudge = || gauge::nudge(&paths::tokengauge_snapshot());
+    match artifacts::hook(store, claude, seat, &raw, &pause, &nudge) {
+        Ok(Some(out)) => println!("{out}"),
+        Ok(None) => {}
+        Err(e) => eprintln!("remuda hook artifact: {e:#}"),
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let argv: Vec<OsString> = std::env::args_os().collect();
     let command = match argv.get(1).and_then(|a| a.to_str()) {
@@ -554,6 +624,9 @@ fn main() -> Result<()> {
         clap_complete::generate(shell, &mut Cli::command(), "remuda", &mut io::stdout());
         return Ok(());
     }
+    if let Cmd::Help { topic } = &command {
+        return help(topic);
+    }
     let store = Store::open(&paths::store_root());
     let claude = Claude::from_env()?;
     let codex = Codex::from_env()?;
@@ -563,6 +636,9 @@ fn main() -> Result<()> {
     let glm = ApiKey::glm();
     let opencode = ApiKey::opencode();
     let providers: [&dyn Provider; 7] = [&claude, &codex, &cursor, &glm, &grok, &kimi, &opencode];
+    if let Cmd::Hook { what } = &command {
+        return hook(&store, &claude, what);
+    }
     if let Cmd::Run { name, args } = &command {
         return run(&store, &providers, name, args);
     }
@@ -809,6 +885,7 @@ fn main() -> Result<()> {
                 serving: served::serving(&paths::runtime_dir()),
                 search: search.as_deref(),
                 here: here.as_deref(),
+                claude_settings: &paths::claude_settings(),
                 now,
             });
             doctor::print(&vitals, now, json, out)
@@ -846,6 +923,8 @@ fn main() -> Result<()> {
         | Cmd::Serve { .. }
         | Cmd::Open { .. }
         | Cmd::Completions { .. }
+        | Cmd::Help { .. }
+        | Cmd::Hook { .. }
         | Cmd::SyncUnits => {
             unreachable!()
         }

@@ -86,6 +86,9 @@ TokenGauge. They are written through `fsx::write_record`, best effort.
 `<store>/.runs/<cli>/<name>/` holds a `remuda run` session's directory and
 lock while it runs, and `<store>/.pins.json` the `.remuda.toml` files allowed;
 see [../features/run.md](../features/run.md).
+`<store>/.artifacts.json` records which account published each Claude Code
+artifact and the switches back the artifact hook owes; see
+[../features/artifact-hook.md](../features/artifact-hook.md).
 `<store>/.log.jsonl` (and `.log.1.jsonl` once it rotates) is the log, appended
 to under `<store>/.log.lock`; see [../features/log.md](../features/log.md).
 `<store>/.attribution.jsonl` is the ledger of which login each CLI spent and

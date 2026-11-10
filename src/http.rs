@@ -344,6 +344,7 @@ mod tests {
                 units: vec![e.tmp.path().join("units")],
                 snapshot: e.tmp.path().join("tokengauge-usage.json"),
                 config: e.tmp.path().join("config.toml"),
+                claude_settings: e.tmp.path().join("settings.json"),
                 tokengauge: None,
                 github: "http://127.0.0.1:1".into(),
                 runtime: e.tmp.path().join("run"),

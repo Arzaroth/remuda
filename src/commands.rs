@@ -765,6 +765,7 @@ pub fn log(
             Some(logbook::By::Cli) => "  [cli]",
             Some(logbook::By::Page) => "  [page]",
             Some(logbook::By::Auto) => "  [auto mode]",
+            Some(logbook::By::Hook) => "  [artifact hook]",
             None => "",
         };
         writeln!(

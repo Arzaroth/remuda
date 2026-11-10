@@ -26,6 +26,7 @@ running.
 | `dirs.rs` | The directories interactive commands used, for the scheduled refresh to check |
 | `runs.rs` | The last scheduled refresh's record, for the page |
 | `attribution.rs` | The ledger lines that say which login each CLI spent, for TokenGauge |
+| `artifacts.rs` | Claude Code's artifact hook: which account owns which artifact, and the switch there and back around a call |
 | `gauge.rs` | Reads TokenGauge's usage snapshot for the page |
 | `usage.rs` | The Usage tab's data: TokenGauge's spend export, and the proxy's requests summed |
 | `value.rs` | The Usage tab's Value view: each login's weeks from TokenGauge's window history, against its spend |
