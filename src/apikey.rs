@@ -968,5 +968,6 @@ mod tests {
         assert!(p.install(&work, None).is_err());
         assert_eq!(p.live().unwrap(), None);
         assert!(!p.renews());
+        assert!(!p.signs_out());
     }
 }

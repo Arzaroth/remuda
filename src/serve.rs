@@ -3083,6 +3083,12 @@ mod tests {
     }
 
     #[test]
+    fn the_desktop_names_no_browser_without_a_display() {
+        let login = config::Login::default();
+        assert_eq!(Desktop.opens_in(&login).is_some(), browser::displayed());
+    }
+
+    #[test]
     fn a_cancelled_sign_in_stops_waiting() {
         use crate::codex::{Api as CodexApi, Codex};
         let e = env(&OFFLINE);
