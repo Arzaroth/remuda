@@ -214,8 +214,9 @@ resets within a twentieth of the window, an hour at most, are one).
 The Quota page draws its pools from these trails
 ([web-page.md](../features/web-page.md#quota)).
 `bankedResets` (`available`, `expiresAt`, and `kinds`,
-`[{kind, count, expiresAt}]` with `kind` one of `session`, `weekly`, `full`,
-`fable`, when TokenGauge splits the count: the Claude resets TokenGauge
+`[{kind, count, expiresAt, clears}]` with `kind` one of `session`, `weekly`,
+`full`, `fable` and `clears` the window keys it resets when TokenGauge names
+them, when TokenGauge splits the count: the Claude resets TokenGauge
 counts usable, null when none are left), and `accounts`: the same fields per stored
 credential name. TokenGauge 0.37 (snapshot schema 2) names the credential a
 payload or an error belongs to in its `credential` field; those go under
