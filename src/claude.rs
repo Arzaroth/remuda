@@ -283,7 +283,7 @@ fn redeem_reset(api: &Api, access_token: &str, organization: &str) -> Result<Str
         let body = resp.text().unwrap_or_default();
         bail!(
             "reset endpoint answered {status}: {}",
-            body.chars().take(200).collect::<String>()
+            oauth::excerpt(&body)
         );
     }
     let answer: Value = resp.json().unwrap_or(Value::Null);

@@ -497,10 +497,6 @@ struct CodexDevice {
     cancelled: Arc<AtomicBool>,
 }
 
-fn excerpt(body: &str) -> String {
-    body.chars().take(200).collect()
-}
-
 impl CodexDevice {
     fn begin(api: &Api) -> Result<Box<dyn PendingLogin>> {
         let (status, body) = api.post_json(
@@ -510,7 +506,7 @@ impl CodexDevice {
         if !status.is_success() {
             bail!(
                 "the device code request answered {status}: {}",
-                excerpt(&body)
+                oauth::excerpt(&body)
             );
         }
         let answer: Value =
@@ -563,7 +559,10 @@ impl CodexDevice {
                 continue;
             }
             if !status.is_success() {
-                bail!("the device sign-in answered {status}: {}", excerpt(&answer));
+                bail!(
+                    "the device sign-in answered {status}: {}",
+                    oauth::excerpt(&answer)
+                );
             }
             return serde_json::from_str(&answer).context("malformed device sign-in response");
         }

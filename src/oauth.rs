@@ -30,12 +30,13 @@ pub fn token_request(request: reqwest::blocking::RequestBuilder) -> Result<Value
         {
             bail!("the refresh token was rejected ({status}): sign this credential in again");
         }
-        bail!(
-            "token endpoint answered {status}: {}",
-            body.chars().take(200).collect::<String>()
-        );
+        bail!("token endpoint answered {status}: {}", excerpt(&body));
     }
     serde_json::from_str(&body).context("malformed token response")
+}
+
+pub fn excerpt(body: &str) -> String {
+    body.chars().take(200).collect()
 }
 
 pub fn text(answer: &Value, key: &str) -> Option<String> {

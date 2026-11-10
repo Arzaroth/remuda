@@ -57,7 +57,7 @@ impl DeviceFlow {
         if !status.is_success() {
             bail!(
                 "device authorization answered {status}: {}",
-                body.chars().take(200).collect::<String>()
+                oauth::excerpt(&body)
             );
         }
         let answer: Value =
@@ -145,7 +145,7 @@ impl DevicePending {
                 Some("expired_token") => bail!("the sign-in was not approved in time"),
                 _ => bail!(
                     "token endpoint answered {status}: {}",
-                    body.chars().take(200).collect::<String>()
+                    oauth::excerpt(&body)
                 ),
             }
         }
