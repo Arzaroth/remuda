@@ -107,14 +107,14 @@ impl Callback {
                 }
                 return Ok((stream, query));
             }
-            if accepted {
-                continue;
-            }
             if self.cancelled.load(Ordering::Relaxed) {
                 bail!("the sign-in was cancelled");
             }
             if Instant::now() > deadline {
                 bail!("gave up waiting for the browser to finish signing in");
+            }
+            if accepted {
+                continue;
             }
             std::thread::sleep(Duration::from_millis(50));
         }
