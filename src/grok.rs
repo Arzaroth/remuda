@@ -448,6 +448,32 @@ mod tests {
     }
 
     #[test]
+    fn a_switch_refuses_while_any_x_ai_entry_moved() {
+        let tmp = tempfile::tempdir().unwrap();
+        let g = grok(tmp.path(), &OFFLINE);
+        let path = tmp.path().join("auth.json");
+        let two = |second: &str| {
+            let mut file = auth("u-1", "a", "r-a", 1_900_000_000);
+            let other = format!("{OIDC_SCOPE}u-2");
+            file[&other] = auth("u-2", "b", second, 1_900_000_000)[&other].clone();
+            file
+        };
+        write_json(&path, &two("r-new")).unwrap();
+        let creds = auth("u-3", "c", "r-c", 1_900_000_000);
+        let identity = g.identify(&creds).unwrap();
+        let perso = Entry::new("grok", "perso", creds, identity, 1);
+
+        let moved = g.install(&perso, Some(&two("r-old")));
+        assert!(moved.unwrap_err().is::<crate::fsx::Changed>());
+        assert_eq!(read_json(&path).unwrap().unwrap(), two("r-new"));
+
+        g.install(&perso, Some(&two("r-new"))).unwrap();
+        let file = read_json(&path).unwrap().unwrap();
+        assert!(file.get(format!("{OIDC_SCOPE}u-2")).is_none());
+        assert_eq!(g.identify(&file).unwrap().account_id, "u-3");
+    }
+
+    #[test]
     fn a_sign_out_leaves_the_files_other_scopes_alone() {
         let tmp = tempfile::tempdir().unwrap();
         let g = grok(tmp.path(), &OFFLINE);
