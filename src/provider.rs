@@ -66,8 +66,8 @@ pub struct Copied {
     pub login_keys: &'static [&'static str],
 }
 
-/// A sign-in the browser has been sent to. Claude's ends with a code the user
-/// pastes back, Codex's with a callback to a local listener.
+/// A sign-in the browser has been sent to. Claude's ends with a callback or a
+/// pasted code, Codex's with a callback or a device code.
 pub trait PendingLogin: Send {
     fn url(&self) -> &str;
     fn needs_code(&self) -> bool;

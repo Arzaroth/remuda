@@ -402,7 +402,8 @@ pub struct Prompt<'a> {
     pub opens_in: Option<String>,
     /// The lines typed, in order, until the input ends.
     pub lines: std::sync::mpsc::Receiver<String>,
-    /// A sign-in that ends with a code to paste, where the CLI offers one.
+    /// A sign-in a browser on another machine can finish, where the CLI
+    /// offers one.
     pub paste: bool,
 }
 
