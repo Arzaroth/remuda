@@ -50,11 +50,12 @@ Where a sign-in opens ([features/sign-in.md](../features/sign-in.md#where-it-ope
 [login]
 browser = "firefox"   # a browser remuda knows; none: the desktop's default
 window  = "profile"   # private (default), profile (the login's own), normal
-paste   = true        # Claude: end with a code to paste, not a local callback
+paste   = true        # a browser anywhere: Claude pastes a code, Codex a device code
 ```
 
-`remuda login` also pastes over SSH or, on Linux, with no display, and `--no-paste`
-asks for the callback for one run whatever `paste` and the session say.
+`remuda login` also acts as if `paste = true` over SSH or, on Linux, with no
+display, and `--no-paste` asks for the callback for one run whatever `paste`
+and the session say.
 
 The page sets it from the Add a login dialog (`config::set_login`, which
 starts the file when there is none).

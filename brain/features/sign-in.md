@@ -5,7 +5,7 @@
 live login. It checks the name first (`commands::begin_login`), then prints the
 provider's authorize URL before opening anything, saying whether any browser
 will do or only one on this machine, for a sign-in that calls back to a local
-port (`PendingLogin::local_only`: Codex, and Claude unless pasting). Pressing
+port (`PendingLogin::local_only`: Claude and Codex unless `paste`). Pressing
 Enter opens it here, in the
 place the prompt names; it is still waited for meanwhile, and a pasted code
 still finishes it. `--no-browser` prints the link and offers nothing.
@@ -73,8 +73,13 @@ offer Enter, and the link is to be opened by hand.
   command just waits (up to 10 minutes). Port 1455 must be free, so not while
   `codex login` runs, and the browser must be on the same machine. Stray
   connections and callbacks from other attempts are answered and ignored; a
-  denied consent with this attempt's state ends it. The stored account is the
-  seat the new tokens name.
+  denied consent with this attempt's state ends it. With `--paste`,
+  `[login] paste = true`, the page's checkbox, or a remote session as for
+  Claude (`--no-paste` keeps the callback), it is codex-cli's device sign-in
+  instead: the link is `auth.openai.com/codex/device`, the prompt and
+  the page show a code to type there from any machine's browser, and remuda
+  polls for up to 15 minutes. Either way the stored account is the seat the
+  new tokens name.
 
 - **Grok and Kimi**: a device code ([device.rs](../../src/device.rs)). The
   URL carries the code to approve, and remuda polls the token endpoint until
@@ -97,7 +102,7 @@ The page offers the same flow in two calls; see [web-page.md](web-page.md).
 - [src/commands.rs](../../src/commands.rs) `login`, `save_login`
 - [src/claude.rs](../../src/claude.rs) `begin_login`, `start_login`, `finish_login`, `ClaudePending`
 - [src/callback.rs](../../src/callback.rs) `Callback`
-- [src/codex.rs](../../src/codex.rs) `begin_login`, `CodexPending`
+- [src/codex.rs](../../src/codex.rs) `begin_login`, `CodexPending`, `CodexDevice`
 - [src/device.rs](../../src/device.rs) `DeviceFlow`, `DevicePending`
 - [src/cursor.rs](../../src/cursor.rs) `CursorPending`
 - [src/apikey.rs](../../src/apikey.rs) `KeyPending`

@@ -119,10 +119,6 @@ machine's history, which TokenGauge bills by), `.dirs.json`, `.pins.json`
 
 It needs, first:
 
-- **Codex sign-in by device code.** remuda waits for a callback on
-  `localhost:1455` today, so the browser must be on the machine signing in.
-  codex-cli has `codex login --device-auth` (0.167.0); its endpoints get read
-  out of the binary like the others.
 - **From TokenGauge**, a join that takes the transport as well as the key
   (`--sync-join -` reading both) and an export of the same, so each side only
   touches its own files; and S3 keys kept in a private file beside

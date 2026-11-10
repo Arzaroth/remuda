@@ -88,9 +88,15 @@ refresh token into "sign this credential in again".
 - `lock_live` takes `auth.json.lock`, the lock TokenGauge refreshes the live
   file under.
 - Expiry: the access token's `exp` claim. Plan: `chatgpt_plan_type` claim.
-- OAuth (from codex-cli 0.153.4): client id `app_EMoamEEZ73f0CkXaXp7hrann`,
+- OAuth (from codex-cli 0.167.0): client id `app_EMoamEEZ73f0CkXaXp7hrann`,
   issuer `auth.openai.com`. Sign-in is PKCE with a callback to
-  `localhost:1455/auth/callback`; the code exchange is form-encoded. Refresh is
+  `localhost:1455/auth/callback`; the code exchange is form-encoded. With
+  `paste` it is `codex login --device-auth` instead: `CodexDevice` posts the
+  client id to `/api/accounts/deviceauth/usercode`, shows `/codex/device` and
+  the user code, polls `/deviceauth/token` (403 and 404 mean not yet) for up
+  to 15 minutes, and exchanges the `authorization_code` it answers with the
+  `code_verifier` it sends along, against the redirect
+  `<issuer>/deviceauth/callback`. Refresh is
   a JSON body with scope `openid profile email`, keeping any token the answer
   leaves out, and stamps `last_refresh`.
 - A sign-in listens on 127.0.0.1:1455 and, when the machine has it, [::1]:1455
@@ -186,7 +192,10 @@ page and takes the pasted key (`asks_for`: "the API key").
 device code, hand the verification URL to the browser, poll the token endpoint
 at the interval given (slower on `slow_down`) until it answers, the user
 refuses, the code expires, or the page cancels. Nothing listens locally, so
-the browser can be on another machine.
+the browser can be on another machine. Codex's device sign-in is not RFC 8628
+and lives in `codex.rs`; it shares `device::pause`, the sleep a cancel cuts
+short. A sign-in whose address does not carry the code to type hands it over
+as `PendingLogin::user_code`, which the prompt and the page show.
 
 ## Sources
 
