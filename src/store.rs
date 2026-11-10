@@ -217,8 +217,8 @@ impl Store {
         Ok(Some((creds, meta)))
     }
 
-    /// Stores an entry from the files [`Store::files`] read elsewhere, byte for
-    /// byte, so its digest still holds.
+    /// Stores an entry from the files [`Store::files`] read elsewhere, the
+    /// credential byte for byte, so its digest still holds.
     pub fn put_files(&self, provider: &str, name: &str, creds: &str, meta: &Value) -> Result<()> {
         validate_name(name)?;
         if provider.is_empty() || !provider.chars().all(|c| c.is_ascii_lowercase()) {
