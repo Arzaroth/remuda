@@ -135,11 +135,11 @@ impl Provider for Cursor {
         Some(exp * 1000)
     }
 
-    /// The membership is not in the file; TokenGauge asks cursor.com for it.
     fn portable(&self) -> bool {
         true
     }
 
+    /// The membership is not in the file; TokenGauge asks cursor.com for it.
     fn plan(&self, _creds: &Value) -> String {
         "-".to_owned()
     }
