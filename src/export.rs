@@ -1361,6 +1361,27 @@ mod tests {
     }
 
     #[test]
+    fn restore_force_keeps_proxy_settings_here_that_cannot_be_read() {
+        let from = env(&OFFLINE);
+        from.stored("work", "u-1", HOUR);
+        crate::fsx::write_json(&places(&from).1, &json!({"enabled": true, "port": 9999})).unwrap();
+        let bundle = bundle_of(&from, &[]).unwrap();
+        let to = env(&OFFLINE);
+        let unreadable = br#"{"port": "x", "keys": [{"id": "2", "name": "here", "key": "rmd-here", "created": 2}]}"#;
+        std::fs::create_dir_all(to.store.root()).unwrap();
+        std::fs::write(places(&to).1, unreadable).unwrap();
+
+        let (restored, out) = restore_into(&to, round_trip(&bundle), true);
+
+        assert!(
+            out.contains("kept the proxy's settings here: they cannot be read"),
+            "{out}"
+        );
+        assert_eq!(std::fs::read(places(&to).1).unwrap(), unreadable);
+        assert_eq!(restored.sign_in.len(), 1);
+    }
+
+    #[test]
     fn a_login_whose_account_is_stored_here_is_not_offered() {
         let from = env(&OFFLINE);
         from.stored("work", "u-1", HOUR);
