@@ -37,3 +37,28 @@ done.
       identity against real accounts. They are built from the CLIs' source
       (Grok, Kimi) and from open-source clients (Cursor), and only the mocks
       have run them.
+
+## Proxy LAN firewall check
+
+Left from the review of PR #77 (`src/proxy/firewall.rs`, `web/src/proxy.ts`).
+
+- [ ] ufw: match interface wildcards (`-i en+`) when deciding whether a rule
+      is on the LAN interface; today such a rule is skipped as another
+      interface's.
+- [ ] firewalld: tell a D-Bus or management error from `firewall-cmd --state`
+      apart from a stopped daemon, and give a null verdict for it rather than
+      no firewall.
+- [ ] firewalld: run the fallback `--get-zone-of-interface` lookup with
+      `sudo`, so it works for a user without the permission.
+- [ ] firewalld: when a zone is bound to sources, ask for the zone that
+      covers the LAN instead of suggesting the interface's.
+- [ ] firewalld: when the zone has rich rules, point at them
+      (`--list-rich-rules`) in the notice.
+- [ ] Card notice: call the commands suggestions rather than promising they
+      open the port, name the interface they apply to, tell a failed check
+      apart from rules that limit some machines, and test the whole message.
+- [ ] brain/architecture/proxy.md: an `ACCEPT` default policy with a limited
+      deny matching gives a null verdict; say so in the ufw row.
+- [ ] CHANGELOG: describe the firewall commands as suggestions.
+- [ ] Tests: a firewalld fixture where the default zone and the interface's
+      zone differ, so a regression asking the wrong zone fails.
