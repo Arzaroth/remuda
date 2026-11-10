@@ -33,7 +33,9 @@
   and Cursor logins go across as they are; Claude Code, Codex, Grok and Kimi
   logins are signed in again over there, since their refresh tokens are single
   use, and `--move` carries one's tokens for a machine being
-  retired. Joining the fleet needs TokenGauge with `--sync-export`. No
+  retired. Joining the fleet needs TokenGauge with `--sync-export` on the
+  sending machine and `--sync-join` on the new one; without it, export goes
+  on without the fleet. No
   refresh token is lost on the way: a moved login is set aside before it is
   removed, and stays when a refresh changed it meanwhile; `restore --force`
   keeps the login a CLI or a `remuda run` session uses and the proxy's client

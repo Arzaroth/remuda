@@ -149,7 +149,10 @@ open their key page and ask for the key.
 `remuda export` on this machine and `remuda restore` on the new one copy the
 logins, `config.toml`, the proxy's settings (without its client keys) and
 TokenGauge's fleet, S3 keys included unless `--without-s3-keys`, so the new
-machine joins the fleet on its own. With wyrmyon or magic-wormhole installed,
+machine joins the fleet on its own. That needs TokenGauge on both machines,
+with `--sync-export` on this one and `--sync-join` on the new one; when
+TokenGauge or its fleet key is missing here, export says so and goes on
+without the fleet. With wyrmyon or magic-wormhole installed,
 export prints a code and restore asks for it; otherwise `remuda export
 <file>` seals everything into a file in age's format, under a passphrase, and
 `remuda restore <file>` opens it.
