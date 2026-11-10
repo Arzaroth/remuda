@@ -312,6 +312,7 @@ pub fn restore(
     let known = |id: &str| providers.iter().find(|p| p.id() == id).copied();
     {
         let _lock = store.lock()?;
+        let mut lives: BTreeMap<&str, std::result::Result<LiveState, String>> = BTreeMap::new();
         for carried in &bundle.carried {
             let at = format!("{}/{}", carried.provider, carried.name);
             let Some(p) = known(&carried.provider) else {
@@ -322,9 +323,24 @@ pub fn restore(
                 )?;
                 continue;
             };
+            if force {
+                lives
+                    .entry(p.id())
+                    .or_insert_with(|| ops::sync_live(store, p).map_err(|e| format!("{e:#}")));
+            }
             let here = store.files(p.id(), &carried.name)?;
             if !force && let Some((creds, _)) = &here {
                 writeln!(out, "kept {at}, already stored here (--force replaces it)")?;
+                if *creds != carried.creds {
+                    set_aside_carried(store, p, carried, out)?;
+                }
+                continue;
+            }
+            if let Some((creds, _)) = &here
+                && let Some(live) = lives.get(p.id())
+                && let Some(why) = refuse_replacing(store, p, &carried.name, live)
+            {
+                writeln!(out, "kept {at}: {why}")?;
                 if *creds != carried.creds {
                     set_aside_carried(store, p, carried, out)?;
                 }
@@ -348,6 +364,17 @@ pub fn restore(
                     set_aside_carried(store, p, carried, out)?;
                 }
                 continue;
+            }
+            if p.renews()
+                && let Some(old) = store.get(p.id(), &carried.name)?
+                && here.is_some_and(|(creds, _)| creds != carried.creds)
+            {
+                let kept = store.set_aside(p.id(), &old.meta.account_id, &old.creds)?;
+                writeln!(
+                    out,
+                    "set the tokens {at} held here aside in {}",
+                    kept.display()
+                )?;
             }
             store.put_files(p.id(), &carried.name, &carried.creds, &carried.meta)?;
             writeln!(out, "stored {at}")?;
@@ -403,6 +430,30 @@ pub fn restore(
         left.push(login);
     }
     Ok(Restored { sign_in: left })
+}
+
+/// Why `--force` may not replace the stored `name`: the checks a switch and a
+/// remove make, since the CLI or a `remuda run` session may be spending it.
+fn refuse_replacing(
+    store: &Store,
+    p: &dyn Provider,
+    name: &str,
+    live: &std::result::Result<LiveState, String>,
+) -> Option<String> {
+    match live {
+        Err(e) => Some(format!("{} could not be read back first: {e}", p.name())),
+        Ok(LiveState::Unreadable { error }) => {
+            Some(format!("which login {} uses is unknown: {error}", p.name()))
+        }
+        Ok(live) if live.active_name() == Some(name) => Some(format!(
+            "it is the login {} uses here; switch it to another first",
+            p.name()
+        )),
+        Ok(_) if crate::session::in_use(store, p.id(), name) => {
+            Some("it is in a `remuda run` session here; end it first".to_owned())
+        }
+        Ok(_) => None,
+    }
 }
 
 /// Keeps the tokens of a carried login that is not stored, when its provider
