@@ -975,6 +975,103 @@ mod tests {
     }
 
     #[test]
+    fn a_device_sign_in_exchanges_the_approval_with_the_verifier_it_carries() {
+        let mut server = mockito::Server::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let c = codex(tmp.path(), &server.url());
+        let usercode = server
+            .mock("POST", "/api/accounts/deviceauth/usercode")
+            .match_body(Matcher::Json(json!({"client_id": CLIENT_ID})))
+            .with_body(
+                json!({"device_auth_id": "da-1", "usercode": "ABCD-1234", "interval": "1"})
+                    .to_string(),
+            )
+            .create();
+        let approved = server
+            .mock("POST", "/api/accounts/deviceauth/token")
+            .match_body(Matcher::Json(json!({"device_auth_id": "da-1", "user_code": "ABCD-1234"})))
+            .with_body(
+                json!({"authorization_code": "auth-1", "code_challenge": "ch", "code_verifier": "ver-1"})
+                    .to_string(),
+            )
+            .create();
+        let exchange = server
+            .mock("POST", "/oauth/token")
+            .match_body(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("grant_type".into(), "authorization_code".into()),
+                Matcher::UrlEncoded("code".into(), "auth-1".into()),
+                Matcher::UrlEncoded("code_verifier".into(), "ver-1".into()),
+                Matcher::UrlEncoded(
+                    "redirect_uri".into(),
+                    format!("{}/deviceauth/callback", server.url()),
+                ),
+            ]))
+            .with_body(
+                json!({
+                    "id_token": id_token("acct-9", "plus"),
+                    "access_token": access_token("acct-9", "device", 1_900_000_000),
+                    "refresh_token": "r-device",
+                })
+                .to_string(),
+            )
+            .create();
+
+        let pending = c.begin_login(true).unwrap();
+        assert!(!pending.needs_code());
+        assert!(!pending.local_only());
+        assert_eq!(pending.url(), format!("{}/codex/device", server.url()));
+        assert_eq!(pending.user_code(), Some("ABCD-1234"));
+        let login = pending.finish(None).unwrap();
+
+        usercode.assert();
+        approved.assert();
+        exchange.assert();
+        assert_eq!(login.identity.account_id, "acct-9");
+        assert_eq!(login.creds["tokens"]["refresh_token"], "r-device");
+        assert_eq!(c.plan(&login.creds), "plus");
+    }
+
+    #[test]
+    fn a_device_sign_in_stops_on_an_error_and_on_a_cancel() {
+        let mut server = mockito::Server::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let c = codex(tmp.path(), &server.url());
+        server
+            .mock("POST", "/api/accounts/deviceauth/usercode")
+            .with_body(
+                json!({"device_auth_id": "da-1", "user_code": "WXYZ", "interval": 1}).to_string(),
+            )
+            .create();
+        server
+            .mock("POST", "/api/accounts/deviceauth/token")
+            .with_status(400)
+            .with_body("denied")
+            .create();
+        let err = c.begin_login(true).unwrap().finish(None).err().unwrap();
+        assert!(err.to_string().contains("400"), "{err}");
+
+        let pending = c.begin_login(true).unwrap();
+        pending.canceller()();
+        let err = pending.finish(None).err().unwrap();
+        assert!(err.to_string().contains("cancelled"), "{err}");
+    }
+
+    #[test]
+    fn a_device_code_the_server_refuses_to_issue_is_an_error() {
+        let mut server = mockito::Server::new();
+        let tmp = tempfile::tempdir().unwrap();
+        server
+            .mock("POST", "/api/accounts/deviceauth/usercode")
+            .with_status(404)
+            .create();
+        let err = codex(tmp.path(), &server.url())
+            .begin_login(true)
+            .err()
+            .unwrap();
+        assert!(err.to_string().contains("404"), "{err}");
+    }
+
+    #[test]
     fn stray_connections_do_not_end_the_wait_and_a_refusal_does() {
         let tmp = tempfile::tempdir().unwrap();
         let c = codex(tmp.path(), &OFFLINE);

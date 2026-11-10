@@ -3007,6 +3007,63 @@ mod tests {
     }
 
     #[test]
+    fn a_codex_device_sign_in_hands_the_page_its_code() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/api/accounts/deviceauth/usercode")
+            .with_body(json!({"device_auth_id": "da", "user_code": "ABCD-1234"}).to_string())
+            .create();
+        let e = env(&server.url());
+        let providers: Vec<Box<dyn Provider>> = vec![Box::new(crate::codex::Codex::at(
+            e.tmp.path(),
+            crate::codex::Api::local(&server.url()),
+            0,
+        ))];
+        let app = App::new(
+            Store::open(e.store.root()),
+            places(&e),
+            providers,
+            TOKEN.into(),
+            PORT,
+            Box::new(Nowhere),
+        );
+
+        let (_, begun) = call(
+            &app,
+            "POST",
+            "/api/login",
+            json!({"provider": "codex", "name": "a", "paste": true}),
+        );
+        assert_eq!(begun["userCode"], "ABCD-1234");
+        assert_eq!(begun["url"], format!("{}/codex/device", server.url()));
+        assert_eq!(
+            (&begun["needsCode"], &begun["localOnly"]),
+            (&json!(false), &json!(false))
+        );
+        call(
+            &app,
+            "POST",
+            "/api/login/cancel",
+            json!({"id": begun["id"]}),
+        );
+
+        let (_, callback) = call(
+            &app,
+            "POST",
+            "/api/login",
+            json!({"provider": "codex", "name": "a"}),
+        );
+        assert_eq!(callback["userCode"], Value::Null);
+        assert_eq!(callback["localOnly"], true);
+        call(
+            &app,
+            "POST",
+            "/api/login/cancel",
+            json!({"id": callback["id"]}),
+        );
+    }
+
+    #[test]
     fn the_page_reads_and_sets_where_sign_ins_open() {
         let e = env(&OFFLINE);
         let opened = Arc::new(Mutex::new(Vec::new()));
