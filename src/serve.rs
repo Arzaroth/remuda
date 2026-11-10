@@ -1183,11 +1183,18 @@ impl App {
                     (pending.provider, pending.name.clone(), pending.force, login)
                 };
                 let done = login.finish(text("code"));
-                if let Ok(mut all) = self.pending.lock() {
-                    all.remove(id);
+                let claimed = self
+                    .pending
+                    .lock()
+                    .map_err(|_| anyhow!("poisoned"))?
+                    .remove(id)
+                    .is_some();
+                let done = done?;
+                if !claimed {
+                    bail!("the sign-in was cancelled");
                 }
                 let p = commands::find(&providers, provider)?;
-                let entry = commands::save_login(store, p, &name, force, done?)?;
+                let entry = commands::save_login(store, p, &name, force, done)?;
                 Ok(json!({"message": commands::stored_message(p, &entry)}))
             }
             ("POST", "/api/login/cancel") => {
