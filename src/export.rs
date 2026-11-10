@@ -973,6 +973,61 @@ mod tests {
     }
 
     #[test]
+    fn a_tokengauge_that_cannot_run_leaves_the_sign_in_to_restore() {
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp.path().join("absent");
+        let vanishing = script(
+            tmp.path(),
+            "tokengauge",
+            "[ \"$1\" = --sync-join ] && cat > /dev/null && rm -- \"$0\"\nexit 0",
+        );
+        for (tokengauge, said) in [
+            (
+                &missing,
+                "TokenGauge did not join the fleet (could not run ",
+            ),
+            (
+                &vanishing,
+                "TokenGauge joined the fleet, but its round trip failed",
+            ),
+        ] {
+            let to = env(&OFFLINE);
+            let (config, proxy) = places(&to);
+            let g = glm();
+            let bundle = Bundle {
+                remuda_export: FORMAT,
+                fleet: Some(json!({"tokengauge_sync": 1, "key": "k"})),
+                sign_in: vec![ToSignIn {
+                    provider: "claude".into(),
+                    name: "work".into(),
+                    account_id: "u-1".into(),
+                    email: "me@example.com".into(),
+                    label: None,
+                }],
+                ..Bundle::default()
+            };
+            let places = Places {
+                config: &config,
+                proxy: &proxy,
+                tokengauge: Some(tokengauge),
+            };
+            let mut out = Vec::new();
+            let restored = restore(
+                &to.store,
+                &[&to.claude, &g],
+                &places,
+                bundle,
+                false,
+                &mut out,
+            )
+            .unwrap();
+
+            assert!(String::from_utf8(out).unwrap().contains(said));
+            assert_eq!(restored.sign_in.len(), 1);
+        }
+    }
+
+    #[test]
     fn a_wormhole_client_sends_the_file_and_receives_into_the_place_given() {
         let tmp = tempfile::tempdir().unwrap();
         let wire = tmp.path().join("wire");
