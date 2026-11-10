@@ -1369,6 +1369,17 @@ fn export_seals_the_logins_and_restore_sets_another_machine_up() {
         "{said}"
     );
     assert!(said.contains("removed claude/perso"), "{said}");
+    let kept = said
+        .split_once("its tokens are set aside in ")
+        .unwrap()
+        .1
+        .split_whitespace()
+        .next()
+        .unwrap();
+    assert_eq!(
+        read(Path::new(kept))["claudeAiOauth"]["refreshToken"],
+        "r-perso"
+    );
     assert!(!old.ok(&["ls"]).contains("perso"));
     assert!(
         !std::fs::read(&sealed)
@@ -1401,4 +1412,56 @@ fn export_seals_the_logins_and_restore_sets_another_machine_up() {
     std::fs::write(&pass, "another\n").unwrap();
     let err = new.fails(&["restore", sealed_arg, "--passphrase-file", pass_arg]);
     assert!(err.contains("wrong passphrase"), "{err}");
+}
+
+#[test]
+fn a_received_bundle_restore_cannot_read_is_kept_to_try_again() {
+    use std::os::unix::fs::PermissionsExt;
+    let new = Home::new();
+    let sent = new.path("sent.json");
+    write(
+        &sent,
+        &json!({"remuda_export": 2, "carried": [], "sign_in": []}),
+    );
+    let bin = new.path("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let client = bin.join("wyrm");
+    std::fs::write(
+        &client,
+        format!("#!/bin/sh\ncp {} \"$5\"\n", sent.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&client, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let out = new
+        .command(&["restore"])
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success());
+    let said = String::from_utf8_lossy(&out.stdout);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("format 2"), "{err} {said}");
+    let kept = said
+        .split_once("what was received is kept in ")
+        .unwrap()
+        .1
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    assert!(
+        kept.starts_with(
+            new.path(".local/share/remuda/credentials/.received-")
+                .to_str()
+                .unwrap()
+        )
+    );
+    let mut bundle = read(Path::new(&kept));
+    bundle["remuda_export"] = json!(1);
+    write(Path::new(&kept), &bundle);
+
+    new.ok(&["restore", &kept]);
+    assert!(!Path::new(&kept).exists());
 }
