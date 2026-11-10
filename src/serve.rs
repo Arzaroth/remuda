@@ -42,6 +42,8 @@ pub struct Places {
     pub units: Vec<PathBuf>,
     pub snapshot: PathBuf,
     pub config: PathBuf,
+    /// Claude Code's `settings.json`, for the artifact hook's vital.
+    pub claude_settings: PathBuf,
     /// TokenGauge's binary, which the Usage tab asks for the spend.
     pub tokengauge: Option<PathBuf>,
     /// GitHub's API, which the Versions view asks for releases.
@@ -58,6 +60,7 @@ impl Places {
             units: paths::systemd_user_units(),
             snapshot: paths::tokengauge_snapshot(),
             config: paths::config_file(),
+            claude_settings: paths::claude_settings(),
             tokengauge: selvedge::proc::installed("tokengauge"),
             github: crate::versions::GITHUB.to_owned(),
             runtime: paths::runtime_dir(),
@@ -501,6 +504,7 @@ impl App {
             )),
             search: self.places.search.as_deref(),
             here: None,
+            claude_settings: &self.places.claude_settings,
             now: fsx::now_ms(),
         });
         json!({
@@ -1060,6 +1064,7 @@ mod tests {
             units: vec![e.tmp.path().join("units"), e.tmp.path().join("global")],
             snapshot: e.tmp.path().join("tokengauge-usage.json"),
             config: e.tmp.path().join("config.toml"),
+            claude_settings: e.tmp.path().join("settings.json"),
             tokengauge: None,
             github: "http://127.0.0.1:1".into(),
             runtime: e.tmp.path().join("run"),

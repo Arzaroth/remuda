@@ -30,6 +30,12 @@ pub fn claude_credentials() -> PathBuf {
         .join(".credentials.json")
 }
 
+pub fn claude_settings() -> PathBuf {
+    claude_config_dir()
+        .unwrap_or_else(|| home().join(".claude"))
+        .join("settings.json")
+}
+
 pub fn claude_config() -> PathBuf {
     match claude_config_dir() {
         Some(dir) => dir.join(".claude.json"),

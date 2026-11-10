@@ -855,6 +855,7 @@ fn main() -> Result<()> {
                 serving: served::serving(&paths::runtime_dir()),
                 search: search.as_deref(),
                 here: here.as_deref(),
+                claude_settings: &paths::claude_settings(),
                 now,
             });
             doctor::print(&vitals, now, json, out)

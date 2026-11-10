@@ -117,6 +117,8 @@ pub struct Checkup<'a> {
     pub search: Option<&'a OsStr>,
     /// The directory whose `.remuda.toml` is looked at, if any.
     pub here: Option<&'a Path>,
+    /// Claude Code's `settings.json`, where its hooks are.
+    pub claude_settings: &'a Path,
     pub now: i64,
 }
 
@@ -160,7 +162,77 @@ pub fn vitals(c: &Checkup) -> Vec<Vital> {
     out.push(live(c, &automated));
     out.extend(versions(c));
     out.extend(pin(c));
+    out.extend(artifact_hook(c));
     out
+}
+
+const HOOK_EVENTS: [&str; 3] = ["PreToolUse", "PostToolUse", "PostToolUseFailure"];
+
+/// The hook events of Claude Code's settings that run `remuda hook artifact`
+/// on its artifact tools.
+fn hooked(settings: &Value) -> Vec<&'static str> {
+    HOOK_EVENTS
+        .into_iter()
+        .filter(|event| {
+            settings
+                .pointer(&format!("/hooks/{event}"))
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter(|group| {
+                    let matcher = group.get("matcher").and_then(Value::as_str).unwrap_or("");
+                    matches!(matcher, "" | "*") || matcher.contains("Artifact")
+                })
+                .flat_map(|group| {
+                    group
+                        .get("hooks")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                })
+                .filter_map(|hook| hook.get("command").and_then(Value::as_str))
+                .any(|command| command.contains("remuda hook artifact"))
+        })
+        .collect()
+}
+
+fn artifact_hook(c: &Checkup) -> Option<Vital> {
+    if c.store.list("claude").map_or(0, |l| l.len()) < 2 {
+        return None;
+    }
+    const TITLE: &str = "Claude Code artifact hook";
+    let settings = crate::fsx::read_json(c.claude_settings)
+        .ok()
+        .flatten()
+        .unwrap_or(Value::Null);
+    let on = hooked(&settings);
+    if on.len() == HOOK_EVENTS.len() {
+        return Some(Vital::new(
+            "artifact-hook",
+            Level::Ok,
+            TITLE,
+            "an artifact call is switched to the login that published it",
+        ));
+    }
+    let missing: Vec<&str> = HOOK_EVENTS
+        .into_iter()
+        .filter(|e| !on.contains(e))
+        .collect();
+    Some(
+        Vital::new(
+            "artifact-hook",
+            Level::Warn,
+            TITLE,
+            format!(
+                "not run on {}: after a switch, a session's artifacts can be refused or published under the other account",
+                and_list(&missing)
+            ),
+        )
+        .fix(format!(
+            "add the hooks `remuda help skill` shows to {}",
+            c.claude_settings.display()
+        )),
+    )
 }
 
 fn and_list(items: &[&str]) -> String {
@@ -699,6 +771,7 @@ mod tests {
             serving,
             search: None,
             here: Some(&s.here),
+            claude_settings: &e.tmp.path().join("settings.json"),
             now: now_ms(),
         })
     }
@@ -970,6 +1043,7 @@ mod tests {
                 serving: None,
                 search: Some(search),
                 here: None,
+                claude_settings: &e.tmp.path().join("settings.json"),
                 now: now_ms(),
             })
         };
@@ -1044,5 +1118,44 @@ mod tests {
         assert_eq!(ago(90 * MIN), "1 hour ago");
         assert_eq!(ago(47 * 60 * MIN), "1 day ago");
         assert_eq!(ago(72 * 60 * MIN), "3 days ago");
+    }
+
+    #[test]
+    fn the_artifact_hook_is_checked_once_two_claude_logins_are_stored() {
+        let e = env(&OFFLINE);
+        let s = setup(&e);
+        e.stored("work", "u-work", HOUR);
+        assert!(
+            check(&e, &s, on("work"), Some(OURS))
+                .iter()
+                .all(|v| v.id != "artifact-hook")
+        );
+
+        e.stored("perso", "u-perso", HOUR);
+        let hooks = |events: &[&str]| {
+            let group = json!([{"matcher": "^Artifact", "hooks": [{"type": "command", "command": "remuda hook artifact"}]}]);
+            let hooks: serde_json::Map<String, Value> = events
+                .iter()
+                .map(|ev| (ev.to_string(), group.clone()))
+                .collect();
+            write_json(
+                &e.tmp.path().join("settings.json"),
+                &json!({"hooks": hooks}),
+            )
+            .unwrap();
+        };
+        hooks(&["PreToolUse"]);
+        let v = check(&e, &s, on("work"), Some(OURS));
+        let hook = find(&v, "artifact-hook");
+        assert_eq!(hook.level, Level::Warn);
+        assert!(
+            hook.detail.contains("PostToolUse and PostToolUseFailure"),
+            "{}",
+            hook.detail
+        );
+
+        hooks(&HOOK_EVENTS);
+        let v = check(&e, &s, on("work"), Some(OURS));
+        assert_eq!(find(&v, "artifact-hook").level, Level::Ok);
     }
 }
