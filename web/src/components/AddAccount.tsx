@@ -13,10 +13,15 @@ type Login = {
   asksFor: string;
   localOnly: boolean;
   machine: string | null;
+  userCode: string | null;
   opensIn: string | null;
   name: string;
 };
 type Window = 'private' | 'profile' | 'normal';
+const anywhere: Record<string, string> = {
+  claude: 'Paste the code instead',
+  codex: 'Type a device code instead',
+};
 type Settings = {
   browsers: { id: string; name: string }[];
   browser: string | null;
@@ -218,14 +223,14 @@ export function AddAccount(props: { provider?: string; again?: string }) {
           </select>
         </div>
       </Show>
-      <Show when={settings() && provider() === 'claude'}>
+      <Show when={settings() && anywhere[provider()]}>
         <label class="opens-in">
           <input
             type="checkbox"
             checked={settings()!.paste}
             onChange={(e) => choose({ paste: e.currentTarget.checked })}
           />
-          <span class="aside">Paste the code instead, to sign in from a browser on another machine than remuda's</span>
+          <span class="aside">{anywhere[provider()]}, to sign in from a browser on another machine than remuda's</span>
         </label>
       </Show>
       <Show when={login()}>
@@ -239,6 +244,13 @@ export function AddAccount(props: { provider?: string; again?: string }) {
               <a class="signin-link" href={l().url} target="_blank" rel="noopener">
                 {l().url}
               </a>
+              <Show when={l().userCode}>
+                {(c) => (
+                  <div>
+                    Enter the code <b class="user-code">{c()}</b> there.
+                  </div>
+                )}
+              </Show>
               <div class="inline">
                 <button type="button" class="btn go" onClick={() => open(l())}>
                   {l().opensIn ? `Open in ${l().opensIn}` : 'Open in a new tab'}

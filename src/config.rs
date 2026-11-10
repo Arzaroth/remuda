@@ -42,8 +42,9 @@ pub struct Login {
     pub browser: Option<String>,
     #[serde(default, skip_serializing_if = "Window::is_private")]
     pub window: Window,
-    /// Sign in by pasting a code where the CLI offers it (Claude Code), so
-    /// the browser can be on another machine; by default it calls back here.
+    /// Sign in from a browser on another machine where the CLI offers it: a
+    /// code to paste back (Claude Code) or a device code (Codex). By default
+    /// the browser calls back here.
     #[serde(default, skip_serializing_if = "is_false")]
     pub paste: bool,
 }

@@ -367,6 +367,7 @@ select { appearance: none; padding-right: 30px; cursor: pointer;
 .add form > .btn { height: 40px; }
 .signin { margin-top: 16px; display: grid; gap: 10px; }
 .signin a { color: var(--focus); overflow-wrap: anywhere; }
+.user-code { font-family: var(--mono); letter-spacing: 0.08em; }
 .signin-link { font-size: 13px; padding: 8px 10px; border: 1px solid var(--rule); border-radius: var(--r-s); background: var(--sunk);
   max-height: 5.5em; overflow: auto; }
 .opens-in { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }

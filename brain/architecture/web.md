@@ -133,11 +133,11 @@ access to anything, and it ends when they stop.
 | `POST /api/label` `{name, text?}` / `rename` `{name, to}` / `remove` `{name}` | As the commands |
 | `POST /api/refresh` `{name?, force?}` | Refresh inactive credentials, then nudge TokenGauge |
 | `POST /api/reset` `{name}` | Spend one of a Claude login's banked usage-limit resets with its own token, then nudge TokenGauge |
-| `POST /api/login` `{provider?, name, force?, paste?}` | Begin a sign-in, opening nothing yet: `{id, url, needsCode, asksFor, localOnly, machine, opensIn}`, `machine` being the hostname a callback sign-in's browser must be on; `paste` defaults to `[login] paste` |
+| `POST /api/login` `{provider?, name, force?, paste?}` | Begin a sign-in, opening nothing yet: `{id, url, needsCode, asksFor, localOnly, userCode, machine, opensIn}`, `userCode` being the device code to type at `url` (null when there is none), `machine` being the hostname a callback sign-in's browser must be on; `paste` defaults to `[login] paste` |
 | `POST /api/login/open` `{id}` | Open its link where `[login]` says: `{opened}` |
 | `GET`/`POST /api/login/settings` `{browser?, window?, paste?}` | Read or save `[login]`: `{browsers, browser, window, paste, opensIn}` |
 | `POST /api/login/finish` `{id, code?}` | Finish it and store the result |
-| `POST /api/login/cancel` `{id}` | Abandon it; a waiting callback (Codex, Claude) stops and frees its port |
+| `POST /api/login/cancel` `{id}` | Abandon it; a waiting callback (Codex, Claude) stops and frees its port, and a `finish` already under way stores nothing |
 | `POST /api/proxy/settings` `{enabled?, port?, lan?}` | Save the proxy's settings and start, move or stop it to match |
 | `POST /api/proxy/keys` `{name}` / `keys/remove` `{id}` | Make or remove a proxy access key |
 | `POST /api/usage/spend` `{days}` | `{export, logins}`: TokenGauge's `--usage-json` from the first day of the range, and every stored login by the digest it names logins with, then each removed one the ledger names (`removed: true`); or `{unavailable}` saying why there is none ([../features/web-page.md](../features/web-page.md#usage)) |
@@ -148,7 +148,8 @@ access to anything, and it ends when they stop.
 | `POST /api/usage/requests` `{days}` | `{since, rows}`: the proxy's request log over the range, summed per quarter hour (every time zone splits its days on one), provider, model, login, key name and outcome |
 
 Pending sign-ins live in memory, one per provider; starting another cancels the
-previous one. `App::api` takes the store lock once for every route except the
+previous one. `finish` stores its login only if it is the one that takes the
+sign-in out of that map, so a cancel that lands during it wins. `App::api` takes the store lock once for every route except the
 `/api/login` ones, which lock only to save (`commands::save_login`), and the
 `/api/usage` and `/api/versions` ones, which only read, ask GitHub and run
 TokenGauge or an update, so a slow one holds up nothing else; `/api/token`

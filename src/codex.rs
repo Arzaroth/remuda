@@ -1,4 +1,7 @@
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value, json};
@@ -11,7 +14,7 @@ use crate::pkce;
 use crate::provider::{Format, Identity, Login, PendingLogin, Provider, RunSpec, Upstream};
 use crate::store::Entry;
 
-const MIRRORS: &str = "0.153.4";
+const MIRRORS: &str = "0.167.0";
 const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const ISSUER: &str = "https://auth.openai.com";
 const CALLBACK_PORT: u16 = 1455;
@@ -20,6 +23,7 @@ const LOGIN_SCOPE: &str =
 const REFRESH_SCOPE: &str = "openid profile email";
 const AUTH_CLAIMS: &str = "https://api.openai.com/auth";
 const INFERENCE: &str = "https://chatgpt.com/backend-api/codex";
+const DEVICE_WAIT: Duration = Duration::from_secs(15 * 60);
 
 #[derive(Clone)]
 pub struct Api {
@@ -53,6 +57,26 @@ impl Api {
 
     fn token_url(&self) -> String {
         format!("{}/oauth/token", self.issuer)
+    }
+
+    fn device_url(&self, step: &str) -> String {
+        format!("{}/api/accounts/deviceauth/{step}", self.issuer)
+    }
+
+    fn post_json(&self, url: &str, body: &Value) -> Result<(reqwest::StatusCode, String)> {
+        let resp = self
+            .client
+            .post(url)
+            .json(body)
+            .send()
+            .context("device sign-in request failed")?;
+        let status = resp.status();
+        let body = if status.is_success() {
+            resp.text().context("device sign-in answer was cut off")?
+        } else {
+            resp.text().unwrap_or_default()
+        };
+        Ok((status, body))
     }
 }
 
@@ -289,7 +313,10 @@ impl Provider for Codex {
         Ok(seat_of(&access, fresh("id_token").as_deref()))
     }
 
-    fn begin_login(&self, _paste: bool) -> Result<Box<dyn PendingLogin>> {
+    fn begin_login(&self, paste: bool) -> Result<Box<dyn PendingLogin>> {
+        if paste {
+            return CodexDevice::begin(&self.api);
+        }
         let state = pkce::random()?;
         let callback = Callback::bind(
             self.callback_port,
@@ -383,38 +410,36 @@ struct CodexPending {
     url: String,
 }
 
-impl CodexPending {
-    fn exchange(&self, code: &str) -> Result<Value> {
-        let answer = oauth::token_request(self.api.client.post(self.api.token_url()).form(&[
-            ("grant_type", "authorization_code"),
-            ("code", code),
-            ("redirect_uri", &self.redirect_uri),
-            ("client_id", CLIENT_ID),
-            ("code_verifier", &self.verifier),
-        ]))?;
-        let get = |k: &str| {
-            oauth::text(&answer, k).with_context(|| format!("the token endpoint sent no {k}"))
-        };
-        let id_token = get("id_token")?;
-        let account_id = claims(&id_token)
-            .and_then(|c| {
-                auth_claim(&c, "chatgpt_account_id")?
-                    .as_str()
-                    .map(str::to_owned)
-            })
-            .context("the id token names no ChatGPT account")?;
-        Ok(json!({
-            "OPENAI_API_KEY": null,
-            "auth_mode": "chatgpt",
-            "tokens": {
-                "id_token": id_token,
-                "access_token": get("access_token")?,
-                "refresh_token": get("refresh_token")?,
-                "account_id": account_id,
-            },
-            "last_refresh": rfc3339(now_ms()),
-        }))
-    }
+fn exchange(api: &Api, redirect_uri: &str, verifier: &str, code: &str) -> Result<Value> {
+    let answer = oauth::token_request(api.client.post(api.token_url()).form(&[
+        ("grant_type", "authorization_code"),
+        ("code", code),
+        ("redirect_uri", redirect_uri),
+        ("client_id", CLIENT_ID),
+        ("code_verifier", verifier),
+    ]))?;
+    let get = |k: &str| {
+        oauth::text(&answer, k).with_context(|| format!("the token endpoint sent no {k}"))
+    };
+    let id_token = get("id_token")?;
+    let account_id = claims(&id_token)
+        .and_then(|c| {
+            auth_claim(&c, "chatgpt_account_id")?
+                .as_str()
+                .map(str::to_owned)
+        })
+        .context("the id token names no ChatGPT account")?;
+    Ok(json!({
+        "OPENAI_API_KEY": null,
+        "auth_mode": "chatgpt",
+        "tokens": {
+            "id_token": id_token,
+            "access_token": get("access_token")?,
+            "refresh_token": get("refresh_token")?,
+            "account_id": account_id,
+        },
+        "last_refresh": rfc3339(now_ms()),
+    }))
 }
 
 impl PendingLogin for CodexPending {
@@ -445,7 +470,7 @@ impl PendingLogin for CodexPending {
                 );
             }
             let code = param("code").context("the callback carried no code")?;
-            let creds = self.exchange(code)?;
+            let creds = exchange(&self.api, &self.redirect_uri, &self.verifier, code)?;
             let identity = identity_of(&creds).context("the new login names no account")?;
             Ok(Login { creds, identity })
         })();
@@ -462,6 +487,134 @@ impl PendingLogin for CodexPending {
             ),
         }
         outcome
+    }
+}
+
+struct CodexDevice {
+    api: Api,
+    device_auth_id: String,
+    user_code: String,
+    url: String,
+    interval: Duration,
+    cancelled: Arc<AtomicBool>,
+}
+
+impl CodexDevice {
+    fn begin(api: &Api) -> Result<Box<dyn PendingLogin>> {
+        let (status, body) = api.post_json(
+            &api.device_url("usercode"),
+            &json!({"client_id": CLIENT_ID}),
+        )?;
+        if status == reqwest::StatusCode::NOT_FOUND {
+            bail!(
+                "device code login is not enabled for this Codex server ({status}): sign in by callback instead, without --paste or `paste = true` under [login], or with --no-paste"
+            );
+        }
+        if !status.is_success() {
+            bail!(
+                "the device code request answered {status}: {}",
+                oauth::excerpt(&body)
+            );
+        }
+        let answer: Value =
+            serde_json::from_str(&body).context("malformed device code response")?;
+        let device_auth_id =
+            oauth::text(&answer, "device_auth_id").context("no device code was issued")?;
+        let user_code = ["user_code", "usercode"]
+            .iter()
+            .find_map(|k| oauth::text(&answer, k))
+            .context("no user code was issued")?;
+        let interval = answer
+            .get("interval")
+            .and_then(|v| v.as_u64().or_else(|| v.as_str()?.trim().parse().ok()))
+            .unwrap_or(5)
+            .max(1);
+        Ok(Box::new(CodexDevice {
+            api: api.clone(),
+            device_auth_id,
+            user_code,
+            url: format!("{}/codex/device", api.issuer),
+            interval: Duration::from_secs(interval),
+            cancelled: Arc::new(AtomicBool::new(false)),
+        }))
+    }
+
+    fn poll(&self) -> Result<Value> {
+        let deadline = Instant::now() + DEVICE_WAIT;
+        let body = json!({"device_auth_id": self.device_auth_id, "user_code": self.user_code});
+        let mut errors = 0;
+        loop {
+            crate::device::pause(&self.cancelled, self.interval)?;
+            if Instant::now() >= deadline {
+                bail!("the sign-in was not approved in time");
+            }
+            let (status, answer) = match self.api.post_json(&self.api.device_url("token"), &body) {
+                Ok(sent) => sent,
+                Err(e) => {
+                    errors += 1;
+                    if errors >= 3 {
+                        return Err(e);
+                    }
+                    continue;
+                }
+            };
+            if crate::device::transient(status) {
+                errors += 1;
+                if errors < 3 {
+                    continue;
+                }
+            } else {
+                errors = 0;
+            }
+            if status == reqwest::StatusCode::FORBIDDEN || status == reqwest::StatusCode::NOT_FOUND
+            {
+                continue;
+            }
+            if !status.is_success() {
+                bail!(
+                    "the device sign-in answered {status}: {}",
+                    oauth::excerpt(&answer)
+                );
+            }
+            return serde_json::from_str(&answer).context("malformed device sign-in response");
+        }
+    }
+}
+
+impl PendingLogin for CodexDevice {
+    fn url(&self) -> &str {
+        &self.url
+    }
+
+    fn needs_code(&self) -> bool {
+        false
+    }
+
+    fn user_code(&self) -> Option<&str> {
+        Some(&self.user_code)
+    }
+
+    fn canceller(&self) -> Box<dyn Fn() + Send + Sync> {
+        let cancelled = self.cancelled.clone();
+        Box::new(move || cancelled.store(true, Ordering::Relaxed))
+    }
+
+    fn finish(self: Box<Self>, _code: Option<&str>) -> Result<Login> {
+        let answer = self.poll()?;
+        if self.cancelled.load(Ordering::Relaxed) {
+            bail!("the sign-in was cancelled");
+        }
+        let get = |k: &str| {
+            oauth::text(&answer, k).with_context(|| format!("the device sign-in sent no {k}"))
+        };
+        let creds = exchange(
+            &self.api,
+            &format!("{}/deviceauth/callback", self.api.issuer),
+            &get("code_verifier")?,
+            &get("authorization_code")?,
+        )?;
+        let identity = identity_of(&creds).context("the new login names no account")?;
+        Ok(Login { creds, identity })
     }
 }
 
@@ -833,6 +986,242 @@ mod tests {
         assert_eq!(login.creds["tokens"]["account_id"], WORKSPACE);
         assert_eq!(login.creds["auth_mode"], "chatgpt");
         assert_eq!(c.plan(&login.creds), "pro");
+    }
+
+    #[test]
+    fn a_device_sign_in_exchanges_the_approval_with_the_verifier_it_carries() {
+        let mut server = mockito::Server::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let c = codex(tmp.path(), &server.url());
+        let usercode = server
+            .mock("POST", "/api/accounts/deviceauth/usercode")
+            .match_body(Matcher::Json(json!({"client_id": CLIENT_ID})))
+            .with_body(
+                json!({"device_auth_id": "da-1", "usercode": "ABCD-1234", "interval": "1"})
+                    .to_string(),
+            )
+            .create();
+        let not_yet: Vec<_> = [403, 404]
+            .into_iter()
+            .map(|status| {
+                server
+                    .mock("POST", "/api/accounts/deviceauth/token")
+                    .with_status(status)
+                    .expect(1)
+                    .create()
+            })
+            .collect();
+        let approved = server
+            .mock("POST", "/api/accounts/deviceauth/token")
+            .match_body(Matcher::Json(json!({"device_auth_id": "da-1", "user_code": "ABCD-1234"})))
+            .with_body(
+                json!({"authorization_code": "auth-1", "code_challenge": "ch", "code_verifier": "ver-1"})
+                    .to_string(),
+            )
+            .create();
+        let exchange = server
+            .mock("POST", "/oauth/token")
+            .match_body(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("grant_type".into(), "authorization_code".into()),
+                Matcher::UrlEncoded("code".into(), "auth-1".into()),
+                Matcher::UrlEncoded("code_verifier".into(), "ver-1".into()),
+                Matcher::UrlEncoded(
+                    "redirect_uri".into(),
+                    format!("{}/deviceauth/callback", server.url()),
+                ),
+            ]))
+            .with_body(
+                json!({
+                    "id_token": id_token("acct-9", "plus"),
+                    "access_token": access_token("acct-9", "device", 1_900_000_000),
+                    "refresh_token": "r-device",
+                })
+                .to_string(),
+            )
+            .create();
+
+        let pending = c.begin_login(true).unwrap();
+        assert!(!pending.needs_code());
+        assert!(!pending.local_only());
+        assert_eq!(pending.url(), format!("{}/codex/device", server.url()));
+        assert_eq!(pending.user_code(), Some("ABCD-1234"));
+        let login = pending.finish(None).unwrap();
+
+        usercode.assert();
+        not_yet.iter().for_each(|m| m.assert());
+        approved.assert();
+        exchange.assert();
+        assert_eq!(login.identity.account_id, "acct-9");
+        assert_eq!(login.creds["tokens"]["refresh_token"], "r-device");
+        assert_eq!(c.plan(&login.creds), "plus");
+    }
+
+    #[test]
+    fn a_device_sign_in_stops_on_an_error_and_on_a_cancel() {
+        let mut server = mockito::Server::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let c = codex(tmp.path(), &server.url());
+        server
+            .mock("POST", "/api/accounts/deviceauth/usercode")
+            .with_body(
+                json!({"device_auth_id": "da-1", "user_code": "WXYZ", "interval": 1}).to_string(),
+            )
+            .create();
+        server
+            .mock("POST", "/api/accounts/deviceauth/token")
+            .with_status(400)
+            .with_body("denied")
+            .create();
+        let err = c.begin_login(true).unwrap().finish(None).err().unwrap();
+        assert!(err.to_string().contains("400"), "{err}");
+
+        let pending = c.begin_login(true).unwrap();
+        pending.canceller()();
+        let err = pending.finish(None).err().unwrap();
+        assert!(err.to_string().contains("cancelled"), "{err}");
+    }
+
+    #[test]
+    fn a_device_sign_in_cancelled_while_it_polls_skips_the_exchange() {
+        let mut server = mockito::Server::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let c = codex(tmp.path(), &server.url());
+        server
+            .mock("POST", "/api/accounts/deviceauth/usercode")
+            .with_body(
+                json!({"device_auth_id": "da-1", "user_code": "WXYZ", "interval": 1}).to_string(),
+            )
+            .create();
+        let exchange = server.mock("POST", "/oauth/token").expect(0).create();
+        let pending = c.begin_login(true).unwrap();
+        let cancel = pending.canceller();
+        server
+            .mock("POST", "/api/accounts/deviceauth/token")
+            .with_body_from_request(move |_| {
+                cancel();
+                json!({"authorization_code": "auth-1", "code_verifier": "ver-1"})
+                    .to_string()
+                    .into_bytes()
+            })
+            .create();
+        let err = pending.finish(None).err().unwrap();
+        assert!(err.to_string().contains("cancelled"), "{err}");
+        exchange.assert();
+    }
+
+    #[test]
+    fn a_device_sign_in_rides_out_two_busy_answers_but_not_a_third() {
+        let mut server = mockito::Server::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let c = codex(tmp.path(), &server.url());
+        server
+            .mock("POST", "/api/accounts/deviceauth/usercode")
+            .with_body(
+                json!({"device_auth_id": "da-1", "user_code": "WXYZ", "interval": 1}).to_string(),
+            )
+            .create();
+        let busy: Vec<_> = [503, 429]
+            .into_iter()
+            .map(|status| {
+                server
+                    .mock("POST", "/api/accounts/deviceauth/token")
+                    .with_status(status)
+                    .expect(1)
+                    .create()
+            })
+            .collect();
+        let approved = server
+            .mock("POST", "/api/accounts/deviceauth/token")
+            .with_body(
+                json!({"authorization_code": "auth-1", "code_verifier": "ver-1"}).to_string(),
+            )
+            .create();
+        server
+            .mock("POST", "/oauth/token")
+            .with_body(
+                json!({
+                    "id_token": id_token("acct-9", "plus"),
+                    "access_token": access_token("acct-9", "device", 1_900_000_000),
+                    "refresh_token": "r-device",
+                })
+                .to_string(),
+            )
+            .create();
+        let login = c.begin_login(true).unwrap().finish(None).unwrap();
+        busy.iter().for_each(|m| m.assert());
+        approved.assert();
+        assert_eq!(login.creds["tokens"]["refresh_token"], "r-device");
+        approved.remove();
+
+        let down = server
+            .mock("POST", "/api/accounts/deviceauth/token")
+            .with_status(502)
+            .with_body("bad gateway")
+            .expect(3)
+            .create();
+        let err = c.begin_login(true).unwrap().finish(None).err().unwrap();
+        down.assert();
+        assert!(err.to_string().contains("502"), "{err}");
+    }
+
+    #[test]
+    fn a_device_sign_in_asks_again_for_an_approval_cut_off_in_transit() {
+        let mut server = mockito::Server::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let c = codex(tmp.path(), &server.url());
+        server
+            .mock("POST", "/api/accounts/deviceauth/usercode")
+            .with_body(
+                json!({"device_auth_id": "da-1", "user_code": "WXYZ", "interval": 1}).to_string(),
+            )
+            .create();
+        let cut = server
+            .mock("POST", "/api/accounts/deviceauth/token")
+            .with_chunked_body(|w| {
+                w.write_all(br#"{"authorization_code":"#)?;
+                Err(std::io::Error::other("dropped"))
+            })
+            .expect(1)
+            .create();
+        let approved = server
+            .mock("POST", "/api/accounts/deviceauth/token")
+            .with_body(
+                json!({"authorization_code": "auth-1", "code_verifier": "ver-1"}).to_string(),
+            )
+            .create();
+        server
+            .mock("POST", "/oauth/token")
+            .with_body(
+                json!({
+                    "id_token": id_token("acct-9", "plus"),
+                    "access_token": access_token("acct-9", "device", 1_900_000_000),
+                    "refresh_token": "r-device",
+                })
+                .to_string(),
+            )
+            .create();
+        let login = c.begin_login(true).unwrap().finish(None).unwrap();
+        cut.assert();
+        approved.assert();
+        assert_eq!(login.creds["tokens"]["refresh_token"], "r-device");
+    }
+
+    #[test]
+    fn a_device_code_the_server_refuses_to_issue_is_an_error() {
+        let mut server = mockito::Server::new();
+        let tmp = tempfile::tempdir().unwrap();
+        server
+            .mock("POST", "/api/accounts/deviceauth/usercode")
+            .with_status(404)
+            .create();
+        let err = codex(tmp.path(), &server.url())
+            .begin_login(true)
+            .err()
+            .unwrap();
+        assert_eq!(
+            err.to_string(),
+            "device code login is not enabled for this Codex server (404 Not Found): sign in by callback instead, without --paste or `paste = true` under [login], or with --no-paste"
+        );
     }
 
     #[test]

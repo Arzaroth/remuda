@@ -402,7 +402,8 @@ pub struct Prompt<'a> {
     pub opens_in: Option<String>,
     /// The lines typed, in order, until the input ends.
     pub lines: std::sync::mpsc::Receiver<String>,
-    /// A sign-in that ends with a code to paste, where the CLI offers one.
+    /// A sign-in a browser on another machine can finish, where the CLI
+    /// offers one.
     pub paste: bool,
 }
 
@@ -428,6 +429,9 @@ pub fn login(
         "Sign in to {} with the account to store as {name}, in {browser}:\n\n{url}\n",
         p.name()
     )?;
+    if let Some(code) = pending.user_code() {
+        writeln!(out, "Enter the code {code} there.\n")?;
+    }
     let offer = match &prompt.opens_in {
         Some(place) => format!(", or press Enter to open it in {place}"),
         None => String::new(),
@@ -1596,6 +1600,49 @@ mod tests {
             entry.creds[OAUTH_KEY]["rateLimitTier"],
             "default_claude_pro"
         );
+    }
+
+    #[test]
+    fn a_codex_device_login_prints_the_code_to_enter() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/api/accounts/deviceauth/usercode")
+            .with_body(
+                json!({"device_auth_id": "da-1", "user_code": "ABCD-1234", "interval": 1})
+                    .to_string(),
+            )
+            .create();
+        server
+            .mock("POST", "/api/accounts/deviceauth/token")
+            .with_status(400)
+            .create();
+        let e = env(&OFFLINE);
+        let codex =
+            crate::codex::Codex::at(e.tmp.path(), crate::codex::Api::local(&server.url()), 0);
+        let (_, lines) = std::sync::mpsc::channel();
+        let mut out = Vec::new();
+
+        let err = login(
+            &e.store,
+            &codex,
+            "new",
+            false,
+            Prompt {
+                open: &|_, _| false,
+                opens_in: None,
+                lines,
+                paste: true,
+            },
+            &mut out,
+        )
+        .unwrap_err();
+
+        let out = text(out);
+        assert!(out.contains("in any browser:"), "{out}");
+        assert!(out.contains("/codex/device"), "{out}");
+        assert!(out.contains("Enter the code ABCD-1234 there."), "{out}");
+        assert!(err.to_string().contains("400"), "{err}");
+        assert!(e.store.get("codex", "new").unwrap().is_none());
     }
 
     #[test]

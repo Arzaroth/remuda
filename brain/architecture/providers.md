@@ -88,9 +88,17 @@ refresh token into "sign this credential in again".
 - `lock_live` takes `auth.json.lock`, the lock TokenGauge refreshes the live
   file under.
 - Expiry: the access token's `exp` claim. Plan: `chatgpt_plan_type` claim.
-- OAuth (from codex-cli 0.153.4): client id `app_EMoamEEZ73f0CkXaXp7hrann`,
+- OAuth (from codex-cli 0.167.0): client id `app_EMoamEEZ73f0CkXaXp7hrann`,
   issuer `auth.openai.com`. Sign-in is PKCE with a callback to
-  `localhost:1455/auth/callback`; the code exchange is form-encoded. Refresh is
+  `localhost:1455/auth/callback`; the code exchange is form-encoded. With
+  `paste` (or over SSH, or on Linux with no display) it is `codex login --device-auth`
+  instead: `CodexDevice` posts the client id to
+  `/api/accounts/deviceauth/usercode` (a 404 there means the server has no
+  device login, and the error says to sign in by callback), shows
+  `/codex/device` and the user code, polls `/api/accounts/deviceauth/token` (403 and 404 mean not yet) for up
+  to 15 minutes, and exchanges the `authorization_code` it answers with the
+  `code_verifier` it sends along, against the redirect
+  `<issuer>/deviceauth/callback`. Refresh is
   a JSON body with scope `openid profile email`, keeping any token the answer
   leaves out, and stamps `last_refresh`.
 - A sign-in listens on 127.0.0.1:1455 and, when the machine has it, [::1]:1455
@@ -185,8 +193,18 @@ page and takes the pasted key (`asks_for`: "the API key").
 [device.rs](../../src/device.rs) is RFC 8628 for Grok and Kimi: ask for a
 device code, hand the verification URL to the browser, poll the token endpoint
 at the interval given (slower on `slow_down`) until it answers, the user
-refuses, the code expires, or the page cancels. Nothing listens locally, so
-the browser can be on another machine.
+refuses, the code expires, or the page cancels. A request that fails, a
+success whose body is cut off, or a
+429 or 5xx answer whose body carries no RFC 8628 error, is tried again at the
+next poll, since the user may already have approved; the third in a row ends
+the sign-in, and a pending or `slow_down` answer, even on a 429, starts the
+count over. Codex's and Cursor's polls count every 429 or 5xx, and a cut-off
+success, the same way; a cancel that lands during Codex's approving poll skips
+its token exchange. Nothing listens locally, so
+the browser can be on another machine. Codex's device sign-in is not RFC 8628
+and lives in `codex.rs`; it shares `device::pause`, the sleep a cancel cuts
+short. A sign-in whose address does not carry the code to type hands it over
+as `PendingLogin::user_code`, which the prompt and the page show.
 
 ## Sources
 

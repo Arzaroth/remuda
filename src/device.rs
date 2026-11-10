@@ -57,7 +57,7 @@ impl DeviceFlow {
         if !status.is_success() {
             bail!(
                 "device authorization answered {status}: {}",
-                body.chars().take(200).collect::<String>()
+                oauth::excerpt(&body)
             );
         }
         let answer: Value =
@@ -86,23 +86,27 @@ impl DeviceFlow {
     }
 }
 
-impl DevicePending {
-    /// Sleeps `d` in short steps so a cancel lands promptly.
-    fn wait(&self, d: Duration) -> Result<()> {
-        let until = Instant::now() + d;
-        while Instant::now() < until {
-            if self.cancelled.load(Ordering::Relaxed) {
-                bail!("the sign-in was cancelled");
-            }
-            std::thread::sleep(Duration::from_millis(100).min(until - Instant::now()));
-        }
-        Ok(())
-    }
+pub fn transient(status: reqwest::StatusCode) -> bool {
+    status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+}
 
+/// Sleeps `d` in short steps so a cancel lands promptly.
+pub fn pause(cancelled: &AtomicBool, d: Duration) -> Result<()> {
+    let until = Instant::now() + d;
+    while Instant::now() < until {
+        if cancelled.load(Ordering::Relaxed) {
+            bail!("the sign-in was cancelled");
+        }
+        std::thread::sleep(Duration::from_millis(100).min(until - Instant::now()));
+    }
+    Ok(())
+}
+
+impl DevicePending {
     fn poll(&mut self) -> Result<Value> {
         let mut errors = 0;
         loop {
-            self.wait(self.interval)?;
+            pause(&self.cancelled, self.interval)?;
             if Instant::now() >= self.deadline {
                 bail!("the sign-in was not approved in time");
             }
@@ -116,14 +120,20 @@ impl DevicePending {
                         ("client_id", &self.flow.client_id),
                     ],
                 )
-                .send();
+                .send()
+                .and_then(|resp| {
+                    let status = resp.status();
+                    let body = if status.is_success() {
+                        resp.text()?
+                    } else {
+                        resp.text().unwrap_or_default()
+                    };
+                    Ok((status, body))
+                });
             // The user may already have approved the code: one blip must not
             // throw that away.
-            let resp = match sent {
-                Ok(resp) => {
-                    errors = 0;
-                    resp
-                }
+            let (status, body) = match sent {
+                Ok(sent) => sent,
                 Err(e) => {
                     errors += 1;
                     if errors >= 3 {
@@ -132,8 +142,6 @@ impl DevicePending {
                     continue;
                 }
             };
-            let status = resp.status();
-            let body = resp.text().unwrap_or_default();
             let answer: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
             if status.is_success() {
                 return Ok(answer);
@@ -143,11 +151,16 @@ impl DevicePending {
                 Some("slow_down") => self.interval += Duration::from_secs(5),
                 Some("access_denied") => bail!("the sign-in was refused"),
                 Some("expired_token") => bail!("the sign-in was not approved in time"),
+                _ if transient(status) && errors < 2 => {
+                    errors += 1;
+                    continue;
+                }
                 _ => bail!(
                     "token endpoint answered {status}: {}",
-                    body.chars().take(200).collect::<String>()
+                    oauth::excerpt(&body)
                 ),
             }
+            errors = 0;
         }
     }
 }
@@ -266,6 +279,72 @@ mod tests {
             started.elapsed() >= Duration::from_secs(3),
             "gave up before the third try"
         );
+    }
+
+    #[test]
+    fn a_token_endpoint_is_asked_again_after_two_busy_answers_but_not_a_third() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/device")
+            .with_body(json!({"device_code": "dc", "verification_uri_complete": "https://x", "interval": 1}).to_string())
+            .create();
+        let busy: Vec<_> = [503, 429]
+            .into_iter()
+            .map(|status| {
+                server
+                    .mock("POST", "/token")
+                    .with_status(status)
+                    .expect(1)
+                    .create()
+            })
+            .collect();
+        let approved = server
+            .mock("POST", "/token")
+            .with_body(r#"{"access_token":"at","refresh_token":"rt"}"#)
+            .create();
+        let done = flow(&server.url()).begin().unwrap().finish(None).unwrap();
+        busy.iter().for_each(|m| m.assert());
+        assert_eq!(done.creds["refresh_token"], "rt");
+        approved.remove();
+
+        let down = server
+            .mock("POST", "/token")
+            .with_status(502)
+            .with_body("bad gateway")
+            .expect(3)
+            .create();
+        let err = flow(&server.url())
+            .begin()
+            .unwrap()
+            .finish(None)
+            .err()
+            .unwrap();
+        down.assert();
+        assert!(err.to_string().contains("502"), "{err}");
+    }
+
+    #[test]
+    fn tokens_cut_off_in_transit_are_asked_for_again() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/device")
+            .with_body(json!({"device_code": "dc", "verification_uri_complete": "https://x", "interval": 1}).to_string())
+            .create();
+        let cut = server
+            .mock("POST", "/token")
+            .with_chunked_body(|w| {
+                w.write_all(br#"{"access_token":"#)?;
+                Err(std::io::Error::other("dropped"))
+            })
+            .expect(1)
+            .create();
+        server
+            .mock("POST", "/token")
+            .with_body(r#"{"access_token":"at","refresh_token":"rt"}"#)
+            .create();
+        let done = flow(&server.url()).begin().unwrap().finish(None).unwrap();
+        cut.assert();
+        assert_eq!(done.creds["refresh_token"], "rt");
     }
 
     #[test]

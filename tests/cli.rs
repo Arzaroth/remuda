@@ -463,6 +463,37 @@ fn claude_signs_in_by_pasting_over_ssh_unless_told_otherwise() {
 }
 
 #[test]
+fn codex_signs_in_by_device_code_over_ssh() {
+    let home = Home::new();
+    let usercode = home
+        .api
+        .borrow_mut()
+        .mock("POST", "/api/accounts/deviceauth/usercode")
+        .with_body(
+            json!({"device_auth_id": "da-1", "user_code": "WXYZ-9876", "interval": 1}).to_string(),
+        )
+        .create();
+    home.api
+        .borrow_mut()
+        .mock("POST", "/api/accounts/deviceauth/token")
+        .with_status(400)
+        .with_body("denied")
+        .create();
+    let out = home
+        .command(&["login", "perso", "-p", "codex", "--no-browser"])
+        .env("SSH_CONNECTION", "10.0.0.2 50000 10.0.0.1 22")
+        .env("DISPLAY", ":0")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    usercode.assert();
+    let said = String::from_utf8(out.stdout).unwrap();
+    assert!(said.contains("in any browser:"), "{said}");
+    assert!(said.contains("/codex/device"), "{said}");
+    assert!(said.contains("Enter the code WXYZ-9876 there."), "{said}");
+}
+
+#[test]
 fn auto_says_where_it_would_move_a_cli_and_moves_nothing() {
     let home = Home::new();
     home.sign_in("a-work", "r-work", "u-work");

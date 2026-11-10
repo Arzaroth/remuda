@@ -117,8 +117,9 @@ enum Cmd {
         /// overriding `[login] window`.
         #[arg(long)]
         window: Option<browser::Window>,
-        /// End with a code to paste rather than a callback, where the CLI
-        /// offers one (Claude Code), so the browser can be on another machine.
+        /// Sign in from a browser on another machine instead of through a
+        /// callback here: Claude Code ends with a code to paste back, Codex
+        /// with a device code to type in.
         /// The default over SSH, or with no display.
         #[arg(long)]
         paste: bool,

@@ -36,8 +36,25 @@
   display, where the callback could not arrive, and `--no-paste` asks for the
   callback anyway. The page names the machine a callback sign-in's browser must
   be on.
+- The same switch signs Codex in by device code, as `codex login --device-auth`
+  does: remuda shows a code to type at auth.openai.com/codex/device from any
+  machine's browser, so Codex no longer needs the browser on this machine.
+  `remuda login` does so by default over SSH or, on Linux, with no display, as
+  it pastes for Claude, and `--no-paste` keeps the callback. Its sign-in constants now
+  follow codex-cli 0.167.0.
 - Spending a banked reset skips one whose limits are all at 0%, as claude.ai
   does, rather than burning it on nothing.
+- A Grok, Kimi, Cursor or Codex device sign-in rides out a busy or failing
+  server the way it rides out a dropped connection, asking again until the
+  third in a row, instead of throwing away an approval already given. Codex
+  and Cursor count every 429 or 5xx; Grok and Kimi do not count one whose body
+  says "pending" or "slow down", and start the count over on it. An approval
+  cut off on its way back is asked for again the same way.
+
+### Fixed
+
+- A sign-in cancelled on the page, or replaced by another for the same CLI,
+  while it was finishing is no longer stored.
 
 ## [0.38.0] - 2026-11-10
 

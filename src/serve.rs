@@ -1138,6 +1138,7 @@ impl App {
                 let needs_code = login.needs_code();
                 let asks_for = login.asks_for();
                 let local_only = login.local_only();
+                let user_code = login.user_code().map(str::to_owned);
                 pending.insert(
                     id.clone(),
                     Pending {
@@ -1152,7 +1153,7 @@ impl App {
                 drop(pending);
                 let opens_in = self.open.opens_in(&self.login_settings());
                 Ok(
-                    json!({"id": id, "url": url, "needsCode": needs_code, "asksFor": asks_for, "localOnly": local_only, "machine": hostname(), "opensIn": opens_in}),
+                    json!({"id": id, "url": url, "needsCode": needs_code, "asksFor": asks_for, "localOnly": local_only, "userCode": user_code, "machine": hostname(), "opensIn": opens_in}),
                 )
             }
             ("POST", "/api/login/open") => {
@@ -1182,11 +1183,18 @@ impl App {
                     (pending.provider, pending.name.clone(), pending.force, login)
                 };
                 let done = login.finish(text("code"));
-                if let Ok(mut all) = self.pending.lock() {
-                    all.remove(id);
+                let claimed = self
+                    .pending
+                    .lock()
+                    .map_err(|_| anyhow!("poisoned"))?
+                    .remove(id)
+                    .is_some();
+                let done = done?;
+                if !claimed {
+                    bail!("the sign-in was cancelled");
                 }
                 let p = commands::find(&providers, provider)?;
-                let entry = commands::save_login(store, p, &name, force, done?)?;
+                let entry = commands::save_login(store, p, &name, force, done)?;
                 Ok(json!({"message": commands::stored_message(p, &entry)}))
             }
             ("POST", "/api/login/cancel") => {
@@ -3006,6 +3014,63 @@ mod tests {
     }
 
     #[test]
+    fn a_codex_device_sign_in_hands_the_page_its_code() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/api/accounts/deviceauth/usercode")
+            .with_body(json!({"device_auth_id": "da", "user_code": "ABCD-1234"}).to_string())
+            .create();
+        let e = env(&server.url());
+        let providers: Vec<Box<dyn Provider>> = vec![Box::new(crate::codex::Codex::at(
+            e.tmp.path(),
+            crate::codex::Api::local(&server.url()),
+            0,
+        ))];
+        let app = App::new(
+            Store::open(e.store.root()),
+            places(&e),
+            providers,
+            TOKEN.into(),
+            PORT,
+            Box::new(Nowhere),
+        );
+
+        let (_, begun) = call(
+            &app,
+            "POST",
+            "/api/login",
+            json!({"provider": "codex", "name": "a", "paste": true}),
+        );
+        assert_eq!(begun["userCode"], "ABCD-1234");
+        assert_eq!(begun["url"], format!("{}/codex/device", server.url()));
+        assert_eq!(
+            (&begun["needsCode"], &begun["localOnly"]),
+            (&json!(false), &json!(false))
+        );
+        call(
+            &app,
+            "POST",
+            "/api/login/cancel",
+            json!({"id": begun["id"]}),
+        );
+
+        let (_, callback) = call(
+            &app,
+            "POST",
+            "/api/login",
+            json!({"provider": "codex", "name": "a"}),
+        );
+        assert_eq!(callback["userCode"], Value::Null);
+        assert_eq!(callback["localOnly"], true);
+        call(
+            &app,
+            "POST",
+            "/api/login/cancel",
+            json!({"id": callback["id"]}),
+        );
+    }
+
+    #[test]
     fn the_page_reads_and_sets_where_sign_ins_open() {
         let e = env(&OFFLINE);
         let opened = Arc::new(Mutex::new(Vec::new()));
@@ -3125,6 +3190,69 @@ mod tests {
         let (status, r) = waiting.join().unwrap();
         assert_eq!(status, 400);
         assert_eq!(r["error"], "the sign-in was cancelled");
+    }
+
+    #[test]
+    fn a_sign_in_cancelled_while_it_finishes_is_not_stored() {
+        use crate::codex::{Api as CodexApi, Codex};
+        use crate::oauth::fake_jwt as jwt;
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/api/accounts/deviceauth/usercode")
+            .with_body(
+                json!({"device_auth_id": "da-1", "user_code": "WXYZ", "interval": 1}).to_string(),
+            )
+            .create();
+        server
+            .mock("POST", "/api/accounts/deviceauth/token")
+            .with_body(
+                json!({"authorization_code": "auth-1", "code_verifier": "ver-1"}).to_string(),
+            )
+            .create();
+        let e = env(&OFFLINE);
+        let providers: Vec<Box<dyn Provider>> = vec![Box::new(Codex::at(
+            e.tmp.path(),
+            CodexApi::local(&server.url()),
+            0,
+        ))];
+        let app = Arc::new(App::new(
+            Store::open(e.store.root()),
+            places(&e),
+            providers,
+            TOKEN.into(),
+            PORT,
+            Box::new(Nowhere),
+        ));
+        let (_, begun) = call(
+            &app,
+            "POST",
+            "/api/login",
+            json!({"provider": "codex", "name": "x", "paste": true}),
+        );
+        let id = begun["id"].as_str().unwrap().to_owned();
+        let exchange = {
+            let app = Arc::clone(&app);
+            let id = id.clone();
+            server
+                .mock("POST", "/oauth/token")
+                .with_body_from_request(move |_| {
+                    call(&app, "POST", "/api/login/cancel", json!({"id": id}));
+                    let claims = "https://api.openai.com/auth";
+                    json!({
+                        "id_token": jwt(json!({claims: {"chatgpt_account_id": "ws-1", "chatgpt_user_id": "user-a"}})),
+                        "access_token": jwt(json!({"exp": 1_900_000_000, claims: {"chatgpt_account_user_id": "a", "chatgpt_account_id": "ws-1"}})),
+                        "refresh_token": "r-device",
+                    })
+                    .to_string()
+                    .into_bytes()
+                })
+                .create()
+        };
+        let (status, r) = call(&app, "POST", "/api/login/finish", json!({"id": id}));
+        exchange.assert();
+        assert_eq!(status, 400, "{r}");
+        assert_eq!(r["error"], "the sign-in was cancelled");
+        assert!(e.store.get("codex", "x").unwrap().is_none());
     }
 
     #[test]

@@ -265,19 +265,25 @@ impl CursorPending {
                 &format!("{}/auth/poll", self.api.api),
                 &[("uuid", &self.uuid), ("verifier", &self.verifier)],
             )?;
-            let resp = self.api.client.get(url).send();
+            let resp = self.api.client.get(url).send().and_then(|r| {
+                let status = r.status();
+                let body = if status.is_success() {
+                    r.bytes()?
+                } else {
+                    Default::default()
+                };
+                Ok((status, body))
+            });
             match resp {
-                Ok(r) if r.status() == reqwest::StatusCode::NOT_FOUND => {
+                Ok((status, _)) if status == reqwest::StatusCode::NOT_FOUND => {
                     errors = 0;
                     delay = delay.mul_f64(1.2).min(POLL_MAX);
                 }
-                Ok(r) if r.status().is_success() => {
-                    return r
-                        .json()
-                        .map_err(reqwest::Error::without_url)
-                        .context("malformed sign-in answer");
+                Ok((status, body)) if status.is_success() => {
+                    return serde_json::from_slice(&body).context("malformed sign-in answer");
                 }
-                Ok(r) => bail!("cursor.com answered the sign-in with {}", r.status()),
+                Ok((status, _)) if crate::device::transient(status) && errors < 2 => errors += 1,
+                Ok((status, _)) => bail!("cursor.com answered the sign-in with {status}"),
                 // The URL carries the verifier, which with the uuid collects
                 // the tokens: no error may quote it.
                 Err(e) => {
@@ -485,6 +491,68 @@ mod tests {
         waiting.remove();
         let login = finished.join().unwrap().unwrap();
         assert_eq!(login.identity.account_id, "u7");
+        assert_eq!(login.creds["refreshToken"], "r7");
+    }
+
+    #[test]
+    fn a_sign_in_rides_out_two_busy_answers_but_not_a_third() {
+        let mut server = mockito::Server::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let c = Cursor::at(tmp.path(), Api::local(&server.url()));
+        let busy: Vec<_> = [503, 429]
+            .into_iter()
+            .map(|status| {
+                server
+                    .mock("GET", "/auth/poll")
+                    .match_query(Matcher::Any)
+                    .with_status(status)
+                    .expect(1)
+                    .create()
+            })
+            .collect();
+        let approved = server
+            .mock("GET", "/auth/poll")
+            .match_query(Matcher::Any)
+            .with_body(json!({"accessToken": token("u7", "a"), "refreshToken": "r7"}).to_string())
+            .create();
+        let login = c.begin_login(false).unwrap().finish(None).unwrap();
+        busy.iter().for_each(|m| m.assert());
+        approved.assert();
+        assert_eq!(login.identity.account_id, "u7");
+        approved.remove();
+
+        let down = server
+            .mock("GET", "/auth/poll")
+            .match_query(Matcher::Any)
+            .with_status(502)
+            .expect(3)
+            .create();
+        let err = c.begin_login(false).unwrap().finish(None).err().unwrap();
+        down.assert();
+        assert!(err.to_string().contains("502"), "{err}");
+    }
+
+    #[test]
+    fn tokens_cut_off_in_transit_are_asked_for_again() {
+        let mut server = mockito::Server::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let c = Cursor::at(tmp.path(), Api::local(&server.url()));
+        let cut = server
+            .mock("GET", "/auth/poll")
+            .match_query(Matcher::Any)
+            .with_chunked_body(|w| {
+                w.write_all(br#"{"accessToken":"#)?;
+                Err(std::io::Error::other("dropped"))
+            })
+            .expect(1)
+            .create();
+        server
+            .mock("GET", "/auth/poll")
+            .match_query(Matcher::Any)
+            .with_body(json!({"accessToken": token("u7", "a"), "refreshToken": "r7"}).to_string())
+            .create();
+        let login = c.begin_login(false).unwrap().finish(None).unwrap();
+        cut.assert();
         assert_eq!(login.creds["refreshToken"], "r7");
     }
 }
