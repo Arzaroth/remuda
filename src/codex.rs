@@ -544,10 +544,7 @@ impl CodexDevice {
                 bail!("the sign-in was not approved in time");
             }
             let (status, answer) = match self.api.post_json(&self.api.device_url("token"), &body) {
-                Ok(sent) => {
-                    errors = 0;
-                    sent
-                }
+                Ok(sent) => sent,
                 Err(e) => {
                     errors += 1;
                     if errors >= 3 {
@@ -556,6 +553,14 @@ impl CodexDevice {
                     continue;
                 }
             };
+            if crate::device::transient(status) {
+                errors += 1;
+                if errors < 3 {
+                    continue;
+                }
+            } else {
+                errors = 0;
+            }
             if status == reqwest::StatusCode::FORBIDDEN || status == reqwest::StatusCode::NOT_FOUND
             {
                 continue;

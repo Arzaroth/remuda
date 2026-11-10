@@ -86,6 +86,10 @@ impl DeviceFlow {
     }
 }
 
+pub fn transient(status: reqwest::StatusCode) -> bool {
+    status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+}
+
 /// Sleeps `d` in short steps so a cancel lands promptly.
 pub fn pause(cancelled: &AtomicBool, d: Duration) -> Result<()> {
     let until = Instant::now() + d;
@@ -120,10 +124,7 @@ impl DevicePending {
             // The user may already have approved the code: one blip must not
             // throw that away.
             let resp = match sent {
-                Ok(resp) => {
-                    errors = 0;
-                    resp
-                }
+                Ok(resp) => resp,
                 Err(e) => {
                     errors += 1;
                     if errors >= 3 {
@@ -143,11 +144,16 @@ impl DevicePending {
                 Some("slow_down") => self.interval += Duration::from_secs(5),
                 Some("access_denied") => bail!("the sign-in was refused"),
                 Some("expired_token") => bail!("the sign-in was not approved in time"),
+                _ if transient(status) && errors < 2 => {
+                    errors += 1;
+                    continue;
+                }
                 _ => bail!(
                     "token endpoint answered {status}: {}",
                     oauth::excerpt(&body)
                 ),
             }
+            errors = 0;
         }
     }
 }

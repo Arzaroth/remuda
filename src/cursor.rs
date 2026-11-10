@@ -277,6 +277,7 @@ impl CursorPending {
                         .map_err(reqwest::Error::without_url)
                         .context("malformed sign-in answer");
                 }
+                Ok(r) if crate::device::transient(r.status()) && errors < 2 => errors += 1,
                 Ok(r) => bail!("cursor.com answered the sign-in with {}", r.status()),
                 // The URL carries the verifier, which with the uuid collects
                 // the tokens: no error may quote it.
