@@ -942,6 +942,28 @@ mod tests {
     }
 
     #[test]
+    fn a_login_gone_before_the_lock_is_already_signed_out() {
+        let mut server = mockito::Server::new();
+        let e = env(&server.url());
+        let path = e.tmp.path().join(".credentials.json");
+        server
+            .mock("GET", "/api/oauth/profile")
+            .with_body_from_request(move |_| {
+                let _ = std::fs::remove_file(&path);
+                profile_body("u-work").into_bytes()
+            })
+            .create();
+        e.stored("work", "u-work", HOUR);
+        e.sign_in(oauth("a2", "r2", 2 * HOUR), account("u-work"));
+
+        let said = sign_out(&e.store, &e.claude, false, By::Cli).unwrap();
+
+        assert_eq!(said, "Claude Code is already signed out");
+        assert_eq!(e.stored_refresh_token("work").as_deref(), Some("r2"));
+        assert!(!crate::runs::switches(&e.store).contains_key("claude"));
+    }
+
+    #[test]
     fn signing_out_a_login_nobody_stored_needs_discard() {
         let server = confirming("u-other");
         let e = env(&server.url());
