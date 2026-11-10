@@ -125,6 +125,47 @@ pub fn build(
     Ok(bundle)
 }
 
+/// Takes the moved logins off this store once the bundle has gone. One whose
+/// tokens changed after the bundle read them stays, since the copy sent may
+/// already be spent.
+pub fn drop_moved(
+    store: &Store,
+    config: &Path,
+    bundle: &Bundle,
+    moved: &[(&dyn Provider, String)],
+    out: &mut dyn Write,
+) -> Result<()> {
+    let _lock = store.lock()?;
+    for (p, name) in moved {
+        let at = format!("{}/{name}", p.id());
+        let sent = bundle
+            .carried
+            .iter()
+            .find(|c| c.provider == p.id() && c.name == *name)
+            .map(|c| c.creds.as_str());
+        let dropped = ops::sync_live(store, *p).and_then(|state| {
+            let now = store.files(p.id(), name)?;
+            if now.as_ref().map(|(creds, _)| creds.as_str()) != sent {
+                return Ok(false);
+            }
+            crate::commands::remove(store, config, *p, &state, name, out)?;
+            Ok(true)
+        });
+        match dropped {
+            Ok(true) => {}
+            Ok(false) => writeln!(
+                out,
+                "warning: kept {at}: its tokens changed here after the bundle read them, so the copy sent may be spent; export it again, or sign it in again over there"
+            )?,
+            Err(e) => writeln!(
+                out,
+                "warning: {at} went across but is still here ({e:#}); remove it before either machine refreshes it"
+            )?,
+        }
+    }
+    Ok(())
+}
+
 fn to_sign_in(entry: &Entry) -> ToSignIn {
     ToSignIn {
         provider: entry.provider.clone(),

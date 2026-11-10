@@ -378,14 +378,17 @@ fn export(
             None
         }
     };
-    let bundle = export::build(
-        store,
-        providers,
-        &paths::config_file(),
-        &store.root().join(".proxy.json"),
-        &moved,
-        fleet,
-    )?;
+    let bundle = {
+        let _lock = store.lock()?;
+        export::build(
+            store,
+            providers,
+            &paths::config_file(),
+            &store.root().join(".proxy.json"),
+            &moved,
+            fleet,
+        )?
+    };
     writeln!(out, "{}", export::describe(&bundle))?;
     let json = serde_json::to_string(&bundle)?;
     match (file, via) {
@@ -414,19 +417,7 @@ fn export(
         }
         (None, None) => unreachable!(),
     }
-    for (p, name) in moved {
-        let removed = ops::sync_live(store, p).and_then(|state| {
-            commands::remove(store, &paths::config_file(), p, &state, &name, out)
-        });
-        if let Err(e) = removed {
-            writeln!(
-                out,
-                "warning: {}/{name} went across but is still here ({e:#}); remove it before either machine refreshes it",
-                p.id()
-            )?;
-        }
-    }
-    Ok(())
+    export::drop_moved(store, &paths::config_file(), &bundle, &moved, out)
 }
 
 struct Again {
