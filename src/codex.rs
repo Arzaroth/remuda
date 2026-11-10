@@ -71,7 +71,12 @@ impl Api {
             .send()
             .context("device sign-in request failed")?;
         let status = resp.status();
-        Ok((status, resp.text().unwrap_or_default()))
+        let body = if status.is_success() {
+            resp.text().context("device sign-in answer was cut off")?
+        } else {
+            resp.text().unwrap_or_default()
+        };
+        Ok((status, body))
     }
 }
 

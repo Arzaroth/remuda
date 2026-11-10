@@ -120,11 +120,20 @@ impl DevicePending {
                         ("client_id", &self.flow.client_id),
                     ],
                 )
-                .send();
+                .send()
+                .and_then(|resp| {
+                    let status = resp.status();
+                    let body = if status.is_success() {
+                        resp.text()?
+                    } else {
+                        resp.text().unwrap_or_default()
+                    };
+                    Ok((status, body))
+                });
             // The user may already have approved the code: one blip must not
             // throw that away.
-            let resp = match sent {
-                Ok(resp) => resp,
+            let (status, body) = match sent {
+                Ok(sent) => sent,
                 Err(e) => {
                     errors += 1;
                     if errors >= 3 {
@@ -133,8 +142,6 @@ impl DevicePending {
                     continue;
                 }
             };
-            let status = resp.status();
-            let body = resp.text().unwrap_or_default();
             let answer: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
             if status.is_success() {
                 return Ok(answer);

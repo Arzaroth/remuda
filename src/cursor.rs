@@ -265,20 +265,25 @@ impl CursorPending {
                 &format!("{}/auth/poll", self.api.api),
                 &[("uuid", &self.uuid), ("verifier", &self.verifier)],
             )?;
-            let resp = self.api.client.get(url).send();
+            let resp = self.api.client.get(url).send().and_then(|r| {
+                let status = r.status();
+                let body = if status.is_success() {
+                    r.bytes()?
+                } else {
+                    Default::default()
+                };
+                Ok((status, body))
+            });
             match resp {
-                Ok(r) if r.status() == reqwest::StatusCode::NOT_FOUND => {
+                Ok((status, _)) if status == reqwest::StatusCode::NOT_FOUND => {
                     errors = 0;
                     delay = delay.mul_f64(1.2).min(POLL_MAX);
                 }
-                Ok(r) if r.status().is_success() => {
-                    return r
-                        .json()
-                        .map_err(reqwest::Error::without_url)
-                        .context("malformed sign-in answer");
+                Ok((status, body)) if status.is_success() => {
+                    return serde_json::from_slice(&body).context("malformed sign-in answer");
                 }
-                Ok(r) if crate::device::transient(r.status()) && errors < 2 => errors += 1,
-                Ok(r) => bail!("cursor.com answered the sign-in with {}", r.status()),
+                Ok((status, _)) if crate::device::transient(status) && errors < 2 => errors += 1,
+                Ok((status, _)) => bail!("cursor.com answered the sign-in with {status}"),
                 // The URL carries the verifier, which with the uuid collects
                 // the tokens: no error may quote it.
                 Err(e) => {
