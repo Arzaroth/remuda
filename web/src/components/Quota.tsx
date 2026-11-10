@@ -272,7 +272,13 @@ function Pool(props: { id: string; name: string; prefs: Prefs; offset: number; s
               value={c()?.title}
               onChange={(e) => props.setPrefs({ windows: { ...props.prefs.windows, [props.id]: e.currentTarget.value } })}
             >
-              <For each={all()}>{(w) => <option value={w.title}>{w.title}</option>}</For>
+              <For each={all()}>
+                {(w) => (
+                  <option value={w.title} selected={w.title === c()?.title}>
+                    {w.title}
+                  </option>
+                )}
+              </For>
             </select>
           </label>
         </Show>
