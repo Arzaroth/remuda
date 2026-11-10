@@ -130,6 +130,9 @@ pub trait Provider: Send + Sync {
     /// `outgoing` (store shape); otherwise fails with [`crate::fsx::Changed`]
     /// and writes nothing. `None` replaces whatever is there.
     fn install(&self, entry: &Entry, outgoing: Option<&Value>) -> Result<()>;
+    fn signs_out(&self) -> bool {
+        false
+    }
     /// Takes the login out of the CLI's files and leaves the rest, but only
     /// while the live login is still `outgoing` (store shape); otherwise fails
     /// with [`crate::fsx::Changed`] and writes nothing.

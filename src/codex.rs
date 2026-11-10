@@ -222,6 +222,10 @@ impl Provider for Codex {
         })
     }
 
+    fn signs_out(&self) -> bool {
+        true
+    }
+
     fn sign_out(&self, outgoing: &Value) -> Result<()> {
         crate::fsx::remove_json_if(&self.auth_path, outgoing)
     }

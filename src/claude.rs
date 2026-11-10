@@ -582,6 +582,10 @@ impl Provider for Claude {
         written
     }
 
+    fn signs_out(&self) -> bool {
+        true
+    }
+
     /// The login goes first and the account second, the reverse of
     /// [`Self::install`], so Claude Code never shows an account it has no
     /// login for.

@@ -238,6 +238,10 @@ impl Provider for Grok {
         })
     }
 
+    fn signs_out(&self) -> bool {
+        true
+    }
+
     fn sign_out(&self, outgoing: &Value) -> Result<()> {
         update_json(&self.auth_path, |file| {
             if oidc(file) != oidc(outgoing) {

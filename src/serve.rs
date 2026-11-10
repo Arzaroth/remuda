@@ -919,7 +919,7 @@ impl App {
                     .iter()
                     .map(|p| {
                         let warm = crate::proxy::route::cheapest(p.id()).is_some();
-                        json!({"id": p.id(), "name": p.name(), "warm": warm, "signsOut": p.renews()})
+                        json!({"id": p.id(), "name": p.name(), "warm": warm, "signsOut": p.signs_out()})
                     })
                     .collect();
                 state["health"] = self.health(&lives);
