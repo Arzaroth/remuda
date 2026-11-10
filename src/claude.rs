@@ -200,15 +200,14 @@ fn oauth_account_from_profile(p: &Value) -> Result<Value> {
     Ok(Value::Object(out))
 }
 
-/// The banked reset to spend: the one the usage endpoint names next, else
-/// any it would accept now.
-fn usable_grant(cedar_ember: &Value) -> Option<&str> {
+/// The grants the usage endpoint would accept now.
+fn accepted(cedar_ember: &Value) -> Vec<&Value> {
     if cedar_ember.get("eligible").and_then(Value::as_bool) != Some(true) {
-        return None;
+        return Vec::new();
     }
     let at_limit = cedar_ember.get("at_limit").and_then(Value::as_bool) == Some(true);
     let flag = |g: &Value, k: &str| g.get(k).and_then(Value::as_bool) == Some(true);
-    let usable: Vec<&str> = cedar_ember
+    cedar_ember
         .get("grants")
         .and_then(Value::as_array)
         .into_iter()
@@ -219,6 +218,24 @@ fn usable_grant(cedar_ember: &Value) -> Option<&str> {
                 && flag(g, "usable_now")
                 && (at_limit || !flag(g, "use_requires_limit"))
         })
+        .collect()
+}
+
+/// Every limit the grant resets is at 0%, so spending it clears nothing:
+/// claude.ai greys its button out for one.
+fn nothing_to_clear(grant: &Value) -> bool {
+    grant
+        .get("percent_used")
+        .and_then(Value::as_object)
+        .is_some_and(|used| !used.is_empty() && used.values().all(|p| p.as_f64() == Some(0.0)))
+}
+
+/// The banked reset to spend: the one the usage endpoint names next, else
+/// any it would accept now, never one with nothing to clear.
+fn usable_grant(cedar_ember: &Value) -> Option<&str> {
+    let usable: Vec<&str> = accepted(cedar_ember)
+        .into_iter()
+        .filter(|g| !nothing_to_clear(g))
         .filter_map(|g| g.get("id")?.as_str())
         .collect();
     let next = cedar_ember.get("next_grant_id").and_then(Value::as_str);
@@ -242,10 +259,13 @@ fn redeem_reset(api: &Api, access_token: &str, organization: &str) -> Result<Str
         bail!("usage endpoint answered {status}");
     }
     let usage: Value = usage.json().context("malformed usage response")?;
-    let grant = usage
-        .get("cedar_ember")
-        .and_then(usable_grant)
-        .context("no banked reset can be used right now")?;
+    let cedar_ember = usage.get("cedar_ember").unwrap_or(&Value::Null);
+    let Some(grant) = usable_grant(cedar_ember) else {
+        if accepted(cedar_ember).into_iter().any(nothing_to_clear) {
+            bail!("the banked reset has nothing to clear yet: every limit it resets is at 0%");
+        }
+        bail!("no banked reset can be used right now");
+    };
     let resp = api
         .client
         .post(format!(
@@ -1083,6 +1103,35 @@ mod tests {
         assert_eq!(usable_grant(&both), Some("b"));
         both["next_grant_id"] = json!("retired");
         assert_eq!(usable_grant(&both), Some("a"));
+    }
+
+    #[test]
+    fn a_grant_whose_limits_are_all_unused_is_never_spent() {
+        let mut fable = grant("launch-2610-fable");
+        fable["clears"] = json!(["seven_day_overage_included"]);
+        fable["gives_back_weekly"] = json!(true);
+        fable["percent_used"] = json!({"seven_day_overage_included": 0});
+        let mut block = banked(vec![fable.clone(), grant("other")]);
+        block["next_grant_id"] = json!("launch-2610-fable");
+        assert_eq!(usable_grant(&block), Some("other"));
+        assert_eq!(usable_grant(&banked(vec![fable.clone()])), None);
+        assert!(
+            accepted(&banked(vec![fable.clone()]))
+                .into_iter()
+                .any(nothing_to_clear)
+        );
+        for used in [
+            json!({"seven_day_overage_included": 12}),
+            json!({}),
+            Value::Null,
+        ] {
+            fable["percent_used"] = used.clone();
+            assert_eq!(
+                usable_grant(&banked(vec![fable.clone()])),
+                Some("launch-2610-fable"),
+                "{used}"
+            );
+        }
     }
 
     #[test]

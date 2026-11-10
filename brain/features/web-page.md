@@ -69,7 +69,11 @@ Add a login.
   percentage and reset over a bar; then "Figures from N minutes ago" when
   TokenGauge carried them from an earlier ask than its snapshot, `windows.ts`
   `carriedSince`), a Claude login's banked usage-limit resets and when they
-  expire, with a Reset limits button that asks for a second click before it
+  expire, named by kind when all are of one (`1 Fable reset`, `banked.ts`),
+  with a button saying what it resets (Reset Fable limit, Reset limits; a
+  Fable reset's tooltip names the 5-hour limit too when its `clears` lists
+  `five_hour`, as on a Team Premium seat) that
+  asks for a second click before it
   spends one and then holds until TokenGauge reports the new count, how long
   its access token and its sign-in (refresh token) have left, its
   keep-warm line, and Refresh, Sign in again, Label, Rename and Remove.

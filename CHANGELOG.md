@@ -24,6 +24,8 @@
   browser remuda knows rather than only the default one, and a private window
   as before, a normal window, or a profile of the login's own, kept under the
   store, which stays signed in for the next time.
+- A banked Claude reset says what it resets: `1 Fable reset` with a Reset
+  Fable limit button, from TokenGauge's `bankedResets.kinds`.
 
 ### Changed
 
@@ -34,6 +36,8 @@
   display, where the callback could not arrive, and `--no-paste` asks for the
   callback anyway. The page names the machine a callback sign-in's browser must
   be on.
+- Spending a banked reset skips one whose limits are all at 0%, as claude.ai
+  does, rather than burning it on nothing.
 
 ## [0.38.0] - 2026-11-10
 
