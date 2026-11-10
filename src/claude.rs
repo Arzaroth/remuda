@@ -639,8 +639,6 @@ impl Provider for Claude {
         Ok(format!("{}: banked reset {result}", entry.qualified()))
     }
 
-    /// By default the browser calls back to a local port, as Claude Code's
-    /// own sign-in does; pasting the code works from a browser anywhere.
     fn begin_login(&self, paste: bool) -> Result<Box<dyn PendingLogin>> {
         let state = pkce::random()?;
         if paste {
