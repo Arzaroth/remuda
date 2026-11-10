@@ -86,23 +86,23 @@ impl DeviceFlow {
     }
 }
 
-impl DevicePending {
-    /// Sleeps `d` in short steps so a cancel lands promptly.
-    fn wait(&self, d: Duration) -> Result<()> {
-        let until = Instant::now() + d;
-        while Instant::now() < until {
-            if self.cancelled.load(Ordering::Relaxed) {
-                bail!("the sign-in was cancelled");
-            }
-            std::thread::sleep(Duration::from_millis(100).min(until - Instant::now()));
+/// Sleeps `d` in short steps so a cancel lands promptly.
+pub fn pause(cancelled: &AtomicBool, d: Duration) -> Result<()> {
+    let until = Instant::now() + d;
+    while Instant::now() < until {
+        if cancelled.load(Ordering::Relaxed) {
+            bail!("the sign-in was cancelled");
         }
-        Ok(())
+        std::thread::sleep(Duration::from_millis(100).min(until - Instant::now()));
     }
+    Ok(())
+}
 
+impl DevicePending {
     fn poll(&mut self) -> Result<Value> {
         let mut errors = 0;
         loop {
-            self.wait(self.interval)?;
+            pause(&self.cancelled, self.interval)?;
             if Instant::now() >= self.deadline {
                 bail!("the sign-in was not approved in time");
             }
