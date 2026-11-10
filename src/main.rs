@@ -797,7 +797,7 @@ fn main() -> Result<()> {
         let open = |url: &str, profile: &Path| choice.open(url, profile);
         let prompt = commands::Prompt {
             open: &open,
-            opens_in: (!no_browser).then(|| choice.describe()),
+            opens_in: (!no_browser && browser::displayed()).then(|| choice.describe()),
             lines,
             paste: !no_paste
                 && (*paste
