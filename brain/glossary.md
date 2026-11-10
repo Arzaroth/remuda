@@ -44,7 +44,8 @@ looking elsewhere.
 **Set aside**: tokens no stored login holds, kept in
 `.set-aside-<account>-<ms>.json` instead of dropped: those a refresh rotated
 for an account other than the credential's, a moved login's once `export`
-removes it, those `restore` carried but could not store or replaced, and a
+removes it, those `restore` carried for a provider it knows but could not
+store or replaced, and a
 restore sign-in that turned out to be another account.
 
 **Sidecar**: `<name>.meta.json` beside a credential: account id, email, capture

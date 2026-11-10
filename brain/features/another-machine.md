@@ -68,7 +68,9 @@ and `.set-aside-*` files.
   account is stored here under another name (skipped). Either way, when the
   provider renews tokens and the file here is not the same, the tokens carried
   are set aside and the path printed: for a moved login they are the only
-  copy.
+  copy. A login of a provider this remuda does not know is skipped and
+  nothing of it is kept here; a moved one's tokens stay only in the set-aside
+  file on the sending machine.
 - With `--force`, a login stored here is replaced only as a switch or a remove
   would allow it: the live login is read back first (`ops::sync_live`), and
   the one the CLI uses, one in a `remuda run` session, or any when which one

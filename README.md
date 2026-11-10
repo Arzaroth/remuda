@@ -169,7 +169,10 @@ when a refresh changed them while the bundle was on its way. restore keeps
 the logins already here; `--force` replaces them, but never the one a CLI or
 a `remuda run` session uses, and never the proxy's client keys. Tokens restore
 could not store or replaced go to a set-aside file whose path it prints, and
-a bundle received that it could not restore is kept for another try.
+a bundle received that it could not restore is kept for another try. A login
+of a provider the new machine's remuda does not know is skipped without being
+set aside there, so keep the set-aside file `--move` printed here until that
+login works over there.
 
 ## A login per session, and per repository
 
