@@ -45,8 +45,8 @@ looking elsewhere.
 `.set-aside-<account>-<ms>.json` instead of dropped: those a refresh rotated
 for an account other than the credential's, a moved login's once `export`
 removes it, those `restore` carried for a provider it knows and that renews
-them but could not store, those a stored login of such a provider held when
-`restore --force` replaced it (an API key is not set aside), and a
+them but could not store, those a stored login held when `restore --force`
+replaced it (an API key too), and a
 restore sign-in that turned out to be another account.
 
 **Sidecar**: `<name>.meta.json` beside a credential: account id, email, capture

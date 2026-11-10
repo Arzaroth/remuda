@@ -77,8 +77,9 @@ and `.set-aside-*` files.
 - With `--force`, a login stored here is replaced only as a switch or a remove
   would allow it: the live login is read back first (`ops::sync_live`), and
   the one the CLI uses, one in a `remuda run` session, or any when which one
-  the CLI uses is unknown, is kept, the tokens carried set aside. The tokens a
-  replaced login held are set aside when its provider renews them.
+  the CLI uses is unknown, is kept, the tokens carried set aside. What a
+  replaced login held is set aside, an API key as well as tokens: the key
+  here may be its only copy.
 - `config.toml` is checked (`Config::check`) against the logins stored here plus
   those listed to sign in, since names do not change, and written only when it
   passes; problems are printed and the config here stays.
