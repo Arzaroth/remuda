@@ -236,7 +236,7 @@ impl Provider for Grok {
             .and_then(|s| Some((s.to_owned(), entry.creds.get(s)?.clone())))
             .context("stored credential has no x.ai sign-in")?;
         update_json(&self.auth_path, |file| {
-            if outgoing.is_some_and(|o| oidc(file) != oidc(o)) {
+            if outgoing.is_some_and(|o| oidc_entries(file) != oidc_entries(o)) {
                 return Err(Changed.into());
             }
             let map = file.as_object_mut().context("auth.json is not an object")?;
