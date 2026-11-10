@@ -1211,6 +1211,23 @@ mod tests {
     }
 
     #[test]
+    fn restore_force_sets_aside_the_api_key_it_replaces() {
+        let from = env(&OFFLINE);
+        keyed(&from, "perso", "k-there");
+        let bundle = bundle_of(&from, &[]).unwrap();
+        let to = env(&OFFLINE);
+        keyed(&to, "perso", "k-here");
+
+        let (_, out) = restore_into(&to, round_trip(&bundle), true);
+
+        assert!(out.contains("stored glm/perso"), "{out}");
+        let stored = to.store.get("glm", "perso").unwrap().unwrap();
+        assert_eq!(stored.creds["key"], "k-there");
+        let kept = set_aside_in(&out, "set the tokens glm/perso held here aside in ");
+        assert_eq!(kept["key"], "k-here");
+    }
+
+    #[test]
     fn restore_force_keeps_the_login_in_use_here() {
         let from = env(&OFFLINE);
         from.stored("perso", "u-2", HOUR);
