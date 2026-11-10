@@ -76,6 +76,14 @@ fn oidc(file: &Value) -> Option<&Value> {
     file.get(oidc_scope(file)?)
 }
 
+fn oidc_entries(file: &Value) -> Vec<(&String, &Value)> {
+    file.as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(scope, _)| scope.starts_with(OIDC_SCOPE))
+        .collect()
+}
+
 fn oidc_mut(file: &mut Value) -> Option<&mut Map<String, Value>> {
     let scope = oidc_scope(file)?.to_owned();
     file.get_mut(&scope)?.as_object_mut()
@@ -244,7 +252,7 @@ impl Provider for Grok {
 
     fn sign_out(&self, outgoing: &Value) -> Result<()> {
         update_json(&self.auth_path, |file| {
-            if oidc(file) != oidc(outgoing) {
+            if oidc_entries(file) != oidc_entries(outgoing) {
                 return Err(Changed.into());
             }
             let map = file.as_object_mut().context("auth.json is not an object")?;
