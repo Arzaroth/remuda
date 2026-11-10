@@ -436,6 +436,62 @@ mod tests {
         assert_eq!(after.meta.account_id, "u-1");
     }
 
+    fn legacy_work(tmp: &Path, store: &Store) -> Value {
+        store.save(&entry("work", "u-1")).unwrap();
+        let meta_path = tmp.join("claude/work.meta.json");
+        let mut legacy = read_json(&meta_path).unwrap().unwrap();
+        legacy.as_object_mut().unwrap().remove("credsDigest");
+        write_json(&meta_path, &legacy).unwrap();
+        legacy
+    }
+
+    fn blocked(tmp: &Path, file: &str) {
+        let blocker = tmp.join(format!("claude/.{file}.remuda-{}", std::process::id()));
+        std::fs::write(&blocker, "").unwrap();
+    }
+
+    #[test]
+    fn files_put_over_a_sidecar_without_a_digest_replace_it_first() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(tmp.path());
+        let legacy = legacy_work(tmp.path(), &store);
+        blocked(tmp.path(), "work.meta.json");
+
+        let mut meta = legacy.clone();
+        meta["accountId"] = json!("u-2");
+        let creds = "{\"claudeAiOauth\": {\"accessToken\": \"b\"}}\n";
+        assert!(store.put_files("claude", "work", creds, &meta).is_err());
+
+        let after = store.get("claude", "work").unwrap().unwrap();
+        assert_eq!(after.creds["claudeAiOauth"]["accessToken"], "a");
+        assert_eq!(after.meta.account_id, "u-1");
+    }
+
+    #[test]
+    fn files_put_with_a_sidecar_without_a_digest_are_given_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(tmp.path());
+        let legacy = legacy_work(tmp.path(), &store);
+        blocked(tmp.path(), "work.json");
+
+        let mut meta = legacy.clone();
+        meta["accountId"] = json!("u-2");
+        let creds = "{\"claudeAiOauth\": {\"accessToken\": \"b\"}}\n";
+        assert!(store.put_files("claude", "work", creds, &meta).is_err());
+
+        let after = store.get("claude", "work").unwrap().unwrap();
+        assert_eq!(after.meta.account_id, "u-2");
+        assert!(!after.verified);
+
+        store.put_files("claude", "work", creds, &meta).unwrap();
+        let after = store.get("claude", "work").unwrap().unwrap();
+        assert!(after.verified);
+        assert_eq!(
+            after.meta.creds_digest.as_deref(),
+            Some(digest(creds).as_str())
+        );
+    }
+
     #[test]
     fn removing_takes_the_sidecar_with_it() {
         let tmp = tempfile::tempdir().unwrap();
