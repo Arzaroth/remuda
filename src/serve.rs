@@ -137,7 +137,8 @@ pub struct Desktop;
 
 impl Opener for Desktop {
     fn opens_in(&self, login: &config::Login) -> Option<String> {
-        Some(browser::choose(login.browser.as_deref(), login.window).describe())
+        browser::displayed()
+            .then(|| browser::choose(login.browser.as_deref(), login.window).describe())
     }
 
     fn open(&self, url: &str, profile: &Path, login: &config::Login) -> bool {
