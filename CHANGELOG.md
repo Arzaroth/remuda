@@ -12,8 +12,8 @@
   does to them, the hook and its settings, and the commands.
 - `remuda doctor` checks that the artifact hook is installed once two Claude
   logins are stored.
-- `remuda signout <cli>`, and Sign out on the page, leave a CLI with no login
-  in use, keeping it in the store. remuda can then refresh and sign in again
+- `remuda signout <cli>`, and Sign out on the page, take the login out of a
+  CLI's own files, keeping it in the store. remuda can then refresh and sign in again
   every login, even a lone one, without going through the CLI.
 - Signing in shows the link before anything opens, so you choose where it
   goes: Enter in the terminal, or Open on the page, opens it here, and Grok,

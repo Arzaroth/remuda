@@ -39,7 +39,8 @@ restarted.
 ## Signing out
 
 `remuda signout <cli> [--discard]` and the page's Sign out, on the login in
-use, leave the CLI with no login at all (`ops::sign_out`). Every login is then
+use, leave the CLI's own files with no login (`ops::sign_out`); a `remuda run`
+session keeps the one it started on, and Grok an API key. Every login is then
 the store's alone, so remuda refreshes it and signs it in again, even when it
 is the only one; the page offers Sign in again only on a login the CLI is not
 using. `remuda use` puts one back.
@@ -54,14 +55,21 @@ rotated it meanwhile:
 - **Claude Code**: removes `claudeAiOauth` from `.credentials.json`, then
   `oauthAccount` from `.claude.json`, keeping every other key (`mcpOAuth`).
 - **Codex, Kimi, Cursor**: removes the file that is the login (`auth.json`,
-  `credentials/kimi-code.json`), as their own logout does. A file that is a
-  link is refused rather than removed (`fsx::remove_json_if`).
-- **Grok**: removes the `auth.x.ai::` entries from `auth.json`.
+  `credentials/kimi-code.json`), as their own logout does. The file is moved
+  aside before it is compared, so a rotation that lands meanwhile is put back
+  rather than removed unsynced. A file that is a link is refused rather than
+  removed (`fsx::remove_json_if`).
+- **Grok**: removes the `auth.x.ai::` entries from `auth.json`. An API key the
+  file holds stays, so Grok keeps using it and remuda reports it as a login it
+  cannot store.
 - **GLM, opencode Go**: refused; the page shows no Sign out for them.
 
 It notes the time in `.last-switch.json`, writes a ledger line with no account,
-and logs a `switch` event. With auto mode on for that CLI, the next round
-picks a login again, and the message says so.
+and logs a `switch` event. With auto mode on for that CLI, the message says
+auto mode will put a login back: the next round picks one unless it holds,
+as when TokenGauge has no figures, every login it may pick is full with no
+fallback, or a session of the CLI has to end first, so the CLI can stay
+signed out for longer.
 
 ## Whose spend it is
 

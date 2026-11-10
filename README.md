@@ -129,8 +129,9 @@ take `-p <cli>`: `claude` (the default), `codex`, `cursor`, `glm`, `grok`,
 Enter opens it where `[login]` says (`--browser` and `--window` for one run):
 by default a private window of your default browser, so the account you are
 signed into there stays put. remuda knows how to open Brave, Chrome, Chromium,
-Vivaldi, Edge, Firefox and LibreWolf, not their Snap or Flatpak packages. Sign
-in with the account to add. Claude and Codex call back to remuda, so their
+Vivaldi, Edge, Firefox and LibreWolf, not their Snap or Flatpak packages; any
+other browser gets the link through `xdg-open`, in a normal window, where it
+may already be signed in. Sign in with the account to add. Claude and Codex call back to remuda, so their
 browser must be on this machine, and Codex's port 1455 must be free (not while
 `codex login` runs); with `--paste`, Claude shows a `code#state` string to
 paste back instead, from any machine's browser. Over SSH (`SSH_CONNECTION` or

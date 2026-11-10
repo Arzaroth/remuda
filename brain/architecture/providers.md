@@ -93,8 +93,9 @@ refresh token into "sign this credential in again".
   a JSON body with scope `openid profile email`, keeping any token the answer
   leaves out, and stamps `last_refresh`.
 - A sign-in listens on 127.0.0.1:1455 and, when the machine has it, [::1]:1455
-  (the redirect says `localhost`), for up to 10 minutes. A port an attempt
-  being cancelled still holds gets two seconds to free up. It reads each
+  (the redirect says `localhost`), for up to 10 minutes. The port is taken
+  when either is, so another process on [::1] cannot get the callback. A port
+  an attempt being cancelled still holds gets two seconds to free up. It reads each
   connection's request line with a 2 s timeout and an 8 KiB cap, drops what it
   cannot read, answers other paths with a 404 and a callback with another
   state with a 400, and keeps waiting; only a callback with this attempt's
