@@ -38,7 +38,13 @@ describe('describeBanked', () => {
       ],
     });
     expect(mix.label).toBe('3 banked resets');
-    expect(mix.title).toBe('Spends the reset Claude names next: 1 Fable reset, 2 5-hour resets');
+    expect(mix.title).toBe('Spends one reset, the one Claude picks when you click. Held: 1 Fable reset, 2 5-hour resets');
     expect(describeBanked({ available: 1, expiresAt: null }).label).toBe('1 banked reset');
+  });
+
+  it('names a kind only when it accounts for every reset held', () => {
+    const partial = describeBanked({ available: 2, expiresAt: null, kinds: [{ kind: 'fable', count: 1, expiresAt: null }] });
+    expect(partial.label).toBe('2 banked resets');
+    expect(partial.button).toBe('Reset limits');
   });
 });

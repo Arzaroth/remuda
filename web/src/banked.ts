@@ -17,7 +17,7 @@ const FABLE_AND_SESSION =
 
 export function describeBanked(r: Banked): { label: string; button: string; title: string } {
   const kinds = r.kinds ?? [];
-  const only = kinds.length === 1 ? NAMES[kinds[0].kind] : undefined;
+  const only = kinds.length === 1 && kinds[0].count === r.available ? NAMES[kinds[0].kind] : undefined;
   if (only) {
     const title = kinds[0].kind === 'fable' && kinds[0].clears?.includes('five_hour') ? FABLE_AND_SESSION : only.title;
     return { label: plural(r.available, only.noun), button: only.button, title };
@@ -26,7 +26,7 @@ export function describeBanked(r: Banked): { label: string; button: string; titl
     label: plural(r.available, 'banked reset'),
     button: 'Reset limits',
     title: kinds.length
-      ? `Spends the reset Claude names next: ${kinds.map((k) => plural(k.count, NAMES[k.kind]?.noun ?? k.kind)).join(', ')}`
+      ? `Spends one reset, the one Claude picks when you click. Held: ${kinds.map((k) => plural(k.count, NAMES[k.kind]?.noun ?? k.kind)).join(', ')}`
       : 'Clears the session and weekly limits now',
   };
 }
