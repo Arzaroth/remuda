@@ -281,6 +281,24 @@ mod tests {
     }
 
     #[test]
+    fn a_file_that_changed_stays_as_it_is_with_nothing_beside_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("auth.json");
+        write_json(&path, &serde_json::json!({"v": 2})).unwrap();
+        let before = fs::read(&path).unwrap();
+
+        let moved = remove_json_if(&path, &serde_json::json!({"v": 1}));
+
+        assert!(moved.unwrap_err().is::<Changed>());
+        assert_eq!(fs::read(&path).unwrap(), before);
+        let names: Vec<_> = fs::read_dir(tmp.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["auth.json"]);
+    }
+
+    #[test]
     fn a_linked_file_is_never_removed() {
         let tmp = tempfile::tempdir().unwrap();
         let real = tmp.path().join("real.json");
