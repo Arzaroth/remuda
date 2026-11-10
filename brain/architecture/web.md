@@ -136,7 +136,7 @@ access to anything, and it ends when they stop.
 | `POST /api/login` `{provider?, name, force?}` | Begin a sign-in and open it in a private window: `{id, url, needsCode, opened}` |
 | `POST /api/login/finish` `{id, code?}` | Finish it and store the result |
 | `POST /api/login/cancel` `{id}` | Abandon it; a waiting Codex callback stops |
-| `POST /api/proxy/settings` `{enabled?, port?}` | Save the proxy's settings and start, move or stop it to match |
+| `POST /api/proxy/settings` `{enabled?, port?, lan?}` | Save the proxy's settings and start, move or stop it to match |
 | `POST /api/proxy/keys` `{name}` / `keys/remove` `{id}` | Make or remove a proxy access key |
 | `POST /api/usage/spend` `{days}` | `{export, logins}`: TokenGauge's `--usage-json` from the first day of the range, and every stored login by the digest it names logins with, then each removed one the ledger names (`removed: true`); or `{unavailable}` saying why there is none ([../features/web-page.md](../features/web-page.md#usage)) |
 | `GET /api/versions` | `{tools, checkedAt}`: for remuda and TokenGauge, `installed`, `current` (null for a TokenGauge that does not answer `--version`), `latest`, `available`, `held` (why the page cannot update it), `url`, `releases` (`{version, published, url, notes}`) and `error` when GitHub could not be asked; the answer is kept 15 minutes ([../features/web-page.md](../features/web-page.md)) |
@@ -164,7 +164,11 @@ nothing. TokenGauge still does the fetching ([decisions](../decisions.md)).
 `remuda use --discard` replaces it) or `unreadable` (with the error).
 
 `proxy` is the proxy's settings and state ([proxy.md](proxy.md)): `enabled`,
-`port`, `running` (the bound port, or null), `error` (why it could not bind,
+`port`, `lan`, `host` (the LAN address with `lan`, null when none was found,
+else `127.0.0.1`; the base URLs fall back to `127.0.0.1`), `firewall` (null, or `name`, `open` true, false or
+null, and the `commands` that open the port; only while it is on with `lan`,
+and only once the background ask has answered),
+`running` (the bound port, or null), `error` (why it could not bind,
 or why `.proxy.json` could not be read),
 `baseUrls` (`openai`, `claude`), `keys` (`id`, `name`, `key`, `created`) and
 `routes` (per provider the proxy can spend: `provider`, `models`, `formats`).

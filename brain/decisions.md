@@ -304,8 +304,11 @@ multi-megabyte requests and long answers. So the proxy runs a second listener,
 reusing only the head reader and the connection slots. Its guard is an access
 key the client sends as an API key, checked before any body is read, not the
 page's token, `Host` and `Origin`: proxy clients are SDKs and CLIs that know
-nothing of the page. It binds `127.0.0.1` only; listening further is the hub
-work on the roadmap. The keys sit in clear in the store's `.proxy.json`,
+nothing of the page. It binds `127.0.0.1` unless the user switches on `lan`,
+which binds every interface with the same keys as the only guard and says on
+the card that traffic is in clear; TLS is the hub work on the roadmap. Firewall
+commands are shown, never run: opening a port needs root, and remuda never
+asks for it. The keys sit in clear in the store's `.proxy.json`,
 beside the credentials they give access to, so the page can show and copy
 them again.
 

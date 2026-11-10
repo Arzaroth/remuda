@@ -50,6 +50,12 @@ pub struct Places {
     pub runtime: PathBuf,
     /// Where the CLIs are looked for, as `$PATH`.
     pub search: Option<std::ffi::OsString>,
+    /// Where the firewall's settings are read from.
+    pub etc: PathBuf,
+    /// The kernel's routing table, which says the interface LAN traffic uses.
+    pub route: PathBuf,
+    /// The address other machines reach this one at.
+    pub lan_address: fn() -> Option<std::net::IpAddr>,
 }
 
 impl Places {
@@ -62,6 +68,9 @@ impl Places {
             github: crate::versions::GITHUB.to_owned(),
             runtime: paths::runtime_dir(),
             search: std::env::var_os("PATH"),
+            etc: PathBuf::from("/etc"),
+            route: PathBuf::from("/proc/net/route"),
+            lan_address: proxy::lan_address,
         }
     }
 }
@@ -72,6 +81,19 @@ const SPEND_FRESH: Duration = Duration::from_secs(60);
 
 /// GitHub allows 60 unsigned requests an hour, and a check spends two.
 const VERSIONS_FRESH: Duration = Duration::from_secs(15 * 60);
+
+/// firewall-cmd is a Python program, too slow to run on every state.
+const FIREWALL_FRESH: Duration = Duration::from_secs(10);
+
+/// The last firewall verdict, asked on a thread of its own so that no
+/// request waits on firewall-cmd under the store's lock.
+#[derive(Default)]
+struct FirewallSeen {
+    verdict: Option<(Instant, u16, Option<proxy::firewall::Verdict>)>,
+    asking: bool,
+    /// Moves when the verdict does, so the page hears of it.
+    changes: u64,
+}
 
 pub struct App {
     store: Store,
@@ -90,6 +112,7 @@ pub struct App {
     refused: Mutex<BTreeMap<String, String>>,
     spent: Mutex<BTreeMap<u32, (Instant, Value)>>,
     versions: Mutex<Option<(Instant, Value)>>,
+    firewall: Mutex<FirewallSeen>,
     me: OnceLock<Weak<App>>,
 }
 
@@ -187,6 +210,7 @@ impl App {
             refused: Mutex::new(BTreeMap::new()),
             spent: Mutex::new(BTreeMap::new()),
             versions: Mutex::new(None),
+            firewall: Mutex::default(),
             me: OnceLock::new(),
         }
     }
@@ -450,6 +474,45 @@ impl App {
         proxy::settings::File::at(self.store.root().join(".proxy.json"))
     }
 
+    /// The firewall in front of the proxy's port, while other machines are
+    /// meant to reach it.
+    fn firewall(&self, s: &proxy::settings::Settings) -> Option<proxy::firewall::Verdict> {
+        if !(s.enabled && s.lan) {
+            return None;
+        }
+        let port = self.proxy.status().0.map_or(s.port, |a| a.port());
+        let mut seen = self.firewall.lock().ok()?;
+        let known = seen.verdict.as_ref().filter(|(_, p, _)| *p == port);
+        let fresh = known.is_some_and(|(at, _, _)| at.elapsed() < FIREWALL_FRESH);
+        let verdict = known.and_then(|(_, _, v)| v.clone());
+        if !fresh
+            && !seen.asking
+            && let Some(me) = self.me.get().and_then(Weak::upgrade)
+        {
+            seen.asking = true;
+            std::thread::spawn(move || me.ask_firewall(port));
+        }
+        verdict
+    }
+
+    fn ask_firewall(&self, port: u16) {
+        let interface = proxy::default_interface(&self.places.route);
+        let verdict = proxy::firewall::check(
+            &self.places.etc,
+            self.places.search.as_deref(),
+            interface.as_deref(),
+            port,
+        );
+        if let Ok(mut seen) = self.firewall.lock() {
+            let before = seen.verdict.as_ref().map(|(_, p, v)| (*p, v.clone()));
+            if before != Some((port, verdict.clone())) {
+                seen.changes += 1;
+            }
+            seen.verdict = Some((Instant::now(), port, verdict));
+            seen.asking = false;
+        }
+    }
+
     /// A settings file that cannot be read shows as the proxy's error, not as
     /// a page that cannot load.
     fn proxy_state(&self) -> Value {
@@ -459,7 +522,16 @@ impl App {
         };
         let (running, error) = self.proxy.status();
         let error = unreadable.or(error);
-        let origin = format!("http://127.0.0.1:{}", running.unwrap_or(s.port));
+        let host = if s.lan {
+            (self.places.lan_address)().map(|ip| ip.to_string())
+        } else {
+            Some("127.0.0.1".to_owned())
+        };
+        let origin = format!(
+            "http://{}:{}",
+            host.as_deref().unwrap_or("127.0.0.1"),
+            running.map_or(s.port, |a| a.port())
+        );
         let providers: Vec<Value> = self
             .providers
             .iter()
@@ -480,7 +552,10 @@ impl App {
         json!({
             "enabled": s.enabled,
             "port": s.port,
-            "running": running,
+            "lan": s.lan,
+            "host": host,
+            "firewall": self.firewall(&s),
+            "running": running.map(|a| a.port()),
             "error": error,
             "routes": providers,
             "baseUrls": {"openai": format!("{origin}/v1"), "claude": origin},
@@ -541,6 +616,9 @@ impl App {
         files.push(self.places.config.clone());
         let mut seen: Vec<_> = files.into_iter().filter_map(stamp).collect();
         seen.sort();
+        if let Ok(firewall) = self.firewall.lock() {
+            seen.push((PathBuf::from("firewall"), UNIX_EPOCH, firewall.changes));
+        }
         seen
     }
 
@@ -809,6 +887,7 @@ impl App {
             }
             ("POST", "/api/proxy/settings") => {
                 let enabled = body.get("enabled").and_then(Value::as_bool);
+                let lan = body.get("lan").and_then(Value::as_bool);
                 let port = match body.get("port") {
                     None | Some(Value::Null) => None,
                     Some(v) => Some(
@@ -825,12 +904,23 @@ impl App {
                     if let Some(port) = port {
                         s.port = port;
                     }
+                    if let Some(lan) = lan {
+                        s.lan = lan;
+                    }
                     Ok(())
                 })?;
                 self.apply_proxy();
                 let (running, error) = self.proxy.status();
                 let message = match (running, error) {
-                    (Some(port), _) => format!("the proxy listens on 127.0.0.1:{port}"),
+                    (Some(addr), _) if addr.ip().is_unspecified() => {
+                        let every =
+                            format!("the proxy listens on every interface, port {}", addr.port());
+                        match (self.places.lan_address)() {
+                            Some(ip) => format!("{every}; other machines use {ip}"),
+                            None => format!("{every}; this machine's LAN address was not found"),
+                        }
+                    }
+                    (Some(addr), _) => format!("the proxy listens on {addr}"),
                     (None, Some(e)) => bail!("saved, but the proxy is not running: {e}"),
                     (None, None) => "the proxy is off".to_owned(),
                 };
@@ -1064,6 +1154,9 @@ mod tests {
             github: "http://127.0.0.1:1".into(),
             runtime: e.tmp.path().join("run"),
             search: None,
+            etc: e.tmp.path().join("etc"),
+            route: e.tmp.path().join("route"),
+            lan_address: || None,
         }
     }
 
@@ -1168,6 +1261,181 @@ mod tests {
         );
         assert_eq!(status, 200);
         assert_eq!(proxy()["keys"], json!([]));
+    }
+
+    #[test]
+    fn the_page_opens_the_proxy_to_other_machines() {
+        let e = env(&OFFLINE);
+        let mut on_lan = places(&e);
+        on_lan.lan_address = || Some(std::net::IpAddr::from([10, 0, 0, 7]));
+        let providers: Vec<Box<dyn Provider>> =
+            vec![Box::new(Claude::at(e.tmp.path(), Api::local(&OFFLINE)))];
+        let app = Arc::new(App::new(
+            Store::open(e.store.root()),
+            on_lan,
+            providers,
+            TOKEN.into(),
+            PORT,
+            Box::new(|_| false),
+        ));
+        app.start();
+        let proxy = || call(&app, "GET", "/api/state", Value::Null).1["proxy"].clone();
+        assert_eq!(proxy()["lan"], false);
+        assert_eq!(proxy()["host"], "127.0.0.1");
+        let etc = e.tmp.path().join("etc");
+        std::fs::create_dir_all(etc.join("ufw")).unwrap();
+        std::fs::write(etc.join("ufw/ufw.conf"), "ENABLED=yes\n").unwrap();
+
+        let (status, r) = call(
+            &app,
+            "POST",
+            "/api/proxy/settings",
+            json!({"enabled": true, "port": free_port(), "lan": true}),
+        );
+        assert_eq!(status, 200, "{r}");
+        let message = r["message"].as_str().unwrap();
+        assert!(message.contains("every interface"), "{r}");
+        assert!(message.contains("other machines use 10.0.0.7"), "{r}");
+        let before = app.fingerprint();
+        let state = (0..100)
+            .map(|_| {
+                std::thread::sleep(Duration::from_millis(50));
+                proxy()
+            })
+            .find(|s| !s["firewall"].is_null())
+            .expect("the firewall was never asked");
+        assert_ne!(app.fingerprint(), before);
+        assert_eq!(state["lan"], true);
+        assert_eq!(state["host"], "10.0.0.7");
+        assert_eq!(state["firewall"]["name"], "ufw");
+        assert_eq!(state["firewall"]["open"], Value::Null);
+        let port = state["running"].as_u64().unwrap();
+        assert_eq!(
+            state["firewall"]["commands"],
+            json!([
+                "sudo ufw status numbered  # a DENY for some machines listed here still refuses them",
+                format!(
+                    "sudo ufw allow in on IFACE to any port {port} proto tcp  # IFACE: the interface of the LAN, from ip -br addr"
+                )
+            ])
+        );
+        assert_eq!(
+            state["baseUrls"]["claude"],
+            format!("http://10.0.0.7:{port}")
+        );
+
+        let (status, r) = call(&app, "POST", "/api/proxy/settings", json!({"lan": false}));
+        assert_eq!(status, 200, "{r}");
+        assert!(r["message"].as_str().unwrap().contains("127.0.0.1"), "{r}");
+        assert_eq!(proxy()["host"], "127.0.0.1");
+        assert_eq!(proxy()["firewall"], Value::Null);
+    }
+
+    #[test]
+    fn a_lan_proxy_without_a_lan_address_says_so() {
+        let e = env(&OFFLINE);
+        let app = Arc::new(app(&e, &OFFLINE));
+        app.start();
+        let (status, r) = call(
+            &app,
+            "POST",
+            "/api/proxy/settings",
+            json!({"enabled": true, "port": free_port(), "lan": true}),
+        );
+        assert_eq!(status, 200, "{r}");
+        assert!(
+            r["message"]
+                .as_str()
+                .unwrap()
+                .contains("LAN address was not found"),
+            "{r}"
+        );
+        let state = call(&app, "GET", "/api/state", Value::Null).1["proxy"].clone();
+        assert_eq!(state["host"], Value::Null);
+        assert_eq!(
+            state["baseUrls"]["claude"],
+            format!("http://127.0.0.1:{}", state["running"])
+        );
+    }
+
+    #[test]
+    fn a_slow_firewall_holds_up_no_request() {
+        use std::os::unix::fs::PermissionsExt;
+        let e = env(&OFFLINE);
+        let bin = e.tmp.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let started = e.tmp.path().join("started");
+        let release = e.tmp.path().join("release");
+        let finished = e.tmp.path().join("finished");
+        let stub = bin.join("firewall-cmd");
+        std::fs::write(
+            &stub,
+            format!(
+                "#!/bin/sh\n\
+                 [ \"$1\" = --get-active-zones ] && {{ echo public; exit 0; }}\n\
+                 [ \"$1\" = --list-all ] && {{ echo '  target: default'; exit 0; }}\n\
+                 [ \"$1\" = --state ] || {{ echo no; exit 1; }}\n\
+                 touch '{}'\n\
+                 i=0\n\
+                 while [ ! -e '{}' ] && [ $i -lt 45 ]; do sleep 0.1; i=$((i+1)); done\n\
+                 touch '{}'\n\
+                 echo running\n",
+                started.display(),
+                release.display(),
+                finished.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut slow = places(&e);
+        slow.search = Some(bin.into_os_string());
+        let providers: Vec<Box<dyn Provider>> =
+            vec![Box::new(Claude::at(e.tmp.path(), Api::local(&OFFLINE)))];
+        let app = Arc::new(App::new(
+            Store::open(e.store.root()),
+            slow,
+            providers,
+            TOKEN.into(),
+            PORT,
+            Box::new(|_| false),
+        ));
+        app.start();
+        let (status, _) = call(
+            &app,
+            "POST",
+            "/api/proxy/settings",
+            json!({"enabled": true, "port": free_port(), "lan": true}),
+        );
+        assert_eq!(status, 200);
+        call(&app, "GET", "/api/state", Value::Null);
+        let until = Instant::now() + Duration::from_secs(3);
+        while !started.exists() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(started.exists(), "the firewall was never asked");
+
+        let (status, state) = call(&app, "GET", "/api/state", Value::Null);
+        assert_eq!(status, 200);
+        assert_eq!(state["proxy"]["firewall"], Value::Null);
+        let (status, _) = call(&app, "POST", "/api/proxy/keys", json!({"name": "laptop"}));
+        assert_eq!(status, 200);
+        assert!(!finished.exists(), "the requests waited on firewall-cmd");
+        std::fs::write(&release, "").unwrap();
+
+        let firewall = (0..100)
+            .map(|_| {
+                std::thread::sleep(Duration::from_millis(50));
+                call(&app, "GET", "/api/state", Value::Null).1["proxy"]["firewall"].clone()
+            })
+            .find(|f| !f.is_null())
+            .expect("no verdict came back");
+        assert_eq!(firewall["name"], "firewalld");
+        assert_eq!(firewall["open"], false);
+    }
+
+    fn free_port() -> u16 {
+        let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        l.local_addr().unwrap().port()
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use std::io::{ErrorKind, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use std::thread::JoinHandle;
@@ -29,7 +29,7 @@ const POLL: Duration = Duration::from_millis(50);
 
 /// A listener that answers until it is told to stop.
 pub struct Running {
-    pub port: u16,
+    pub addr: SocketAddr,
     stop: Arc<AtomicBool>,
     accepting: Option<JoinHandle<()>>,
 }
@@ -45,10 +45,15 @@ impl Running {
     }
 }
 
-pub fn start(backend: Weak<dyn Backend>, port: u16) -> Result<Running> {
-    let listener = TcpListener::bind(("127.0.0.1", port))
-        .with_context(|| format!("cannot listen on 127.0.0.1:{port}"))?;
-    let port = listener.local_addr()?.port();
+pub fn start(backend: Weak<dyn Backend>, port: u16, lan: bool) -> Result<Running> {
+    let host = if lan {
+        Ipv4Addr::UNSPECIFIED
+    } else {
+        Ipv4Addr::LOCALHOST
+    };
+    let listener = TcpListener::bind((host, port))
+        .with_context(|| format!("cannot listen on {host}:{port}"))?;
+    let addr = listener.local_addr()?;
     listener.set_nonblocking(true)?;
     let stop = Arc::new(AtomicBool::new(false));
     let stopping = Arc::clone(&stop);
@@ -56,7 +61,7 @@ pub fn start(backend: Weak<dyn Backend>, port: u16) -> Result<Running> {
         .name("remuda-proxy".into())
         .spawn(move || accept(listener, backend, &stopping))?;
     Ok(Running {
-        port,
+        addr,
         stop,
         accepting: Some(accepting),
     })

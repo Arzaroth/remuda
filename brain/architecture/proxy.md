@@ -10,7 +10,7 @@ nothing with it but the providers and a few pieces of `http.rs` (`read_head`,
 `App` holds a `proxy::Control` and a weak reference to itself, set by
 `App::start` once `main` has put it in an `Arc`. `App::apply_proxy` reads
 `<store>/.proxy.json` and hands it to `Control::apply`, which starts, moves or
-stops the listener to match `enabled` and `port`; a port it cannot bind is kept
+stops the listener to match `enabled`, `port` and `lan`; a port it cannot bind is kept
 as the error the page shows, and `/api/proxy/settings` answers it as an error.
 It runs at start, after every `/api/proxy/settings`, and from `serve::watch`
 whenever the store's files change, so a hand edit takes effect within seconds.
@@ -21,7 +21,8 @@ log), which tests implement on their own.
 
 ## The listener (`listen.rs`)
 
-Bound to `127.0.0.1` only. The accept loop polls a stop flag every 50 ms, so
+Bound to `127.0.0.1`, or to `0.0.0.0` when `lan` is set (IPv4 only). The
+key is the guard either way; `lan` adds nothing to it. The accept loop polls a stop flag every 50 ms, so
 turning the proxy off frees the port. At most 32 connections at once; each
 runs on its own thread.
 
@@ -44,6 +45,39 @@ stops reading the answer is dropped after a minute of blocked writes.
 Errors are written in the client's shape: Anthropic's
 `{type: "error", error: {type, message}}` on `/v1/messages`, OpenAI's
 `{error: {message, type, code}}` elsewhere.
+
+## Reaching it from other machines (`mod.rs`, `firewall.rs`)
+
+With `lan` set, the base URLs the page shows use `proxy::lan_address`, the
+source address of the default route, found by connecting a UDP socket, which
+sends nothing. With no route `host` is null, the URLs say `127.0.0.1`, which only this
+machine can use (a client elsewhere puts this machine's address in by hand),
+and the card and the settings answer say the LAN address was not found.
+`firewall::check` then says whether something on this machine keeps other
+machines out, reading only what needs no root:
+
+| Firewall | On when | Port open when | Opened by |
+| --- | --- | --- | --- |
+| ufw | `ENABLED=yes` in `/etc/ufw/ufw.conf`; a `ufw.conf` that exists but cannot be read gives a null verdict with `sudo ufw status numbered` alone | the first `ufw-user-input` rule in `/etc/ufw/user.rules` for TCP on the port that is not limited (`-s`, `-d`, `--sport`, or a negated `! -i`; a rule on `-i` another interface than the default route's is skipped, and counts as limited when that interface is unknown) accepts it and no limited rule before it refuses some machines, or, when no such rule matches, `DEFAULT_INPUT_POLICY` in `/etc/default/ufw` is `ACCEPT` | `sudo ufw allow <rule>`, or `sudo ufw insert 1 allow <rule>` when a deny rule for every machine matched, since an appended allow would come after it. `<rule>` is `in on <interface> to any port <port> proto tcp` the interface being the default route's, so a deny on another interface stays; when `/proc/net/route` has no default route it reads `IFACE`, with a trailing comment saying to put the LAN's interface there, rather than opening every interface. A deny limited to some machines is left in place, with `sudo ufw status numbered` first to show it, its trailing comment saying such a deny still refuses those machines. When one comes before the deny for every machine, or after it on the same interface (where an allow inserted first would overtake it), the allow is `sudo ufw insert N allow <rule>`, the comment naming N as the first `DENY` or `REJECT` for the port to Anywhere from Anywhere, on that interface or on none, and asking for any deny or `limit` for some machines to be moved above it. A `limit` rule for some machines before the deny for every machine takes the same path, so the allow does not overtake its rate limit. Rules that cannot be read get `sudo ufw status numbered` too |
+| firewalld | `firewall-cmd --state` succeeds | `firewall-cmd --zone=<zone> --query-port=<port>/tcp` says `yes`, the zone being that of the default route's interface (`proxy::default_interface`, from `/proc/net/route`), or the default zone when firewall-cmd says `no zone`, or the zone's `--list-all` gives `target: ACCEPT`; null when that listing has rich rules or cannot be had, since a rich rule can let some machines in or keep them out; and `--get-active-zones` names no zone bound to `sources:`, since such a zone takes the machines it names away from the interface's | `sudo firewall-cmd --zone=<zone> --add-port=<port>/tcp` for the running firewall, then the same with `--permanent` for the saved one; never `--reload`, which would drop runtime-only rules. When the zone lookup failed, both go on one line behind `Z=$(firewall-cmd --get-zone-of-interface=<interface>) && [ -n "$Z" ] &&`, so the shell asks again and adds nothing without a zone. A `--state` that fails to run (a timeout) gives a null verdict rather than no firewall. Interface and zone names outside `[A-Za-z0-9._@+-]` are single-quoted in every command |
+
+On a machine with several interfaces, the one used is the default route's, for the LAN address and the ufw rule alike; a LAN on another interface needs its address and rule put in by hand. The two can still differ: the address is whatever the kernel's routing picks for `192.0.2.1`, policy rules and split routes included (a full-tunnel VPN gives the tunnel's), while the interface is the `00000000` row of the main table in `/proc/net/route`.
+
+ufw is looked at first. `open` is null when ufw's rules or policy cannot be
+read, when limited rules let some machines in that the verdict would keep out
+(or the reverse), when the interface's zone or the active zones cannot be
+learnt, when an active zone is bound to sources, or when firewall-cmd's
+answer is neither yes nor no. A port opened by a firewalld service counts as closed. ufw's
+`before.rules` and `after.rules` are not read, nor nftables or iptables set
+by hand.
+
+`/api/state` runs under the store's lock, so it never asks: `App::firewall`
+answers the last verdict for the port and, once that is 10 s old, starts
+`App::ask_firewall` on its own thread (one at a time). A verdict that changes
+moves an entry of `App::fingerprint`, so `/api/events` tells the page to load
+again. It asks only while the proxy is on with `lan`. The places are
+`Places::etc`, `Places::search`, `Places::route` and `Places::lan_address`:
+a temporary directory, none, a missing file and no address in tests.
 
 ## Forwarding (`forward.rs`, `route.rs`)
 
@@ -205,5 +239,6 @@ counts as the 5-minute kind.
 - [src/proxy/forward.rs](../../src/proxy/forward.rs)
 - [src/proxy/route.rs](../../src/proxy/route.rs)
 - [src/proxy/settings.rs](../../src/proxy/settings.rs)
+- [src/proxy/firewall.rs](../../src/proxy/firewall.rs)
 - [src/proxy/translate/](../../src/proxy/translate/)
 - [src/provider.rs](../../src/provider.rs)
