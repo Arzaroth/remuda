@@ -567,12 +567,12 @@ fn join_fleet(
         .stdin(Stdio::piped())
         .spawn()
         .with_context(|| format!("could not run {}", program.display()))?;
-    child
+    let handed = child
         .stdin
         .take()
         .context("no stdin to hand TokenGauge the fleet on")?
-        .write_all(serde_json::to_string(fleet)?.as_bytes())?;
-    if !child.wait()?.success() {
+        .write_all(serde_json::to_string(fleet)?.as_bytes());
+    if !child.wait()?.success() || handed.is_err() {
         writeln!(
             out,
             "TokenGauge did not join the fleet; the rest is restored"
