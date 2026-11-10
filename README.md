@@ -409,7 +409,7 @@ shows a meter per stored credential (its ADR 0003 describes the contract).
 
 ## Caveats
 
-remuda talks to the same OAuth endpoints and clients as Claude Code 2.1.282,
+remuda talks to the same OAuth endpoints and clients as Claude Code 2.1.322,
 codex-cli 0.153.4, xAI's grok-build and MoonshotAI's kimi-code. They are not a
 public API, and a release of any of them can change them. cursor-agent is
 closed source: its refresh endpoint and sign-in are the ones the open-source

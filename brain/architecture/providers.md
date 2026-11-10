@@ -43,7 +43,7 @@ refresh token into "sign this credential in again".
   login is its seat ("team premium"), never its tier's multiplier. Anything
   else is `subscriptionType` plus the tier's `Nx` suffix ("enterprise 5x"),
   or `subscriptionType` alone.
-- OAuth (from Claude Code 2.1.282): client id `9d1c250a-e61b-44d9-88ed-5944d1962f5e`,
+- OAuth (from Claude Code 2.1.322): client id `9d1c250a-e61b-44d9-88ed-5944d1962f5e`,
   authorize at `claude.com/cai/oauth/authorize`, token at
   `platform.claude.com/v1/oauth/token` (JSON body), profile at
   `api.anthropic.com/api/oauth/profile`. Sign-in redirects to
@@ -51,8 +51,7 @@ refresh token into "sign this credential in again".
   sent on to `platform.claude.com/oauth/code/success?app=claude-code`; pasting
   redirects to `platform.claude.com/oauth/code/callback`, which shows a
   `code#state`. Both keep `code=true` in the authorize URL, and the token
-  request repeats the `redirect_uri` used (the callback and the success page
-  read from Claude Code 2.1.319, where its own sign-in does the same).
+  request repeats the `redirect_uri` used.
 - A banked usage-limit reset is spent by asking
   `api.anthropic.com/api/oauth/usage?cedar_ember=1` which grant it would accept
   (`next_grant_id` while it is usable, else any usable one) and POSTing
