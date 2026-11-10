@@ -34,6 +34,10 @@ impl Callback {
                 {
                     std::thread::sleep(Duration::from_millis(100));
                 }
+                Err(e) if port == 0 => {
+                    return Err(e)
+                        .context("could not open a local port for the browser to call back to");
+                }
                 Err(e) => {
                     return Err(e).with_context(|| format!("port {port} is taken; {busy}"));
                 }
