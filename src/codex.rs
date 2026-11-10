@@ -383,38 +383,36 @@ struct CodexPending {
     url: String,
 }
 
-impl CodexPending {
-    fn exchange(&self, code: &str) -> Result<Value> {
-        let answer = oauth::token_request(self.api.client.post(self.api.token_url()).form(&[
-            ("grant_type", "authorization_code"),
-            ("code", code),
-            ("redirect_uri", &self.redirect_uri),
-            ("client_id", CLIENT_ID),
-            ("code_verifier", &self.verifier),
-        ]))?;
-        let get = |k: &str| {
-            oauth::text(&answer, k).with_context(|| format!("the token endpoint sent no {k}"))
-        };
-        let id_token = get("id_token")?;
-        let account_id = claims(&id_token)
-            .and_then(|c| {
-                auth_claim(&c, "chatgpt_account_id")?
-                    .as_str()
-                    .map(str::to_owned)
-            })
-            .context("the id token names no ChatGPT account")?;
-        Ok(json!({
-            "OPENAI_API_KEY": null,
-            "auth_mode": "chatgpt",
-            "tokens": {
-                "id_token": id_token,
-                "access_token": get("access_token")?,
-                "refresh_token": get("refresh_token")?,
-                "account_id": account_id,
-            },
-            "last_refresh": rfc3339(now_ms()),
-        }))
-    }
+fn exchange(api: &Api, redirect_uri: &str, verifier: &str, code: &str) -> Result<Value> {
+    let answer = oauth::token_request(api.client.post(api.token_url()).form(&[
+        ("grant_type", "authorization_code"),
+        ("code", code),
+        ("redirect_uri", redirect_uri),
+        ("client_id", CLIENT_ID),
+        ("code_verifier", verifier),
+    ]))?;
+    let get = |k: &str| {
+        oauth::text(&answer, k).with_context(|| format!("the token endpoint sent no {k}"))
+    };
+    let id_token = get("id_token")?;
+    let account_id = claims(&id_token)
+        .and_then(|c| {
+            auth_claim(&c, "chatgpt_account_id")?
+                .as_str()
+                .map(str::to_owned)
+        })
+        .context("the id token names no ChatGPT account")?;
+    Ok(json!({
+        "OPENAI_API_KEY": null,
+        "auth_mode": "chatgpt",
+        "tokens": {
+            "id_token": id_token,
+            "access_token": get("access_token")?,
+            "refresh_token": get("refresh_token")?,
+            "account_id": account_id,
+        },
+        "last_refresh": rfc3339(now_ms()),
+    }))
 }
 
 impl PendingLogin for CodexPending {
@@ -445,7 +443,7 @@ impl PendingLogin for CodexPending {
                 );
             }
             let code = param("code").context("the callback carried no code")?;
-            let creds = self.exchange(code)?;
+            let creds = exchange(&self.api, &self.redirect_uri, &self.verifier, code)?;
             let identity = identity_of(&creds).context("the new login names no account")?;
             Ok(Login { creds, identity })
         })();
