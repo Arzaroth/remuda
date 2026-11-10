@@ -3193,6 +3193,69 @@ mod tests {
     }
 
     #[test]
+    fn a_sign_in_cancelled_while_it_finishes_is_not_stored() {
+        use crate::codex::{Api as CodexApi, Codex};
+        use crate::oauth::fake_jwt as jwt;
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/api/accounts/deviceauth/usercode")
+            .with_body(
+                json!({"device_auth_id": "da-1", "user_code": "WXYZ", "interval": 1}).to_string(),
+            )
+            .create();
+        server
+            .mock("POST", "/api/accounts/deviceauth/token")
+            .with_body(
+                json!({"authorization_code": "auth-1", "code_verifier": "ver-1"}).to_string(),
+            )
+            .create();
+        let e = env(&OFFLINE);
+        let providers: Vec<Box<dyn Provider>> = vec![Box::new(Codex::at(
+            e.tmp.path(),
+            CodexApi::local(&server.url()),
+            0,
+        ))];
+        let app = Arc::new(App::new(
+            Store::open(e.store.root()),
+            places(&e),
+            providers,
+            TOKEN.into(),
+            PORT,
+            Box::new(Nowhere),
+        ));
+        let (_, begun) = call(
+            &app,
+            "POST",
+            "/api/login",
+            json!({"provider": "codex", "name": "x", "paste": true}),
+        );
+        let id = begun["id"].as_str().unwrap().to_owned();
+        let exchange = {
+            let app = Arc::clone(&app);
+            let id = id.clone();
+            server
+                .mock("POST", "/oauth/token")
+                .with_body_from_request(move |_| {
+                    call(&app, "POST", "/api/login/cancel", json!({"id": id}));
+                    let claims = "https://api.openai.com/auth";
+                    json!({
+                        "id_token": jwt(json!({claims: {"chatgpt_account_id": "ws-1", "chatgpt_user_id": "user-a"}})),
+                        "access_token": jwt(json!({"exp": 1_900_000_000, claims: {"chatgpt_account_user_id": "a", "chatgpt_account_id": "ws-1"}})),
+                        "refresh_token": "r-device",
+                    })
+                    .to_string()
+                    .into_bytes()
+                })
+                .create()
+        };
+        let (status, r) = call(&app, "POST", "/api/login/finish", json!({"id": id}));
+        exchange.assert();
+        assert_eq!(status, 400, "{r}");
+        assert_eq!(r["error"], "the sign-in was cancelled");
+        assert!(e.store.get("codex", "x").unwrap().is_none());
+    }
+
+    #[test]
     fn the_fingerprint_moves_with_the_store_and_the_snapshot_not_with_a_read() {
         let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);
