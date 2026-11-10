@@ -59,7 +59,8 @@ rotated it meanwhile:
   aside before it is compared, so a rotation that lands meanwhile is put back
   rather than removed unsynced. A file that is a link is refused rather than
   removed (`fsx::remove_json_if`).
-- **Grok**: removes the `auth.x.ai::` entries from `auth.json`. An API key the
+- **Grok**: removes the `auth.x.ai::` entries from `auth.json`, refusing
+  when any of them differs from what sync read. An API key the
   file holds stays, so Grok keeps using it and remuda reports it as a login it
   cannot store.
 - **GLM, opencode Go**: refused; they have no `signs_out`, so the page shows
