@@ -500,6 +500,11 @@ impl CodexDevice {
             &api.device_url("usercode"),
             &json!({"client_id": CLIENT_ID}),
         )?;
+        if status == reqwest::StatusCode::NOT_FOUND {
+            bail!(
+                "device code login is not enabled for this Codex server ({status}): sign in by callback instead, without --paste or `paste = true` under [login], or with --no-paste"
+            );
+        }
         if !status.is_success() {
             bail!(
                 "the device code request answered {status}: {}",
