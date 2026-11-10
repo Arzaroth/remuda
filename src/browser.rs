@@ -305,6 +305,13 @@ pub fn remote(set: &dyn Fn(&str) -> bool) -> bool {
         || (cfg!(target_os = "linux") && !set("DISPLAY") && !set("WAYLAND_DISPLAY"))
 }
 
+/// Whether a window can be shown here: `DISPLAY` or `WAYLAND_DISPLAY` set.
+pub fn displayed() -> bool {
+    ["DISPLAY", "WAYLAND_DISPLAY"]
+        .iter()
+        .any(|v| env::var_os(v).is_some_and(|v| !v.is_empty()))
+}
+
 /// A login's own browser profile, under the store, so its sessions are kept
 /// with it and never in a profile the user browses with.
 pub fn profile_dir(store: &Path, provider: &str, name: &str) -> PathBuf {
@@ -325,10 +332,7 @@ impl Choice {
 
     /// False when there is no display or nothing could be started.
     pub fn open(&self, url: &str, profile: &Path) -> bool {
-        let shown = ["DISPLAY", "WAYLAND_DISPLAY"]
-            .iter()
-            .any(|v| env::var_os(v).is_some_and(|v| !v.is_empty()));
-        if !shown {
+        if !displayed() {
             return false;
         }
         let Some(page) = redirect_file(url) else {
