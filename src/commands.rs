@@ -1603,6 +1603,49 @@ mod tests {
     }
 
     #[test]
+    fn a_codex_device_login_prints_the_code_to_enter() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/api/accounts/deviceauth/usercode")
+            .with_body(
+                json!({"device_auth_id": "da-1", "user_code": "ABCD-1234", "interval": 1})
+                    .to_string(),
+            )
+            .create();
+        server
+            .mock("POST", "/api/accounts/deviceauth/token")
+            .with_status(400)
+            .create();
+        let e = env(&OFFLINE);
+        let codex =
+            crate::codex::Codex::at(e.tmp.path(), crate::codex::Api::local(&server.url()), 0);
+        let (_, lines) = std::sync::mpsc::channel();
+        let mut out = Vec::new();
+
+        let err = login(
+            &e.store,
+            &codex,
+            "new",
+            false,
+            Prompt {
+                open: &|_, _| false,
+                opens_in: None,
+                lines,
+                paste: true,
+            },
+            &mut out,
+        )
+        .unwrap_err();
+
+        let out = text(out);
+        assert!(out.contains("in any browser:"), "{out}");
+        assert!(out.contains("/codex/device"), "{out}");
+        assert!(out.contains("Enter the code ABCD-1234 there."), "{out}");
+        assert!(err.to_string().contains("400"), "{err}");
+        assert!(e.store.get("codex", "new").unwrap().is_none());
+    }
+
+    #[test]
     fn login_refuses_a_code_from_another_attempt() {
         let (server, _) = login_server("u-new");
         let e = env(&server.url());
