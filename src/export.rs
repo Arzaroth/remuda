@@ -410,18 +410,23 @@ pub fn restore(
             let mut settings: crate::proxy::settings::Settings =
                 serde_json::from_value(proxy.clone())
                     .context("the proxy settings are malformed")?;
-            settings.keys = crate::proxy::settings::File::at(places.proxy.to_owned())
-                .read()
-                .map(|here| here.keys)
-                .unwrap_or_default();
-            crate::fsx::write_json(places.proxy, &serde_json::to_value(&settings)?)?;
-            if settings.keys.is_empty() {
-                writeln!(out, "set the proxy up as it was, with no client keys yet")?;
-            } else {
-                writeln!(
+            match crate::proxy::settings::File::at(places.proxy.to_owned()).read() {
+                Err(e) => writeln!(
                     out,
-                    "set the proxy up as it was, keeping its client keys here"
-                )?;
+                    "kept the proxy's settings here: they cannot be read: {e:#}"
+                )?,
+                Ok(here) => {
+                    settings.keys = here.keys;
+                    crate::fsx::write_json(places.proxy, &serde_json::to_value(&settings)?)?;
+                    if settings.keys.is_empty() {
+                        writeln!(out, "set the proxy up as it was, with no client keys yet")?;
+                    } else {
+                        writeln!(
+                            out,
+                            "set the proxy up as it was, keeping its client keys here"
+                        )?;
+                    }
+                }
             }
         } else {
             writeln!(
