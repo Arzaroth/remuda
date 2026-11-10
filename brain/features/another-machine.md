@@ -90,7 +90,9 @@ and `.set-aside-*` files.
   those listed to sign in, since names do not change, and written only when it
   passes; problems are printed and the config here stays.
 - The proxy's settings are written when there are none; `--force` replaces
-  them but keeps the client keys here, since the bundle carries none.
+  them but keeps the client keys here, since the bundle carries none. Settings
+  here that cannot be read are kept as they are, even with `--force`, and
+  the rest goes on.
 - The fleet goes to `tokengauge --sync-join -` on stdin (`--sync-force` with
   `--force`), then `tokengauge --sync-test` runs. A TokenGauge that cannot run,
   fails, or exits before reading the fleet, is reported and the rest stays
