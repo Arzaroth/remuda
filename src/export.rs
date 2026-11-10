@@ -1015,4 +1015,261 @@ mod tests {
         let mode = std::fs::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
     }
+
+    fn set_aside_in(out: &str, after: &str) -> Value {
+        let path = out
+            .split_once(after)
+            .unwrap_or_else(|| panic!("no {after:?} in {out}"))
+            .1
+            .split_whitespace()
+            .next()
+            .unwrap();
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    fn refresh_token(creds: &Value) -> &str {
+        creds[crate::claude::OAUTH_KEY]["refreshToken"]
+            .as_str()
+            .unwrap()
+    }
+
+    fn drop_from(e: &Env, bundle: &Bundle, moved: &[(&dyn Provider, String)]) -> String {
+        let mut out = Vec::new();
+        drop_moved(
+            &e.store,
+            &e.tmp.path().join("config.toml"),
+            bundle,
+            moved,
+            &mut out,
+        )
+        .unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    fn rotated(e: &Env, name: &str, uuid: &str, refresh: &str) {
+        e.store
+            .save(&Entry::new(
+                "claude",
+                name,
+                oauth("a-new", refresh, HOUR),
+                identity(uuid),
+                1,
+            ))
+            .unwrap();
+    }
+
+    #[test]
+    fn a_moved_login_leaves_once_sent_with_its_tokens_set_aside() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-1", HOUR);
+        e.stored("perso", "u-2", HOUR);
+        e.sign_in(oauth("a-work", "r-work", HOUR), account("u-1"));
+        let moved: [(&dyn Provider, String); 1] = [(&e.claude, "perso".into())];
+        let bundle = bundle_of(&e, &moved).unwrap();
+
+        let out = drop_from(&e, &bundle, &moved);
+
+        assert!(out.contains("removed claude/perso"), "{out}");
+        assert!(e.store.get("claude", "perso").unwrap().is_none());
+        let kept = set_aside_in(&out, "its tokens are set aside in ");
+        assert_eq!(refresh_token(&kept), "r-perso");
+    }
+
+    #[test]
+    fn a_moved_login_refreshed_after_the_bundle_read_it_stays() {
+        let e = env(&OFFLINE);
+        e.stored("perso", "u-2", HOUR);
+        let moved: [(&dyn Provider, String); 1] = [(&e.claude, "perso".into())];
+        let bundle = bundle_of(&e, &moved).unwrap();
+        rotated(&e, "perso", "u-2", "r-rotated");
+
+        let out = drop_from(&e, &bundle, &moved);
+
+        assert!(
+            out.contains("warning: kept claude/perso: its tokens changed here"),
+            "{out}"
+        );
+        assert_eq!(
+            e.stored_refresh_token("perso").as_deref(),
+            Some("r-rotated")
+        );
+    }
+
+    #[test]
+    fn a_carried_login_restore_cannot_store_keeps_its_tokens_aside() {
+        let from = env(&OFFLINE);
+        from.stored("perso", "u-2", HOUR);
+        let bundle = bundle_of(&from, &[(&from.claude, "perso".into())]).unwrap();
+
+        let to = env(&OFFLINE);
+        rotated(&to, "perso", "u-9", "r-here");
+        let (_, out) = restore_into(&to, round_trip(&bundle), false);
+        assert!(
+            out.contains("kept claude/perso, already stored here"),
+            "{out}"
+        );
+        let kept = set_aside_in(&out, "the tokens it carried are set aside in ");
+        assert_eq!(refresh_token(&kept), "r-perso");
+        assert_eq!(to.stored_refresh_token("perso").as_deref(), Some("r-here"));
+
+        let same = env(&OFFLINE);
+        same.stored("perso", "u-2", HOUR);
+        std::fs::copy(
+            from.store.root().join("claude/perso.json"),
+            same.store.root().join("claude/perso.json"),
+        )
+        .unwrap();
+        let (_, out) = restore_into(&same, round_trip(&bundle), false);
+        assert!(!out.contains("set aside"), "{out}");
+
+        let other = env(&OFFLINE);
+        rotated(&other, "mine", "u-2", "r-mine");
+        let (_, out) = restore_into(&other, round_trip(&bundle), false);
+        assert!(
+            out.contains("skipped claude/perso: its account is stored here as claude/mine"),
+            "{out}"
+        );
+        let kept = set_aside_in(&out, "the tokens it carried are set aside in ");
+        assert_eq!(refresh_token(&kept), "r-perso");
+    }
+
+    #[test]
+    fn restore_force_sets_aside_the_tokens_it_replaces() {
+        let from = env(&OFFLINE);
+        from.stored("perso", "u-2", HOUR);
+        let bundle = bundle_of(&from, &[(&from.claude, "perso".into())]).unwrap();
+        let to = env(&OFFLINE);
+        rotated(&to, "perso", "u-2", "r-here");
+
+        let (_, out) = restore_into(&to, round_trip(&bundle), true);
+
+        assert!(out.contains("stored claude/perso"), "{out}");
+        assert_eq!(to.stored_refresh_token("perso").as_deref(), Some("r-perso"));
+        let kept = set_aside_in(&out, "set the tokens claude/perso held here aside in ");
+        assert_eq!(refresh_token(&kept), "r-here");
+    }
+
+    #[test]
+    fn restore_force_keeps_the_login_in_use_here() {
+        let from = env(&OFFLINE);
+        from.stored("perso", "u-2", HOUR);
+        let bundle = bundle_of(&from, &[(&from.claude, "perso".into())]).unwrap();
+        let to = env(&OFFLINE);
+        rotated(&to, "perso", "u-2", "r-here");
+        to.sign_in(oauth("a-live", "r-live", HOUR), account("u-2"));
+
+        let (_, out) = restore_into(&to, round_trip(&bundle), true);
+
+        assert!(
+            out.contains("kept claude/perso: it is the login Claude Code uses here"),
+            "{out}"
+        );
+        assert_eq!(to.stored_refresh_token("perso").as_deref(), Some("r-here"));
+        assert_eq!(to.live_refresh_token().as_deref(), Some("r-live"));
+        let kept = set_aside_in(&out, "the tokens it carried are set aside in ");
+        assert_eq!(refresh_token(&kept), "r-perso");
+
+        to.sign_in(oauth("a-other", "r-other", HOUR), account("u-3"));
+        let _held = crate::session::start(&to.store, &to.claude, "perso").unwrap();
+        let (_, out) = restore_into(&to, round_trip(&bundle), true);
+        assert!(
+            out.contains("kept claude/perso: it is in a `remuda run` session here"),
+            "{out}"
+        );
+        assert_eq!(to.stored_refresh_token("perso").as_deref(), Some("r-here"));
+    }
+
+    #[test]
+    fn restore_force_keeps_the_proxy_client_keys_here() {
+        let from = env(&OFFLINE);
+        crate::fsx::write_json(
+            &places(&from).1,
+            &json!({"enabled": true, "port": 9999, "keys": [{"id": "1", "name": "old", "key": "rmd-old", "created": 1}]}),
+        )
+        .unwrap();
+        let bundle = bundle_of(&from, &[]).unwrap();
+        let to = env(&OFFLINE);
+        crate::fsx::write_json(
+            &places(&to).1,
+            &json!({"enabled": false, "port": 8888, "keys": [{"id": "2", "name": "here", "key": "rmd-here", "created": 2}]}),
+        )
+        .unwrap();
+
+        let (_, out) = restore_into(&to, round_trip(&bundle), true);
+
+        assert!(out.contains("keeping its client keys here"), "{out}");
+        let restored = crate::proxy::settings::File::at(places(&to).1)
+            .read()
+            .unwrap();
+        assert!(restored.enabled);
+        assert_eq!(restored.port, 9999);
+        let keys: Vec<&str> = restored.keys.iter().map(|k| k.key.as_str()).collect();
+        assert_eq!(keys, ["rmd-here"]);
+    }
+
+    #[test]
+    fn a_login_whose_account_is_stored_here_is_not_offered() {
+        let from = env(&OFFLINE);
+        from.stored("work", "u-1", HOUR);
+        let bundle = bundle_of(&from, &[]).unwrap();
+        let to = env(&OFFLINE);
+        to.stored("job", "u-1", HOUR);
+
+        let (restored, out) = restore_into(&to, bundle, false);
+
+        assert!(restored.sign_in.is_empty());
+        assert!(
+            out.contains("skipped claude/work: its account is stored here as claude/job"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn a_tokengauge_that_never_reads_the_fleet_leaves_the_rest_restored() {
+        let tmp = tempfile::tempdir().unwrap();
+        let tokengauge = script(tmp.path(), "tokengauge", "exec 0<&-\nexit 0");
+        let to = env(&OFFLINE);
+        let (config, proxy) = places(&to);
+        let g = glm();
+        let bundle = Bundle {
+            remuda_export: FORMAT,
+            fleet: Some(json!({"key": "k".repeat(1 << 20)})),
+            ..Bundle::default()
+        };
+        let places = Places {
+            config: &config,
+            proxy: &proxy,
+            tokengauge: Some(&tokengauge),
+        };
+        let mut out = Vec::new();
+
+        restore(
+            &to.store,
+            &[&to.claude, &g],
+            &places,
+            bundle,
+            false,
+            &mut out,
+        )
+        .unwrap();
+
+        let out = String::from_utf8(out).unwrap();
+        assert!(out.contains("TokenGauge did not join the fleet"), "{out}");
+    }
+
+    #[test]
+    fn a_received_bundle_that_failed_is_kept_and_known_again() {
+        let e = env(&OFFLINE);
+        let kept = keep_received(&e.store, br#"{"remuda_export": 2}"#).unwrap();
+
+        assert_eq!(kept.parent().unwrap(), e.store.root());
+        assert_eq!(std::fs::read(&kept).unwrap(), br#"{"remuda_export": 2}"#);
+        let mode = std::fs::metadata(&kept).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        assert!(was_kept(&e.store, &kept));
+        assert!(!was_kept(&e.store, &e.tmp.path().join("out.json")));
+        assert!(!was_kept(&e.store, &e.store.root().join(".proxy.json")));
+        assert!(unsealed(b"  {\"remuda_export\": 1}"));
+        assert!(!unsealed(b"age-encryption.org/v1\n"));
+    }
 }
