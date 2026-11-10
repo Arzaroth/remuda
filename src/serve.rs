@@ -212,6 +212,16 @@ impl Response {
     }
 }
 
+fn hostname() -> Option<String> {
+    let mut buf = [0u8; 256];
+    if unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) } != 0 {
+        return None;
+    }
+    let end = buf.iter().position(|&b| b == 0)?;
+    let name = std::str::from_utf8(&buf[..end]).ok()?;
+    (!name.is_empty()).then(|| name.to_owned())
+}
+
 fn sent_config(body: &Value) -> Result<config::Config> {
     serde_json::from_value(body.get("config").cloned().unwrap_or(json!({})))
         .context("config is not a valid config")
@@ -1141,7 +1151,7 @@ impl App {
                 drop(pending);
                 let opens_in = self.open.opens_in(&self.login_settings());
                 Ok(
-                    json!({"id": id, "url": url, "needsCode": needs_code, "asksFor": asks_for, "localOnly": local_only, "opensIn": opens_in}),
+                    json!({"id": id, "url": url, "needsCode": needs_code, "asksFor": asks_for, "localOnly": local_only, "machine": hostname(), "opensIn": opens_in}),
                 )
             }
             ("POST", "/api/login/open") => {

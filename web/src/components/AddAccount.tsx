@@ -12,6 +12,7 @@ type Login = {
   needsCode: boolean;
   asksFor: string;
   localOnly: boolean;
+  machine: string | null;
   opensIn: string | null;
   name: string;
 };
@@ -28,6 +29,8 @@ const windows: [Window, string][] = [
   ['profile', "The login's own profile"],
   ['normal', 'Normal window'],
 ];
+
+const remudas = (l: Login) => (l.machine ? `${l.machine}, the machine remuda runs on` : 'the machine remuda runs on');
 
 export function AddAccount(props: { provider?: string; again?: string }) {
   const [provider, setProvider] = createSignal(props.provider ?? store.s!.providers[0]?.id ?? '');
@@ -221,7 +224,7 @@ export function AddAccount(props: { provider?: string; again?: string }) {
             checked={settings()!.paste}
             onChange={(e) => choose({ paste: e.currentTarget.checked })}
           />
-          <span class="aside">Paste the code instead, to sign in from a browser on another machine</span>
+          <span class="aside">Paste the code instead, to sign in from a browser on another machine than remuda's</span>
         </label>
       </Show>
       <Show when={login()}>
@@ -230,7 +233,7 @@ export function AddAccount(props: { provider?: string; again?: string }) {
             <div class="signin">
               <div>
                 Sign in with the account to store as <b>{l().name}</b>,{' '}
-                {l().localOnly ? 'in a browser on this machine, since it calls back here' : 'in any browser'}:
+                {l().localOnly ? `in a browser on ${remudas(l())}, since it calls back there` : 'in any browser'}:
               </div>
               <a class="signin-link" href={l().url} target="_blank" rel="noopener">
                 {l().url}
