@@ -125,9 +125,10 @@ pub fn build(
     Ok(bundle)
 }
 
-/// Takes the moved logins off this store once the bundle has gone. One whose
-/// tokens changed after the bundle read them stays, since the copy sent may
-/// already be spent.
+/// Takes the moved logins off this store once the bundle has gone, setting
+/// their tokens aside first in case the other side cannot restore them. One
+/// whose tokens changed after the bundle read them stays, since the copy sent
+/// may already be spent.
 pub fn drop_moved(
     store: &Store,
     config: &Path,
@@ -146,14 +147,23 @@ pub fn drop_moved(
         let dropped = ops::sync_live(store, *p).and_then(|state| {
             let now = store.files(p.id(), name)?;
             if now.as_ref().map(|(creds, _)| creds.as_str()) != sent {
-                return Ok(false);
+                return Ok(None);
             }
+            let entry = store
+                .get(p.id(), name)?
+                .with_context(|| format!("{at} vanished"))?;
+            crate::commands::refuse_in_use(store, *p, name)?;
+            let kept = store.set_aside(p.id(), &entry.meta.account_id, &entry.creds)?;
             crate::commands::remove(store, config, *p, &state, name, out)?;
-            Ok(true)
+            Ok(Some(kept))
         });
         match dropped {
-            Ok(true) => {}
-            Ok(false) => writeln!(
+            Ok(Some(kept)) => writeln!(
+                out,
+                "  its tokens are set aside in {} until {at} works over there",
+                kept.display()
+            )?,
+            Ok(None) => writeln!(
                 out,
                 "warning: kept {at}: its tokens changed here after the bundle read them, so the copy sent may be spent; export it again, or sign it in again over there"
             )?,
@@ -233,6 +243,36 @@ pub fn write_new_private(path: &Path, bytes: &[u8]) -> Result<()> {
         .with_context(|| format!("could not create {}", path.display()))?;
     file.write_all(bytes)?;
     Ok(())
+}
+
+/// Whether `bytes` are a bundle as it travels over a wormhole, rather than
+/// one sealed into a file.
+pub fn unsealed(bytes: &[u8]) -> bool {
+    bytes.trim_ascii_start().starts_with(b"{")
+}
+
+/// Keeps a received bundle that could not be restored, since for the logins
+/// moved here it may be the only copy left.
+pub fn keep_received(store: &Store, bytes: &[u8]) -> Result<PathBuf> {
+    crate::fsx::create_private_dir(store.root())
+        .with_context(|| format!("could not create {}", store.root().display()))?;
+    let path = store
+        .root()
+        .join(format!(".received-{}.json", crate::fsx::now_ms()));
+    write_new_private(&path, bytes)?;
+    Ok(path)
+}
+
+/// Whether `file` is one [`keep_received`] wrote, which a restore that
+/// succeeds removes.
+pub fn was_kept(store: &Store, file: &Path) -> bool {
+    file.parent()
+        .and_then(|dir| dir.canonicalize().ok())
+        .is_some_and(|dir| store.root().canonicalize().is_ok_and(|root| root == dir))
+        && file
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with(".received-") && n.ends_with(".json"))
 }
 
 pub fn parse(bytes: &[u8]) -> Result<Bundle> {

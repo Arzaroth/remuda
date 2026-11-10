@@ -436,11 +436,18 @@ fn restore(
     out: &mut dyn Write,
 ) -> Result<()> {
     let search = search_path();
-    let bytes = match file {
+    let (bytes, received) = match file {
         Some(file) => {
-            let sealed = std::fs::read(file)
+            let read = std::fs::read(file)
                 .with_context(|| format!("could not read {}", file.display()))?;
-            seal::open(&sealed, &seal::passphrase(passphrase_file, false)?)?
+            if export::unsealed(&read) {
+                (read, false)
+            } else {
+                (
+                    seal::open(&read, &seal::passphrase(passphrase_file, false)?)?,
+                    false,
+                )
+            }
         }
         None => {
             let via = export::Via::find(&search).context(
@@ -455,10 +462,9 @@ fn restore(
             )?;
             out.flush()?;
             via.receive(&into)?;
-            std::fs::read(&into)?
+            (std::fs::read(&into)?, true)
         }
     };
-    let bundle = export::parse(&bytes)?;
     let config_path = paths::config_file();
     let proxy_path = store.root().join(".proxy.json");
     let tokengauge = doctor::which("tokengauge", &search);
@@ -467,7 +473,28 @@ fn restore(
         proxy: &proxy_path,
         tokengauge: tokengauge.as_deref(),
     };
-    let restored = export::restore(store, providers, &places, bundle, force, out)?;
+    let restored = export::parse(&bytes)
+        .and_then(|bundle| export::restore(store, providers, &places, bundle, force, out));
+    let restored = match restored {
+        Ok(restored) => restored,
+        Err(e) if received => {
+            match export::keep_received(store, &bytes) {
+                Ok(kept) => writeln!(
+                    out,
+                    "what was received is kept in {}; `remuda restore {}` tries it again",
+                    kept.display(),
+                    kept.display()
+                )?,
+                Err(k) => writeln!(out, "warning: what was received is lost: {k:#}")?,
+            }
+            return Err(e);
+        }
+        Err(e) => return Err(e),
+    };
+    if let Some(kept) = file.filter(|f| export::was_kept(store, f)) {
+        std::fs::remove_file(kept)
+            .with_context(|| format!("could not remove {}", kept.display()))?;
+    }
     if restored.sign_in.is_empty() {
         return Ok(());
     }

@@ -862,7 +862,7 @@ pub fn log(
     Ok(())
 }
 
-fn refuse_in_use(store: &Store, p: &dyn Provider, name: &str) -> Result<()> {
+pub fn refuse_in_use(store: &Store, p: &dyn Provider, name: &str) -> Result<()> {
     if session::in_use(store, p.id(), name) {
         bail!(
             "{}/{name} is in a `remuda run` session; end it first",
