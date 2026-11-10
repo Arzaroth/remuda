@@ -1538,6 +1538,35 @@ mod tests {
     }
 
     #[test]
+    fn a_login_another_machine_named_must_be_the_same_account() {
+        let (server, _) = login_server("u-new");
+        let e = env(&server.url());
+        let (lines, open) = pasting();
+        let prompt = |expect| Prompt {
+            open: &open,
+            opens_in: Some("a test browser".into()),
+            lines: &lines,
+            paste: true,
+            expect,
+        };
+
+        let error = login(
+            &e.store,
+            &e.claude,
+            "work",
+            false,
+            prompt(Some(("u-old", "old@example.com"))),
+            &mut Vec::new(),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "that is u-new@example.com, not old@example.com, the account claude/work was; nothing was stored"
+        );
+        assert!(e.store.get("claude", "work").unwrap().is_none());
+    }
+
+    #[test]
     fn login_exchanges_the_pasted_code_and_stores_the_account() {
         let (server, verifiers) = login_server("u-new");
         let e = env(&server.url());

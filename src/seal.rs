@@ -92,3 +92,29 @@ fn read_hidden(prompt: &str) -> Result<String> {
         .trim_end_matches(['\r', '\n'])
         .to_owned())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn what_is_sealed_opens_with_its_passphrase_only() {
+        let sealed = seal(b"the bundle", "correct horse").unwrap();
+        assert!(sealed.starts_with(b"age-encryption.org/v1\n-> scrypt "));
+        assert!(!sealed.windows(10).any(|w| w == b"the bundle"));
+        assert_eq!(open(&sealed, "correct horse").unwrap(), b"the bundle");
+        let error = open(&sealed, "wrong").err().unwrap();
+        assert!(error.to_string().contains("wrong passphrase"), "{error}");
+        assert!(open(b"not age at all", "correct horse").is_err());
+    }
+
+    #[test]
+    fn a_passphrase_file_gives_its_first_line() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("pass");
+        std::fs::write(&file, "two words\nignored\n").unwrap();
+        assert_eq!(passphrase(Some(&file), true).unwrap(), "two words");
+        std::fs::write(&file, "\n").unwrap();
+        assert!(passphrase(Some(&file), false).is_err());
+    }
+}

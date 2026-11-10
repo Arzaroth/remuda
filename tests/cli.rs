@@ -1343,3 +1343,62 @@ fn help_prints_the_skill_and_each_command() {
     assert!(home.ok(&["help"]).contains("Commands:"));
     assert!(home.fails(&["help", "nope"]).contains("topics: skill"));
 }
+
+#[test]
+fn export_seals_the_logins_and_restore_sets_another_machine_up() {
+    let old = Home::new();
+    old.sign_in("a-perso", "r-perso", "u-perso");
+    old.ok(&["import", "perso"]);
+    old.sign_in("a-work", "r-work", "u-work");
+    old.ok(&["import", "work"]);
+    let pass = old.path("pass");
+    std::fs::write(&pass, "a passphrase\n").unwrap();
+    let sealed = old.path("out.age");
+    let (sealed_arg, pass_arg) = (sealed.to_str().unwrap(), pass.to_str().unwrap());
+
+    let said = old.ok(&[
+        "export",
+        sealed_arg,
+        "--passphrase-file",
+        pass_arg,
+        "--move",
+        "perso",
+    ]);
+    assert!(
+        said.contains("It carries 1 login(s) as they are, 1 to sign in again."),
+        "{said}"
+    );
+    assert!(said.contains("removed claude/perso"), "{said}");
+    assert!(!old.ok(&["ls"]).contains("perso"));
+    assert!(
+        !std::fs::read(&sealed)
+            .unwrap()
+            .windows(7)
+            .any(|w| w == b"r-perso")
+    );
+    let err = old.fails(&["export", "--move", "work", sealed_arg]);
+    assert!(err.contains("is the login Claude Code uses"), "{err}");
+    let out = old
+        .command(&["export"])
+        .env("PATH", old.path("nowhere"))
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("neither wyrmyon (wyrm) nor magic-wormhole")
+    );
+
+    let new = Home::new();
+    let said = new.ok(&["restore", sealed_arg, "--passphrase-file", pass_arg]);
+    assert!(said.contains("stored claude/perso"), "{said}");
+    assert!(
+        said.contains("remuda login work -p claude --paste    (u-work@example.com)"),
+        "{said}"
+    );
+    let stored = read(&new.path(".local/share/remuda/credentials/claude/perso.json"));
+    assert_eq!(stored["claudeAiOauth"]["refreshToken"], "r-perso");
+    assert!(new.ok(&["ls"]).contains("perso"));
+
+    std::fs::write(&pass, "another\n").unwrap();
+    let err = new.fails(&["restore", sealed_arg, "--passphrase-file", pass_arg]);
+    assert!(err.contains("wrong passphrase"), "{err}");
+}
