@@ -1287,6 +1287,7 @@ mod tests {
                 opens_in: Some("a test browser".into()),
                 lines: &lines,
                 paste: false,
+                expect: None,
             },
             &mut out,
         )

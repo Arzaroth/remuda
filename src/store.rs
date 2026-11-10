@@ -191,6 +191,31 @@ impl Store {
         write_json(&meta_path, &serde_json::to_value(&meta)?)
     }
 
+    /// An entry's credential file as it is, and its sidecar.
+    pub fn files(&self, provider: &str, name: &str) -> Result<Option<(String, Value)>> {
+        validate_name(name)?;
+        let path = self.creds_path(provider, name);
+        let creds = match fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e).with_context(|| format!("failed to read {}", path.display())),
+        };
+        let meta = read_json(&self.meta_path(provider, name))?
+            .with_context(|| format!("{provider}/{name} has no {name}.meta.json"))?;
+        Ok(Some((creds, meta)))
+    }
+
+    /// Stores an entry from the files [`Store::files`] read elsewhere, byte for
+    /// byte, so its digest still holds.
+    pub fn put_files(&self, provider: &str, name: &str, creds: &str, meta: &Value) -> Result<()> {
+        validate_name(name)?;
+        if provider.is_empty() || !provider.chars().all(|c| c.is_ascii_lowercase()) {
+            bail!("{provider:?} is not a provider");
+        }
+        write_private(&self.creds_path(provider, name), creds)?;
+        write_json(&self.meta_path(provider, name), meta)
+    }
+
     /// Keeps tokens nothing else would hold, in a file `list` does not show.
     pub fn set_aside(&self, provider: &str, account: &str, creds: &Value) -> Result<PathBuf> {
         let account: String = account

@@ -616,7 +616,7 @@ fn version(text: &str) -> String {
     crate::store::digest(text)
 }
 
-fn read(path: &Path) -> Result<Option<String>> {
+pub fn read(path: &Path) -> Result<Option<String>> {
     match std::fs::read_to_string(path) {
         Ok(text) => Ok(Some(text)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -624,7 +624,7 @@ fn read(path: &Path) -> Result<Option<String>> {
     }
 }
 
-fn parse(path: &Path, text: &str) -> Result<Config> {
+pub fn parse(path: &Path, text: &str) -> Result<Config> {
     toml_edit::de::from_str(text).with_context(|| format!("{} is not valid", path.display()))
 }
 

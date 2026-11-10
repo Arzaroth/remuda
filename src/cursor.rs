@@ -136,6 +136,10 @@ impl Provider for Cursor {
     }
 
     /// The membership is not in the file; TokenGauge asks cursor.com for it.
+    fn portable(&self) -> bool {
+        true
+    }
+
     fn plan(&self, _creds: &Value) -> String {
         "-".to_owned()
     }

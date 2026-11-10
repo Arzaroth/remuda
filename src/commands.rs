@@ -405,6 +405,9 @@ pub struct Prompt<'a> {
     /// A sign-in a browser on another machine can finish, where the CLI
     /// offers one.
     pub paste: bool,
+    /// The account id and email the login must turn out to be, for a login
+    /// another machine named.
+    pub expect: Option<(&'a str, &'a str)>,
 }
 
 /// Prints the link first, so it can be opened anywhere; Enter opens it here.
@@ -483,6 +486,15 @@ pub fn login(
                 .map_err(|_| anyhow::anyhow!("the sign-in stopped unexpectedly"))
         })?
     }?;
+    if let Some((account, email)) = prompt.expect
+        && done.identity.account_id != account
+    {
+        bail!(
+            "that is {}, not {email}, the account {}/{name} was; nothing was stored",
+            done.identity.email,
+            p.id()
+        );
+    }
     let entry = save_login(store, p, name, force, done)?;
     writeln!(out, "{}", stored_message(p, &entry))?;
     Ok(())
@@ -1549,6 +1561,7 @@ mod tests {
                 opens_in: Some("a test browser".into()),
                 lines: &lines,
                 paste: true,
+                expect: None,
             },
             &mut out,
         )
@@ -1632,6 +1645,7 @@ mod tests {
                 opens_in: None,
                 lines: &lines,
                 paste: true,
+                expect: None,
             },
             &mut out,
         )
@@ -1661,6 +1675,7 @@ mod tests {
                 opens_in: None,
                 lines: &lines,
                 paste: true,
+                expect: None,
             },
             &mut Vec::new(),
         )
@@ -1686,6 +1701,7 @@ mod tests {
                 opens_in: Some("a test browser".into()),
                 lines: &lines,
                 paste: true,
+                expect: None,
             },
             &mut Vec::new(),
         )
@@ -1705,6 +1721,7 @@ mod tests {
                 opens_in: None,
                 lines: &std::sync::mpsc::channel().1,
                 paste: true,
+                expect: None,
             },
             &mut Vec::new(),
         )
@@ -1737,6 +1754,7 @@ mod tests {
                     opens_in: Some("a test browser".into()),
                     lines: &lines,
                     paste: true,
+                    expect: None,
                 },
                 &mut Vec::new(),
             )
@@ -1997,6 +2015,7 @@ mod tests {
                 opens_in: None,
                 lines: &lines,
                 paste: true,
+                expect: None,
             },
             &mut out,
         )
