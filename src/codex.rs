@@ -988,6 +988,16 @@ mod tests {
                     .to_string(),
             )
             .create();
+        let not_yet: Vec<_> = [403, 404]
+            .into_iter()
+            .map(|status| {
+                server
+                    .mock("POST", "/api/accounts/deviceauth/token")
+                    .with_status(status)
+                    .expect(1)
+                    .create()
+            })
+            .collect();
         let approved = server
             .mock("POST", "/api/accounts/deviceauth/token")
             .match_body(Matcher::Json(json!({"device_auth_id": "da-1", "user_code": "ABCD-1234"})))
@@ -1025,6 +1035,7 @@ mod tests {
         let login = pending.finish(None).unwrap();
 
         usercode.assert();
+        not_yet.iter().for_each(|m| m.assert());
         approved.assert();
         exchange.assert();
         assert_eq!(login.identity.account_id, "acct-9");
