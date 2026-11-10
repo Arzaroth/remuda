@@ -1427,6 +1427,120 @@ mod tests {
     }
 
     #[test]
+    fn a_config_or_proxy_sent_malformed_is_reported_and_the_rest_restored() {
+        let from = env(&OFFLINE);
+        keyed(&from, "k", "sk-1");
+        from.stored("work", "u-1", HOUR);
+        let mut bundle = bundle_of(&from, &[]).unwrap();
+        bundle.config = Some("not = [toml".into());
+        bundle.proxy = Some(json!({"port": "x"}));
+        let to = env(&OFFLINE);
+
+        let (restored, out) = restore_into(&to, round_trip(&bundle), true);
+
+        assert!(out.contains("stored glm/k"), "{out}");
+        assert!(out.contains("kept config.toml as it is here: "), "{out}");
+        assert!(
+            out.contains("kept the proxy's settings here: the ones sent are malformed"),
+            "{out}"
+        );
+        assert!(!places(&to).0.exists() && !places(&to).1.exists());
+        assert_eq!(restored.sign_in.len(), 1);
+    }
+
+    #[test]
+    fn a_carried_login_that_cannot_be_stored_is_reported_and_the_rest_restored() {
+        let from = env(&OFFLINE);
+        keyed(&from, "k", "sk-1");
+        from.stored("work", "u-1", HOUR);
+        let bundle = bundle_of(&from, &[]).unwrap();
+        let to = env(&OFFLINE);
+        std::fs::create_dir_all(to.store.root().join("glm/k.meta.json")).unwrap();
+
+        let (restored, out) = restore_into(&to, round_trip(&bundle), false);
+
+        assert!(out.contains("could not store glm/k: "), "{out}");
+        assert_eq!(restored.sign_in.len(), 1);
+    }
+
+    #[test]
+    fn a_login_here_whose_tokens_cannot_be_set_aside_is_kept_and_the_rest_restored() {
+        let from = env(&OFFLINE);
+        keyed(&from, "k", "sk-1");
+        from.stored("work", "u-1", HOUR);
+        let bundle = bundle_of(&from, &[]).unwrap();
+        let to = env(&OFFLINE);
+        keyed(&to, "k", "sk-here");
+        let dir = to.store.root().join("glm");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let enforced = std::fs::write(dir.join("probe"), "").is_err();
+
+        let restored = if enforced {
+            Some(restore_into(&to, round_trip(&bundle), true))
+        } else {
+            None
+        };
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        if let Some((restored, out)) = restored {
+            assert!(
+                out.contains("kept glm/k: what it holds here could not be set aside"),
+                "{out}"
+            );
+            assert_eq!(
+                to.store.get("glm", "k").unwrap().unwrap().creds["key"],
+                "sk-here"
+            );
+            assert_eq!(restored.sign_in.len(), 1);
+        }
+    }
+
+    #[test]
+    fn logins_here_that_cannot_be_listed_are_reported_and_the_rest_restored() {
+        let from = env(&OFFLINE);
+        keyed(&from, "k", "sk-1");
+        from.stored("work", "u-1", HOUR);
+        crate::fsx::write_json(&places(&from).1, &json!({"enabled": true})).unwrap();
+        let mut bundle = bundle_of(&from, &[]).unwrap();
+        bundle.config = Some(String::new());
+        let to = env(&OFFLINE);
+        let dirs = ["glm", "claude"].map(|p| to.store.root().join(p));
+        for dir in &dirs {
+            std::fs::create_dir_all(dir).unwrap();
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o300)).unwrap();
+        }
+        let enforced = std::fs::read_dir(&dirs[0]).is_err();
+
+        let restored = if enforced {
+            Some(restore_into(&to, round_trip(&bundle), false))
+        } else {
+            None
+        };
+        for dir in &dirs {
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+
+        if let Some((restored, out)) = restored {
+            assert!(
+                out.contains("skipped glm/k: the logins stored here cannot be listed"),
+                "{out}"
+            );
+            assert!(
+                out.contains(
+                    "kept config.toml as it is here: the logins stored here cannot be listed"
+                ),
+                "{out}"
+            );
+            assert!(
+                out.contains("skipped claude/work: the logins stored here cannot be listed"),
+                "{out}"
+            );
+            assert!(out.contains("set the proxy up as it was"), "{out}");
+            assert!(restored.sign_in.is_empty());
+        }
+    }
+
+    #[test]
     fn a_login_whose_account_is_stored_here_is_not_offered() {
         let from = env(&OFFLINE);
         from.stored("work", "u-1", HOUR);

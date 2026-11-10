@@ -1465,3 +1465,36 @@ fn a_received_bundle_restore_cannot_read_is_kept_to_try_again() {
     new.ok(&["restore", &kept]);
     assert!(!Path::new(&kept).exists());
 }
+
+#[test]
+fn a_kept_bundle_that_cannot_be_removed_leaves_the_sign_ins_listed() {
+    use std::os::unix::fs::PermissionsExt;
+    let new = Home::new();
+    let root = new.path(".local/share/remuda/credentials");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join(".lock"), "").unwrap();
+    let kept = root.join(".received-1.json");
+    write(
+        &kept,
+        &json!({"remuda_export": 1, "carried": [], "sign_in": [{"provider": "claude", "name": "work", "account_id": "u-1", "email": "me@example.com"}]}),
+    );
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let enforced = std::fs::write(root.join("probe"), "").is_err();
+
+    let out = enforced.then(|| new.run(&["restore", kept.to_str().unwrap(), "--no-sign-in"]));
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+    if let Some(out) = out {
+        let said = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success(),
+            "{said} {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(said.contains("warning: could not remove"), "{said}");
+        assert!(
+            said.contains("remuda login work -p claude --paste"),
+            "{said}"
+        );
+    }
+}
