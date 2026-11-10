@@ -13,6 +13,16 @@
 - `remuda doctor` checks that the artifact hook is installed once two Claude
   logins are stored.
 
+## [0.38.0] - 2026-11-10
+
+### Added
+
+- The API proxy card has a "Reachable from other machines" switch (`lan` in
+  `.proxy.json`): the proxy listens on every interface and its base URLs carry
+  the machine's LAN address. When ufw or firewalld blocks the port, the card
+  shows the commands that open it on the LAN interface, and says when a rule
+  for some machines may still keep them out.
+
 ### Fixed
 
 - The page's dropdowns draw their arrow inside the field, clear of the rounded

@@ -610,7 +610,7 @@ fn versions(c: &Checkup) -> Vec<Vital> {
         .collect()
 }
 
-fn which(name: &str, search: &OsStr) -> Option<PathBuf> {
+pub fn which(name: &str, search: &OsStr) -> Option<PathBuf> {
     std::env::split_paths(search)
         .map(|d| d.join(name))
         .find(|p| {

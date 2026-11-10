@@ -22,8 +22,23 @@ export const exports = (p: Proxy, protocol: Protocol, key: string) => {
 export const masked = (key: string) => '•'.repeat(Math.min(Math.max(key.length, 8), 24));
 
 export function status(p: Proxy): { text: string; tone: 'good' | 'bad' | 'muted' } {
+  if (p.running !== null && p.lan && p.host)
+    return { text: `Listening on every interface, port ${p.running}; other machines use ${p.host}`, tone: 'good' };
+  if (p.running !== null && p.lan)
+    return {
+      text: `Listening on every interface, port ${p.running}; this machine's LAN address was not found, so the URLs below say 127.0.0.1`,
+      tone: 'bad',
+    };
   if (p.running !== null) return { text: `Listening on 127.0.0.1:${p.running}`, tone: 'good' };
   if (p.enabled && p.error) return { text: p.error, tone: 'bad' };
   if (p.enabled) return { text: 'Starting', tone: 'muted' };
   return { text: 'Off', tone: 'muted' };
+}
+
+export function blocked(p: Proxy): string | null {
+  const f = p.firewall;
+  if (!p.lan || p.running === null || !f || f.open) return null;
+  return f.open === false
+    ? `${f.name} blocks port ${p.running}: other machines cannot reach the proxy until it is opened.`
+    : `${f.name} may keep some or all other machines off port ${p.running}: remuda cannot tell for sure, since some rules need root to read or cover only some machines. This opens it on the LAN interface; rules or zones that name some machines may still need their own change:`;
 }

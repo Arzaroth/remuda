@@ -114,9 +114,14 @@ export type ProxyKey = { id: string; name: string; key: string; created: number 
 
 export type ProxyRoute = { provider: string; models: string[]; formats: string[] };
 
+export type Firewall = { name: string; open: boolean | null; commands: string[] };
+
 export type Proxy = {
   enabled: boolean;
   port: number;
+  lan: boolean;
+  host: string | null;
+  firewall: Firewall | null;
   running: number | null;
   error: string | null;
   baseUrls: { openai: string; claude: string };

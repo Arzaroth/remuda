@@ -19,6 +19,9 @@ pub struct Settings {
     pub enabled: bool,
     #[serde(default = "default_port")]
     pub port: u16,
+    /// Listens on every interface rather than on loopback alone.
+    #[serde(default)]
+    pub lan: bool,
     #[serde(default)]
     pub keys: Vec<Key>,
 }
@@ -28,6 +31,7 @@ impl Default for Settings {
         Settings {
             enabled: false,
             port: DEFAULT_PORT,
+            lan: false,
             keys: Vec::new(),
         }
     }

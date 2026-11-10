@@ -1,3 +1,4 @@
+pub mod firewall;
 mod forward;
 mod journal;
 mod listen;
@@ -8,6 +9,8 @@ mod translate;
 
 pub use ping::ping;
 
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
+use std::path::Path;
 use std::sync::{Mutex, Weak};
 
 use anyhow::Result;
@@ -39,8 +42,9 @@ pub struct Control {
 #[derive(Default)]
 struct State {
     running: Option<listen::Running>,
-    /// The port asked for, which differs from the one bound when it is 0.
-    asked: Option<u16>,
+    /// The port asked for, which differs from the one bound when it is 0,
+    /// and whether other machines may reach it.
+    asked: Option<(u16, bool)>,
     error: Option<String>,
 }
 
@@ -49,7 +53,7 @@ impl Control {
         let Ok(mut state) = self.state.lock() else {
             return;
         };
-        let want = settings.enabled.then_some(settings.port);
+        let want = settings.enabled.then_some((settings.port, settings.lan));
         if state.asked == want && (state.running.is_some() || want.is_none()) {
             return;
         }
@@ -58,21 +62,41 @@ impl Control {
         }
         state.asked = want;
         state.error = None;
-        if let Some(port) = want {
-            match listen::start(backend, port) {
+        if let Some((port, lan)) = want {
+            match listen::start(backend, port, lan) {
                 Ok(running) => state.running = Some(running),
                 Err(e) => state.error = Some(format!("{e:#}")),
             }
         }
     }
 
-    /// The bound port, or why there is none while it is enabled.
-    pub fn status(&self) -> (Option<u16>, Option<String>) {
+    /// The bound address, or why there is none while it is enabled.
+    pub fn status(&self) -> (Option<SocketAddr>, Option<String>) {
         match self.state.lock() {
-            Ok(s) => (s.running.as_ref().map(|r| r.port), s.error.clone()),
+            Ok(s) => (s.running.as_ref().map(|r| r.addr), s.error.clone()),
             Err(_) => (None, Some("the proxy's state is poisoned".to_owned())),
         }
     }
+}
+
+/// The address other machines reach this one at, the one the default route
+/// leaves from. Connecting a UDP socket sends nothing.
+pub fn lan_address() -> Option<IpAddr> {
+    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
+    socket.connect((Ipv4Addr::new(192, 0, 2, 1), 9)).ok()?;
+    let ip = socket.local_addr().ok()?.ip();
+    (!ip.is_unspecified() && !ip.is_loopback()).then_some(ip)
+}
+
+/// The interface the default route leaves by, read from `/proc/net/route`
+/// at `route`.
+pub fn default_interface(route: &Path) -> Option<String> {
+    let table = std::fs::read_to_string(route).ok()?;
+    table.lines().skip(1).find_map(|l| {
+        let mut fields = l.split_whitespace();
+        let name = fields.next()?;
+        (fields.next()? == "00000000").then(|| name.to_owned())
+    })
 }
 
 #[cfg(test)]
@@ -124,6 +148,7 @@ mod tests {
         settings::Settings {
             enabled: true,
             port: 0,
+            lan: false,
             keys: vec![settings::Key {
                 id: "k".into(),
                 name: "test".into(),
@@ -149,7 +174,7 @@ mod tests {
         let control = Control::default();
         let weak: Weak<dyn Backend> = Arc::downgrade(&backend) as Weak<dyn Backend>;
         control.apply(weak, &backend.settings);
-        let port = control.status().0.expect("the proxy did not start");
+        let port = control.status().0.expect("the proxy did not start").port();
         Running {
             backend,
             control,
@@ -638,6 +663,47 @@ event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
         let (running, error) = p.control.status();
         assert_eq!(running, None);
         assert!(error.unwrap().contains("cannot listen"));
+    }
+
+    #[test]
+    fn lan_listens_on_every_interface_and_back() {
+        let backend: Arc<dyn Backend> = Arc::new(Test {
+            providers: Vec::new(),
+            settings: on(),
+            spent: Mutex::default(),
+            recorded: Mutex::default(),
+        });
+        let control = Control::default();
+        let lan = settings::Settings { lan: true, ..on() };
+        control.apply(Arc::downgrade(&backend), &lan);
+        let addr = control.status().0.expect("the proxy did not start");
+        assert!(addr.ip().is_unspecified(), "{addr}");
+        assert!(TcpStream::connect(("127.0.0.1", addr.port())).is_ok());
+
+        let local = settings::Settings {
+            port: addr.port(),
+            ..on()
+        };
+        control.apply(Arc::downgrade(&backend), &local);
+        let addr = control.status().0.expect("the proxy did not restart");
+        assert!(addr.ip().is_loopback(), "{addr}");
+    }
+
+    #[test]
+    fn the_default_route_names_its_interface() {
+        let dir = tempfile::tempdir().unwrap();
+        let route = dir.path().join("route");
+        std::fs::write(
+            &route,
+            "Iface\tDestination\tGateway\n\
+             docker0\t000011AC\t00000000\n\
+             eth0\t00000000\t0101A8C0\n",
+        )
+        .unwrap();
+        assert_eq!(default_interface(&route).as_deref(), Some("eth0"));
+        std::fs::write(&route, "Iface\tDestination\n").unwrap();
+        assert_eq!(default_interface(&route), None);
+        assert_eq!(default_interface(&dir.path().join("none")), None);
     }
 
     #[test]
