@@ -65,21 +65,55 @@ export function recorded(ls: Login[]): { points: Point[]; refills: Refill[] } {
   return { points, refills };
 }
 
-export function burn(ls: Login[], at: number, hours: number): number | null {
+function since(ls: Login[], at: number, hours: number): number | null {
   if (!ls.length) return null;
   const from = Math.max(at - hours * HOUR, knownFrom(ls));
-  if (at - from < 15 * MIN) return null;
+  return at - from < 15 * MIN ? null : from;
+}
+
+function rise(l: Login, from: number, at: number): number {
   let spent = 0;
-  for (const l of ls) {
-    let held = usedAt(l, from);
-    for (const [t, u] of l.samples) {
-      if (t <= from) continue;
-      if (t > at) break;
-      if (u > held) spent += l.weight * (u - held);
-      held = u;
-    }
+  let held = usedAt(l, from);
+  for (const [t, u] of l.samples) {
+    if (t <= from) continue;
+    if (t > at) break;
+    if (u > held) spent += u - held;
+    held = u;
   }
-  return spent / ((at - from) / HOUR);
+  return spent;
+}
+
+export function burn(ls: Login[], at: number, hours: number): number | null {
+  const from = since(ls, at, hours);
+  if (from === null) return null;
+  return ls.reduce((a, l) => a + l.weight * rise(l, from, at), 0) / ((at - from) / HOUR);
+}
+
+export type Share = {
+  name: string;
+  weight: number;
+  left: number;
+  resetsAt: number | null;
+  own: number | null;
+  pooled: number | null;
+  empty: number | null;
+};
+
+export function shares(ls: Login[], at: number, hours: number): Share[] {
+  const from = since(ls, at, hours);
+  return ls.map((l) => {
+    const own = from === null ? null : rise(l, from, at) / ((at - from) / HOUR);
+    const dry = own ? at + ((100 - l.used) / own) * HOUR : null;
+    return {
+      name: l.name,
+      weight: l.weight,
+      left: 100 - l.used,
+      resetsAt: l.resetsAt,
+      own,
+      pooled: own === null ? null : own * l.weight,
+      empty: dry !== null && (l.resetsAt === null || dry < l.resetsAt) ? dry : null,
+    };
+  });
 }
 
 export type Projection = {

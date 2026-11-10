@@ -620,6 +620,10 @@ select { appearance: none; padding-right: 30px; cursor: pointer;
 .pool-area.ahead { opacity: 0.6; }
 .pool-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .pool-head h3 { margin: 0; }
+.pool-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pool-logins { margin: 0 0 20px; overflow-x: auto; }
+.pool-logins td { white-space: nowrap; }
+.pool-logins td small { font-size: 12px; }
 .pool-top { display: grid; grid-template-columns: auto repeat(4, minmax(0, 1fr)); grid-template-rows: auto auto auto; column-gap: 28px; margin: 16px 0 20px; }
 .pool-fig { display: grid; grid-row: span 3; grid-template-rows: subgrid; row-gap: 4px; min-width: 0; margin: 0; }
 .pool-fig dt { color: var(--muted); font-size: 13px; }
