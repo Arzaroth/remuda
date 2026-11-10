@@ -485,9 +485,6 @@ impl PendingLogin for CodexPending {
     }
 }
 
-/// codex-cli's `codex login --device-auth`: the user types a code at
-/// `/codex/device` while this side polls, and the approval comes back as an
-/// authorization code and the verifier to exchange it with.
 struct CodexDevice {
     api: Api,
     device_auth_id: String,
