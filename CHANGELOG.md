@@ -44,6 +44,9 @@
   follow codex-cli 0.167.0.
 - Spending a banked reset skips one whose limits are all at 0%, as claude.ai
   does, rather than burning it on nothing.
+- A Grok, Kimi, Cursor or Codex device sign-in rides out a busy or failing
+  server (429 or 5xx) the way it rides out a dropped connection, asking again
+  until the third in a row, instead of throwing away an approval already given.
 
 ## [0.38.0] - 2026-11-10
 
