@@ -135,14 +135,18 @@ pub const REFRESH_BEFORE_MS: i64 = 5 * 60 * 1000;
 /// Finishes the provider's `remuda run` sessions whose processes all ended
 /// first, so nothing acts on a login whose newest tokens are still in one.
 pub fn sync_live(store: &Store, p: &dyn Provider) -> Result<LiveState> {
-    let live = sync_live_files(store, p)?;
-    crate::attribution::noticed(store, p, &live);
-    Ok(live)
+    Ok(sync_live_read(store, p)?.0)
 }
 
-fn sync_live_files(store: &Store, p: &dyn Provider) -> Result<LiveState> {
+fn sync_live_read(store: &Store, p: &dyn Provider) -> Result<(LiveState, Option<Value>)> {
     crate::session::recover(store, &[p]);
     let live = p.live()?;
+    let state = sync_live_files(store, p, live.clone())?;
+    crate::attribution::noticed(store, p, &state);
+    Ok((state, live))
+}
+
+fn sync_live_files(store: &Store, p: &dyn Provider, live: Option<Value>) -> Result<LiveState> {
     heal(store, p, live.as_ref())?;
     let Some(creds) = live else {
         return Ok(match p.foreign_login()? {
@@ -311,10 +315,9 @@ pub fn sign_out(store: &Store, p: &dyn Provider, discard: bool, by: By) -> Resul
     let _live = p.lock_live()?;
     let mut attempts = 0;
     loop {
-        if attempts > 0 {
-            sync_live(store, p)?;
-        }
-        let Some(outgoing) = p.live()? else { break };
+        let (live, outgoing) = sync_live_read(store, p)?;
+        let Some(outgoing) = outgoing else { break };
+        refuse_to_replace(p, live, discard)?;
         match p.sign_out(&outgoing) {
             Err(e) if e.is::<crate::fsx::Changed>() && attempts < 3 => attempts += 1,
             result => break result?,
