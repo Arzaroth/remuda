@@ -424,6 +424,28 @@ mod tests {
     }
 
     #[test]
+    fn signing_out_removes_the_file_once_its_login_is_stored() {
+        let mut server = mockito::Server::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let k = Kimi::at(tmp.path(), Api::local(&server.url()));
+        let creds = file("a-work", "r-work");
+        me_mock(&mut server, "a-work", "u-1");
+        let identity = k.identify(&creds).unwrap();
+        store
+            .save(&Entry::new("kimi", "work", creds, identity, 1))
+            .unwrap();
+        let work = store.get("kimi", "work").unwrap().unwrap();
+        k.install(&work, None).unwrap();
+
+        let said = ops::sign_out(&store, &k, false, crate::logbook::By::Cli).unwrap();
+
+        assert_eq!(said, "signed Kimi out of work");
+        assert!(!tmp.path().join("credentials/kimi-code.json").exists());
+        assert!(store.get("kimi", "work").unwrap().is_some());
+    }
+
+    #[test]
     fn switching_replaces_the_file_whole() {
         let mut server = mockito::Server::new();
         let tmp = tempfile::tempdir().unwrap();

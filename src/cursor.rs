@@ -363,6 +363,26 @@ mod tests {
     }
 
     #[test]
+    fn signing_out_removes_auth_json_once_its_login_is_stored() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let c = Cursor::at(tmp.path(), Api::local(&OFFLINE));
+        let creds = auth("u1", "work", "r-work");
+        let identity = c.identify(&creds).unwrap();
+        store
+            .save(&Entry::new("cursor", "work", creds, identity, 1))
+            .unwrap();
+        let work = store.get("cursor", "work").unwrap().unwrap();
+        c.install(&work, None).unwrap();
+
+        let said = ops::sign_out(&store, &c, false, crate::logbook::By::Cli).unwrap();
+
+        assert_eq!(said, "signed Cursor out of work");
+        assert!(!tmp.path().join("auth.json").exists());
+        assert!(store.get("cursor", "work").unwrap().is_some());
+    }
+
+    #[test]
     fn switching_replaces_auth_json_whole() {
         let tmp = tempfile::tempdir().unwrap();
         let store = Store::open(&tmp.path().join("store"));
