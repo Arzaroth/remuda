@@ -568,7 +568,7 @@ mod tests {
     use super::testing::*;
     use super::*;
     use crate::claude::OAUTH_KEY;
-    use crate::fsx::read_json;
+    use crate::fsx::{read_json, write_json};
     use serde_json::json;
 
     #[test]
@@ -900,6 +900,32 @@ mod tests {
             sync_live(&e.store, &e.claude).unwrap(),
             LiveState::SignedOut
         );
+    }
+
+    #[test]
+    fn a_refresh_during_the_sign_out_is_synced_before_its_tokens_leave_the_cli() {
+        let mut server = mockito::Server::new();
+        let e = env(&server.url());
+        let path = e.tmp.path().join(".credentials.json");
+        let refreshed = std::sync::atomic::AtomicBool::new(false);
+        server
+            .mock("GET", "/api/oauth/profile")
+            .with_body_from_request(move |_| {
+                if !refreshed.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                    let mut file = oauth("a3", "r3", 3 * HOUR);
+                    file["mcpOAuth"] = json!({"srv": {"t": 1}});
+                    write_json(&path, &file).unwrap();
+                }
+                profile_body("u-work").into_bytes()
+            })
+            .create();
+        e.stored("work", "u-work", HOUR);
+        e.sign_in(oauth("a2", "r2", 2 * HOUR), account("u-work"));
+
+        sign_out(&e.store, &e.claude, false, By::Cli).unwrap();
+
+        assert_eq!(e.claude.live().unwrap(), None);
+        assert_eq!(e.stored_refresh_token("work").as_deref(), Some("r3"));
     }
 
     #[test]
