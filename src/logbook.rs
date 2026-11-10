@@ -47,6 +47,8 @@ pub enum By {
     Cli,
     Page,
     Auto,
+    /// Claude Code's artifact hook, for a call on another login's artifact.
+    Hook,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

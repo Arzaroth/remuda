@@ -135,7 +135,7 @@ export type LogEvent = {
   kind: 'switch' | 'auto' | 'refresh' | 'warm' | 'reset' | 'proxy' | 'store' | 'run';
   provider?: string;
   name?: string;
-  by?: 'cli' | 'page' | 'auto';
+  by?: 'cli' | 'page' | 'auto' | 'hook';
   ok: boolean;
   message: string;
 };

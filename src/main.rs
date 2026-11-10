@@ -1,4 +1,5 @@
 mod apikey;
+mod artifacts;
 mod attribution;
 mod auto;
 mod browser;
@@ -204,6 +205,11 @@ enum Cmd {
     },
     /// Print a completion script for a shell.
     Completions { shell: clap_complete::Shell },
+    /// Run by Claude Code's hooks on its artifact tools: `remuda hook artifact`
+    /// reads the event on stdin and switches to the login that published the
+    /// artifact for the call. Never fails the call.
+    #[command(hide = true)]
+    Hook { what: String },
     /// Run by `--update` as the new binary: bring the installed units up to date.
     #[command(hide = true)]
     SyncUnits,
@@ -230,6 +236,7 @@ impl Cmd {
             | Cmd::Login { .. }
             | Cmd::Open { .. }
             | Cmd::Completions { .. }
+            | Cmd::Hook { .. }
             | Cmd::SyncUnits
             | Cmd::Status => None,
         }
@@ -531,6 +538,42 @@ fn run(store: &Store, providers: &[&dyn Provider], target: &str, args: &[OsStrin
     exit_as(status.with_context(|| format!("failed to start {}", spec.command))?);
 }
 
+/// The login a `remuda run` session started this process on, from its
+/// directory: the hook must not move the CLI's own login for it.
+fn run_login(store: &Store) -> Option<String> {
+    std::env::var_os(paths::outer("CLAUDE_CONFIG_DIR"))?;
+    let dir = std::path::PathBuf::from(std::env::var_os("CLAUDE_CONFIG_DIR")?);
+    let rest = dir
+        .strip_prefix(store.root().join(".runs").join("claude"))
+        .ok()?;
+    let mut parts = rest.components();
+    let name = parts.next()?.as_os_str().to_str()?.to_owned();
+    (parts.next()?.as_os_str() == "home" && parts.next().is_none()).then_some(name)
+}
+
+fn hook(store: &Store, claude: &Claude, what: &str) -> Result<()> {
+    if what != "artifact" {
+        bail!("no hook named {what}; `remuda hook artifact` is the one there is");
+    }
+    let mut raw = String::new();
+    io::Read::read_to_string(&mut io::stdin(), &mut raw)?;
+    if !store.root().exists() {
+        return Ok(());
+    }
+    let pinned = run_login(store);
+    let seat = match &pinned {
+        Some(name) => artifacts::Seat::Run(name),
+        None => artifacts::Seat::Live,
+    };
+    let pause = || std::thread::sleep(std::time::Duration::from_millis(500));
+    match artifacts::hook(store, claude, seat, &raw, &pause) {
+        Ok(Some(out)) => println!("{out}"),
+        Ok(None) => {}
+        Err(e) => eprintln!("remuda hook artifact: {e:#}"),
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let argv: Vec<OsString> = std::env::args_os().collect();
     let command = match argv.get(1).and_then(|a| a.to_str()) {
@@ -563,6 +606,9 @@ fn main() -> Result<()> {
     let glm = ApiKey::glm();
     let opencode = ApiKey::opencode();
     let providers: [&dyn Provider; 7] = [&claude, &codex, &cursor, &glm, &grok, &kimi, &opencode];
+    if let Cmd::Hook { what } = &command {
+        return hook(&store, &claude, what);
+    }
     if let Cmd::Run { name, args } = &command {
         return run(&store, &providers, name, args);
     }
@@ -846,6 +892,7 @@ fn main() -> Result<()> {
         | Cmd::Serve { .. }
         | Cmd::Open { .. }
         | Cmd::Completions { .. }
+        | Cmd::Hook { .. }
         | Cmd::SyncUnits => {
             unreachable!()
         }

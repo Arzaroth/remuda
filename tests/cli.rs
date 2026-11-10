@@ -1183,3 +1183,73 @@ fn a_pinned_directory_starts_its_cli_on_the_pinned_login() {
     assert!(init.contains("codex()"), "{init}");
     assert!(home.fails(&["nope"]).contains("unrecognized subcommand"));
 }
+
+impl Home {
+    fn hook(&self, event: &str, input: Value, response: Value) -> String {
+        use std::io::Write;
+        let mut child = self
+            .command(&["hook", "artifact"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let body = json!({
+            "hook_event_name": event,
+            "session_id": "s-1",
+            "tool_name": "Artifact",
+            "tool_input": input,
+            "tool_response": response,
+        });
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(body.to_string().as_bytes())
+            .unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8(out.stdout).unwrap()
+    }
+}
+
+#[test]
+fn the_artifact_hook_switches_to_the_publishing_login_and_back() {
+    let home = Home::new();
+    assert_eq!(home.hook("PreToolUse", json!({}), Value::Null), "");
+
+    home.sign_in("a-work", "r-work", "u-work");
+    home.ok(&["import", "work"]);
+    home.sign_in("a-perso", "r-perso", "u-perso");
+    home.ok(&["import", "perso"]);
+    let page = json!({"file_path": "/s/page.html"});
+    let published = json!({"url": "https://claude.ai/artifact/Abc", "path": "/s/page.html"});
+    assert_eq!(
+        home.hook("PostToolUse", page.clone(), published.clone()),
+        ""
+    );
+    home.ok(&["use", "work"]);
+
+    let said: Value =
+        serde_json::from_str(&home.hook("PreToolUse", page.clone(), Value::Null)).unwrap();
+    let text = said["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .unwrap();
+    assert!(text.contains("from work to perso"), "{text}");
+    assert_eq!(
+        read(&home.creds())["claudeAiOauth"]["refreshToken"],
+        "r-perso"
+    );
+
+    home.hook("PostToolUse", page, published);
+    assert_eq!(
+        read(&home.creds())["claudeAiOauth"]["refreshToken"],
+        "r-work"
+    );
+    let log = home.ok(&["log", "-n", "2"]);
+    assert_eq!(log.matches("[artifact hook]").count(), 2, "{log}");
+}
