@@ -88,13 +88,18 @@ and `.set-aside-*` files.
   incomplete, or its credential file not JSON) is kept as it is, even with
   `--force`, the tokens carried set aside, and the rest goes on; a listed
   login under such a name is skipped instead of offered.
+- A carried login is kept as it is here when what it holds cannot be set
+  aside, and reported when it cannot be written; when the logins stored here
+  cannot be listed, a carried login is skipped and a listed one is not
+  offered. Each time the tokens carried are set aside and the rest goes on.
 - `config.toml` is checked (`Config::check`) against the logins stored here plus
   those listed to sign in, since names do not change, and written only when it
-  passes; problems are printed and the config here stays.
+  passes; problems, the logins here not being listed, or a config that cannot
+  be read or written are printed and the config here stays.
 - The proxy's settings are written when there are none; `--force` replaces
   them but keeps the client keys here, since the bundle carries none. Settings
-  here that cannot be read are kept as they are, even with `--force`, and
-  the rest goes on.
+  here that cannot be read, or sent malformed, leave the ones here as they
+  are, even with `--force`, and the rest goes on.
 - The fleet goes to `tokengauge --sync-join -` on stdin (`--sync-force` with
   `--force`), then `tokengauge --sync-test` runs. A TokenGauge that cannot run,
   fails, or exits before reading the fleet, is reported and the rest stays
@@ -103,9 +108,10 @@ and `.set-aside-*` files.
   writes its own files: remuda never touches them.
 
 A bundle received over a wormhole that cannot be restored (another format, or
-an error partway) is kept in the store as `.received-<ms>.json`, 0600, and the
-path printed; `remuda restore <that file>` reads it unsealed and removes it
-once it succeeds.
+tokens carried that cannot be set aside, which stops the restore so the
+bundle still holds them) is kept in the store as `.received-<ms>.json`, 0600,
+and the path printed; `remuda restore <that file>` reads it unsealed and
+removes it once it succeeds, or says it could not and goes on to the sign-ins.
 
 Then each listed login not stored here yet, and whose account is not stored
 here under another name (that is printed), is offered in turn ("Sign
@@ -117,7 +123,8 @@ be shown (`browser::displayed`). Pasting lets the browser be anywhere: Claude's 
 paste, Codex's, Grok's and Kimi's device codes. The login is filed only when
 its tokens name the account the list says (`Prompt::expect`); another account
 is refused, nothing is stored, and its tokens are set aside, as a refresh that
-answers for another account does. Its label comes back with it. Logins skipped, refused, or
+answers for another account does. Its label comes back with it, or is
+printed when it cannot be set, and the sign-ins go on. Logins skipped, refused, or
 left when the input ends, and all of them with `--no-sign-in`, are printed as
 the `remuda login NAME -p CLI --paste` lines to run later.
 

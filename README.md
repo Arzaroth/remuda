@@ -172,7 +172,9 @@ client keys (proxy settings it cannot read stay as they are). Tokens restore
 could not store, and those a login here held when `--force` replaced it, go
 to a set-aside file whose path it prints (an API key it keeps out is not set
 aside, since the sending machine still has it; one it replaces is), and
-a bundle received that it could not restore is kept for another try. A login
+a bundle received that it could not restore is kept for another try. A
+login, config.toml or the proxy's settings it cannot write is reported and the
+rest restored. A login
 of a provider the new machine's remuda does not know is skipped without being
 set aside there, so keep the set-aside file `--move` printed here until that
 login works over there.
