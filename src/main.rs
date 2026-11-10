@@ -799,7 +799,7 @@ fn main() -> Result<()> {
         let prompt = commands::Prompt {
             open: &open,
             opens_in: (!no_browser && browser::displayed()).then(|| choice.describe()),
-            lines,
+            lines: &lines,
             paste: !no_paste
                 && (*paste
                     || set.paste

@@ -401,7 +401,7 @@ pub struct Prompt<'a> {
     /// Where `open` opens it; none when opening is not offered.
     pub opens_in: Option<String>,
     /// The lines typed, in order, until the input ends.
-    pub lines: std::sync::mpsc::Receiver<String>,
+    pub lines: &'a std::sync::mpsc::Receiver<String>,
     /// A sign-in a browser on another machine can finish, where the CLI
     /// offers one.
     pub paste: bool,
@@ -1547,7 +1547,7 @@ mod tests {
             Prompt {
                 open: &open,
                 opens_in: Some("a test browser".into()),
-                lines,
+                lines: &lines,
                 paste: true,
             },
             &mut out,
@@ -1630,7 +1630,7 @@ mod tests {
             Prompt {
                 open: &|_, _| false,
                 opens_in: None,
-                lines,
+                lines: &lines,
                 paste: true,
             },
             &mut out,
@@ -1659,7 +1659,7 @@ mod tests {
             Prompt {
                 open: &|_, _| false,
                 opens_in: None,
-                lines,
+                lines: &lines,
                 paste: true,
             },
             &mut Vec::new(),
@@ -1684,7 +1684,7 @@ mod tests {
             Prompt {
                 open: &open,
                 opens_in: Some("a test browser".into()),
-                lines,
+                lines: &lines,
                 paste: true,
             },
             &mut Vec::new(),
@@ -1703,7 +1703,7 @@ mod tests {
             Prompt {
                 open: &|_, _| unreachable!(),
                 opens_in: None,
-                lines: std::sync::mpsc::channel().1,
+                lines: &std::sync::mpsc::channel().1,
                 paste: true,
             },
             &mut Vec::new(),
@@ -1735,7 +1735,7 @@ mod tests {
                 Prompt {
                     open: &open,
                     opens_in: Some("a test browser".into()),
-                    lines,
+                    lines: &lines,
                     paste: true,
                 },
                 &mut Vec::new(),
@@ -1995,7 +1995,7 @@ mod tests {
             Prompt {
                 open: &|_, _| unreachable!(),
                 opens_in: None,
-                lines,
+                lines: &lines,
                 paste: true,
             },
             &mut out,

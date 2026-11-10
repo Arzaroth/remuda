@@ -1285,7 +1285,7 @@ mod tests {
             crate::commands::Prompt {
                 open: &open,
                 opens_in: Some("a test browser".into()),
-                lines,
+                lines: &lines,
                 paste: false,
             },
             &mut out,
