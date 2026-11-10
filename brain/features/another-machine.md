@@ -17,9 +17,11 @@ sorts every stored login:
   refresh) and Cursor (its refresh answers with an access token, and has not
   been seen to return a new refresh token; one that does is kept). The
   credential file goes across byte for byte (`Store::files`,
-  `Store::put_files`), so `credsDigest` still holds; the sidecar goes across
-  as JSON and is written again, keeping `accountId`, and one without
-  `credsDigest` is given one on the way in.
+  `Store::put_files`), so `credsDigest` matches there exactly when it matched
+  here: a login `ops::heal` could not identify yet goes across unverified and
+  stays so until it is healed there. The sidecar goes across as JSON and is
+  written again, keeping `accountId`, and one without `credsDigest` is given
+  one on the way in.
 - **Listed, to sign in again**: Claude Code, Codex, Grok and Kimi, whose
   refresh is single use. Two machines holding one refresh token race, and the
   first refresh signs the other out; Grok's server treats a second use after
