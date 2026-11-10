@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-11-10
+
 ### Added
 
 - The API proxy card has a "Reachable from other machines" switch (`lan` in
