@@ -261,21 +261,25 @@ fn firewalld(search: &OsStr, interface: Option<&str>, port: u16) -> Option<Verdi
     });
     let open =
         open.filter(|_| ask("--get-active-zones").is_some_and(|r| r.ok && !by_source(&r.out)));
-    let add = match (&zone, interface) {
-        (Some(Some(z)), _) => format!(
-            "sudo firewall-cmd --permanent --zone={} --add-port={port}/tcp",
-            quoted(z)
-        ),
-        (None, Some(i)) => format!(
-            "Z=$(firewall-cmd --get-zone-of-interface={}) && [ -n \"$Z\" ] && sudo firewall-cmd --permanent --zone=\"$Z\" --add-port={port}/tcp",
-            quoted(i)
-        ),
-        _ => format!("sudo firewall-cmd --permanent --add-port={port}/tcp"),
+    let add = |zoned: &str| {
+        [
+            format!("sudo firewall-cmd{zoned} --add-port={port}/tcp"),
+            format!("sudo firewall-cmd --permanent{zoned} --add-port={port}/tcp"),
+        ]
+    };
+    let commands = match (&zone, interface) {
+        (Some(Some(z)), _) => add(&format!(" --zone={}", quoted(z))).to_vec(),
+        (None, Some(i)) => vec![format!(
+            "Z=$(firewall-cmd --get-zone-of-interface={}) && [ -n \"$Z\" ] && {}",
+            quoted(i),
+            add(" --zone=\"$Z\"").join(" && ")
+        )],
+        _ => add("").to_vec(),
     };
     Some(Verdict {
         name: "firewalld",
         open,
-        commands: vec![add, "sudo firewall-cmd --reload".to_owned()],
+        commands,
     })
 }
 
@@ -637,8 +641,8 @@ esac"#,
         assert_eq!(
             v.commands,
             [
-                "sudo firewall-cmd --permanent --add-port=8317/tcp",
-                "sudo firewall-cmd --reload"
+                "sudo firewall-cmd --add-port=8317/tcp",
+                "sudo firewall-cmd --permanent --add-port=8317/tcp"
             ]
         );
         let v = check(empty.path(), Some(dir.as_os_str()), None, 9000).unwrap();
@@ -663,10 +667,7 @@ esac"#,
         assert_eq!(v.open, Some(true));
         let v = check(empty.path(), Some(dir.as_os_str()), Some("wlan0"), 8317).unwrap();
         assert_eq!(v.open, Some(false));
-        assert_eq!(
-            v.commands[0],
-            "sudo firewall-cmd --permanent --add-port=8317/tcp"
-        );
+        assert_eq!(v.commands[0], "sudo firewall-cmd --add-port=8317/tcp");
         let (_bin, dir) = firewall_cmd(
             r#"case "$*" in
 --state) echo running ;;
@@ -677,8 +678,11 @@ esac"#,
         );
         let v = check(empty.path(), Some(dir.as_os_str()), Some("eth0"), 8317).unwrap();
         assert_eq!(
-            v.commands[0],
-            "sudo firewall-cmd --permanent --zone=work --add-port=8317/tcp"
+            v.commands,
+            [
+                "sudo firewall-cmd --zone=work --add-port=8317/tcp",
+                "sudo firewall-cmd --permanent --zone=work --add-port=8317/tcp"
+            ]
         );
     }
 
@@ -701,7 +705,7 @@ esac"#,
         assert_eq!(v.open, None);
         assert_eq!(
             v.commands[0],
-            "Z=$(firewall-cmd --get-zone-of-interface=wlan0) && [ -n \"$Z\" ] && sudo firewall-cmd --permanent --zone=\"$Z\" --add-port=8317/tcp"
+            "Z=$(firewall-cmd --get-zone-of-interface=wlan0) && [ -n \"$Z\" ] && sudo firewall-cmd --zone=\"$Z\" --add-port=8317/tcp && sudo firewall-cmd --permanent --zone=\"$Z\" --add-port=8317/tcp"
         );
     }
 
