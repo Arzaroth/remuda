@@ -108,8 +108,8 @@ refresh token into "sign this credential in again".
 - File: `auth.json` under `GROK_HOME`, else `~/.grok`, or `GROK_AUTH_PATH`
   itself. An object keyed by `<issuer>::<client id>`; the login is the entry
   whose key starts `https://auth.x.ai::` and has a `key`. The whole file is
-  stored; `install` replaces only the `auth.x.ai::` entries, compared and
-  swapped on them, so an API key under another scope survives a switch. An entry under any other scope with a `key` and no OIDC entry is an
+  stored; `install` replaces only the `auth.x.ai::` entries, refusing when
+  any of them differs from the outgoing login, so an API key under another scope survives a switch. An entry under any other scope with a `key` and no OIDC entry is an
   API key, reported by `foreign_login`.
 - Identity: the access token's own `sub`. Email from the entry. Expiry: the
   token's `exp`.
