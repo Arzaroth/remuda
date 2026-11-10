@@ -12,6 +12,14 @@
   does to them, the hook and its settings, and the commands.
 - `remuda doctor` checks that the artifact hook is installed once two Claude
   logins are stored.
+- The Quota card has a row per login: what it has left, its own burn, its
+  share of the pool's burn when weighted, and when it runs dry at that pace.
+  The card carries the Weighted/Absolute switch the Overview tile has.
+
+### Fixed
+
+- The Quota card's window picker no longer shows another window after the
+  list of windows is rebuilt.
 
 ## [0.38.0] - 2026-11-10
 

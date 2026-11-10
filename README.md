@@ -193,7 +193,8 @@ usage, read from TokenGauge's snapshot (only the login in use before
 TokenGauge 0.37). A Quota view pools every login of a CLI into one
 allowance and charts it over two weeks: what was left as TokenGauge recorded
 it (0.54 or later), and where it heads at the burn of the last 1, 3 or 6
-hours, each reset filling its login back up. A Versions view sets the installed remuda and
+hours, each reset filling its login back up, with each login's own burn
+and when it runs dry beside it. A Versions view sets the installed remuda and
 TokenGauge beside their latest releases and updates either. It keeps itself current: a change made from the CLI, by the
 refresh timer or by a TokenGauge fetch shows within a couple of seconds.
 
