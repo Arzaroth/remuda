@@ -53,6 +53,9 @@ window  = "profile"   # private (default), profile (the login's own), normal
 paste   = true        # Claude: end with a code to paste, not a local callback
 ```
 
+`remuda login` also pastes over SSH or with no display, and `--no-paste`
+asks for the callback for one run whatever `paste` and the session say.
+
 The page sets it from the Add a login dialog (`config::set_login`, which
 starts the file when there is none).
 

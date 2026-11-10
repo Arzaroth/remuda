@@ -30,7 +30,10 @@
 - Claude signs in the way Claude Code does: the browser calls back to remuda,
   with nothing to paste. `--paste`, `paste = true` under `[login]`, or the
   checkbox on the page brings the code to paste back, for a browser on another
-  machine.
+  machine. `remuda login` pastes by default over SSH, or on Linux with no
+  display, where the callback could not arrive, and `--no-paste` asks for the
+  callback anyway. The page names the machine a callback sign-in's browser must
+  be on.
 
 ## [0.38.0] - 2026-11-10
 

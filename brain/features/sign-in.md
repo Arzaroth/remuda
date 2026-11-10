@@ -1,7 +1,7 @@
 # Sign-in
 
 `remuda login <name> [-p <cli>] [--force] [--no-browser] [--browser <id>]
-[--window private|profile|normal] [--paste]` adds an account without touching the CLI's
+[--window private|profile|normal] [--paste|--no-paste]` adds an account without touching the CLI's
 live login. It checks the name first (`commands::begin_login`), then prints the
 provider's authorize URL before opening anything, saying whether any browser
 will do or only one on this machine, for a sign-in that calls back to a local
@@ -52,13 +52,19 @@ window, and the prompt says "the default browser".
 
 - **Claude Code**: the browser calls back to `localhost` on a free port, as
   Claude Code's own sign-in does, so the command waits (up to 10 minutes) and
-  the browser must be on this machine; the prompt and the page say so. Once
+  the browser must be on this machine; the prompt says so, and the page names
+  the machine remuda runs on (its hostname, `machine` in `POST /api/login`). Once
   stored, the browser lands on Claude's success page. Other requests to the
   port, and callbacks with another attempt's state, are answered and ignored;
   a refusal ends it. With `--paste`, `[login] paste = true` or the page's
   checkbox, the sign-in ends on Claude's page that shows `code#state` instead,
   to paste, so the browser can be on any machine; a pasted state that does not
-  match refuses the login. Either way the code is exchanged, the profile
+  match refuses the login. `login` also pastes when the session is evidently
+  remote (`browser::remote`: `SSH_CONNECTION` or `SSH_TTY` set, or on Linux
+  neither `DISPLAY` nor `WAYLAND_DISPLAY`), where a callback would never
+  arrive; `--no-paste` asks for the callback anyway, over SSH or against
+  `paste = true`. The page decides by its checkbox alone, since the server's
+  environment says nothing about where the page is viewed. Either way the code is exchanged, the profile
   fetched, and the credential is built the way Claude Code builds its own
   (`subscriptionType`, `rateLimitTier`, the `oauthAccount` block).
 - **Codex**: the browser calls back to `localhost:1455` by itself, so the

@@ -133,9 +133,11 @@ access to anything, and it ends when they stop.
 | `POST /api/label` `{name, text?}` / `rename` `{name, to}` / `remove` `{name}` | As the commands |
 | `POST /api/refresh` `{name?, force?}` | Refresh inactive credentials, then nudge TokenGauge |
 | `POST /api/reset` `{name}` | Spend one of a Claude login's banked usage-limit resets with its own token, then nudge TokenGauge |
-| `POST /api/login` `{provider?, name, force?}` | Begin a sign-in and open it in a private window: `{id, url, needsCode, opened}` |
+| `POST /api/login` `{provider?, name, force?, paste?}` | Begin a sign-in, opening nothing yet: `{id, url, needsCode, asksFor, localOnly, machine, opensIn}`, `machine` being the hostname a callback sign-in's browser must be on; `paste` defaults to `[login] paste` |
+| `POST /api/login/open` `{id}` | Open its link where `[login]` says: `{opened}` |
+| `GET`/`POST /api/login/settings` `{browser?, window?, paste?}` | Read or save `[login]`: `{browsers, browser, window, paste, opensIn}` |
 | `POST /api/login/finish` `{id, code?}` | Finish it and store the result |
-| `POST /api/login/cancel` `{id}` | Abandon it; a waiting Codex callback stops |
+| `POST /api/login/cancel` `{id}` | Abandon it; a waiting callback (Codex, Claude) stops and frees its port |
 | `POST /api/proxy/settings` `{enabled?, port?, lan?}` | Save the proxy's settings and start, move or stop it to match |
 | `POST /api/proxy/keys` `{name}` / `keys/remove` `{id}` | Make or remove a proxy access key |
 | `POST /api/usage/spend` `{days}` | `{export, logins}`: TokenGauge's `--usage-json` from the first day of the range, and every stored login by the digest it names logins with, then each removed one the ledger names (`removed: true`); or `{unavailable}` saying why there is none ([../features/web-page.md](../features/web-page.md#usage)) |
