@@ -170,25 +170,34 @@ impl Store {
             .collect())
     }
 
-    /// A crash between the two renames must leave a sidecar whose digest
-    /// does not match, never one that passes for the other half. So the
-    /// credential goes first, except over a sidecar with no digest (written by
-    /// 0.1.0), which would pass for anything: that one is replaced first.
     pub fn save(&self, entry: &Entry) -> Result<()> {
         validate_name(&entry.name)?;
         let mut creds = serde_json::to_string_pretty(&entry.creds)?;
         creds.push('\n');
         let mut meta = entry.meta.clone();
         meta.creds_digest = Some(digest(&creds));
-        let meta_path = self.meta_path(&entry.provider, &entry.name);
-        let creds_path = self.creds_path(&entry.provider, &entry.name);
+        self.write_pair(
+            &entry.provider,
+            &entry.name,
+            &creds,
+            &serde_json::to_value(&meta)?,
+        )
+    }
+
+    /// A crash between the two renames must leave a sidecar whose digest
+    /// does not match, never one that passes for the other half. So the
+    /// credential goes first, except over a sidecar with no digest (written by
+    /// 0.1.0), which would pass for anything: that one is replaced first.
+    fn write_pair(&self, provider: &str, name: &str, creds: &str, meta: &Value) -> Result<()> {
+        let meta_path = self.meta_path(provider, name);
+        let creds_path = self.creds_path(provider, name);
         let legacy = read_json(&meta_path)?.is_some_and(|m| m.get("credsDigest").is_none());
         if legacy {
-            write_json(&meta_path, &serde_json::to_value(&meta)?)?;
-            return write_private(&creds_path, &creds);
+            write_json(&meta_path, meta)?;
+            return write_private(&creds_path, creds);
         }
-        write_private(&creds_path, &creds)?;
-        write_json(&meta_path, &serde_json::to_value(&meta)?)
+        write_private(&creds_path, creds)?;
+        write_json(&meta_path, meta)
     }
 
     /// An entry's credential file as it is, and its sidecar.
