@@ -948,6 +948,18 @@ mod tests {
     }
 
     #[test]
+    fn a_callback_port_held_on_the_ipv6_loopback_is_taken() {
+        let Ok(held) = TcpListener::bind(("::1", 0)) else {
+            return;
+        };
+        let port = held.local_addr().unwrap().port();
+        let tmp = tempfile::tempdir().unwrap();
+        let c = Codex::at(tmp.path(), Api::local(&OFFLINE), port);
+        let err = c.begin_login(false).err().unwrap();
+        assert!(err.to_string().contains("codex login"), "{err}");
+    }
+
+    #[test]
     fn a_taken_callback_port_says_what_is_probably_holding_it() {
         let held = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let port = held.local_addr().unwrap().port();

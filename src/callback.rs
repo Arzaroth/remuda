@@ -164,3 +164,24 @@ pub fn page(message: &str) -> String {
         "<!doctype html><meta charset=utf-8><title>remuda</title><body style=\"font:16px system-ui;margin:3rem\"><p>{message}</p>"
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_cancel_ends_the_wait_while_connections_are_queued() {
+        let callback = Callback::bind(0, "/callback", "state".into(), "").unwrap();
+        let silent: Vec<TcpStream> = (0..4)
+            .map(|_| TcpStream::connect(("127.0.0.1", callback.port())).unwrap())
+            .collect();
+        callback.canceller()();
+        let started = Instant::now();
+
+        let err = callback.wait().unwrap_err();
+
+        assert!(err.to_string().contains("cancelled"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(5));
+        drop(silent);
+    }
+}
