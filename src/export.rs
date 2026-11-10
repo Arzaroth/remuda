@@ -439,6 +439,19 @@ pub fn restore(
         if store.get(p.id(), &login.name)?.is_some() {
             continue;
         }
+        if let Some(other) = store
+            .list(p.id())?
+            .into_iter()
+            .find(|e| e.meta.account_id == login.account_id)
+        {
+            writeln!(
+                out,
+                "skipped {}: its account is stored here as {}",
+                login.qualified(),
+                other.qualified()
+            )?;
+            continue;
+        }
         left.push(login);
     }
     Ok(Restored { sign_in: left })
