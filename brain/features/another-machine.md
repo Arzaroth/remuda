@@ -16,7 +16,8 @@ sorts every stored login:
   tokens work from two machines at once. That is the API keys (nothing to
   refresh) and Cursor (its refresh answers with an access token, and has not
   been seen to return a new refresh token; one that does is kept). Both files go across byte for byte (`Store::files`,
-  `Store::put_files`), so `credsDigest` and `accountId` still hold.
+  `Store::put_files`), so `credsDigest` and `accountId` still hold; a sidecar
+  without `credsDigest` is given one on the way in.
 - **Listed, to sign in again**: Claude Code, Codex, Grok and Kimi, whose
   refresh is single use. Two machines holding one refresh token race, and the
   first refresh signs the other out; Grok's server treats a second use after
