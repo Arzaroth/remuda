@@ -217,6 +217,7 @@ fn before(
         let back = session
             .restore
             .take()
+            .filter(|r| r.on == current.name)
             .map_or(current.name.clone(), |r| r.back);
         session.restore = Some(Restore {
             on: to.clone(),
@@ -548,6 +549,25 @@ mod tests {
         assert_eq!(active(&e), "perso");
         run(&e, &event("PostToolUse", "s1", read, Value::Null));
         assert_eq!(active(&e), "work");
+    }
+
+    #[test]
+    fn a_restore_left_behind_does_not_undo_a_switch_made_since() {
+        let e = two();
+        e.stored("third", "u-third", HOUR);
+        run(
+            &e,
+            &event("PostToolUse", "s1", json!({}), published("P", "/p.html")),
+        );
+        ops::switch(&e.store, &e.claude, "work", false).unwrap();
+        let read = json!({"action": "read", "url": "https://claude.ai/artifact/P"});
+        run(&e, &event("PreToolUse", "s1", read.clone(), Value::Null));
+        ops::switch(&e.store, &e.claude, "third", false).unwrap();
+
+        let said = run(&e, &event("PreToolUse", "s1", read.clone(), Value::Null));
+        assert!(context(&said).contains("back to third"), "{said:?}");
+        run(&e, &event("PostToolUse", "s1", read, Value::Null));
+        assert_eq!(active(&e), "third");
     }
 
     #[test]

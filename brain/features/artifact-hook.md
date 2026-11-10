@@ -48,7 +48,8 @@ happens. Otherwise the stored login of that account (verified, matched by
 `accountId`) is switched to through `ops::switch_when`, by `By::Hook`, which the
 log shows as `[artifact hook]`, and the restore is noted. Consecutive calls
 keep the first `back`, so a run of calls returns to the login before the
-first. The hook says what it did as `additionalContext`, so the session knows.
+first; a restore whose `on` is no longer live was left by a call that never
+returned, and the live login becomes `back` instead. The hook says what it did as `additionalContext`, so the session knows.
 
 When another session's call is on the login this one must leave (its restore
 has `on` equal to the live login), the hook waits, unlocked, for up to 30
