@@ -221,8 +221,13 @@ impl Store {
         if provider.is_empty() || !provider.chars().all(|c| c.is_ascii_lowercase()) {
             bail!("{provider:?} is not a provider");
         }
-        write_private(&self.creds_path(provider, name), creds)?;
-        write_json(&self.meta_path(provider, name), meta)
+        let mut meta = meta.clone();
+        if let Some(fields) = meta.as_object_mut() {
+            fields
+                .entry("credsDigest")
+                .or_insert_with(|| Value::String(digest(creds)));
+        }
+        self.write_pair(provider, name, creds, &meta)
     }
 
     /// Keeps tokens nothing else would hold, in a file `list` does not show.
