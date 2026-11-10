@@ -1,5 +1,6 @@
 use std::io::{Read, Write};
 use std::path::Path;
+use std::sync::atomic::{AtomicI32, AtomicPtr, Ordering};
 
 use age::secrecy::SecretString;
 use anyhow::{Context, Result, bail};
@@ -62,20 +63,7 @@ fn read_hidden(prompt: &str) -> Result<String> {
         .write(true)
         .open("/dev/tty")
         .context("no terminal to type the passphrase in; pass --passphrase-file")?;
-    let fd = tty.as_raw_fd();
-    let mut saved = std::mem::MaybeUninit::<libc::termios>::uninit();
-    // SAFETY: fd is an open terminal and `saved` is written by tcgetattr before use.
-    let saved = unsafe {
-        if libc::tcgetattr(fd, saved.as_mut_ptr()) != 0 {
-            bail!("could not read the terminal's settings");
-        }
-        saved.assume_init()
-    };
-    let mut quiet = saved;
-    quiet.c_lflag &= !libc::ECHO;
-    quiet.c_lflag |= libc::ECHONL;
-    // SAFETY: fd is an open terminal and `quiet` a copy of its own settings.
-    unsafe { libc::tcsetattr(fd, libc::TCSANOW, &quiet) };
+    let _quiet = Quiet::new(tty.as_raw_fd())?;
     let mut out = &tty;
     let typed = write!(out, "{prompt}")
         .and_then(|_| out.flush())
@@ -85,12 +73,80 @@ fn read_hidden(prompt: &str) -> Result<String> {
                 .read_line(&mut line)
                 .map(|_| line)
         });
-    // SAFETY: restores the settings read above on the same terminal.
-    unsafe { libc::tcsetattr(fd, libc::TCSANOW, &saved) };
     Ok(typed
         .context("could not read the passphrase")?
         .trim_end_matches(['\r', '\n'])
         .to_owned())
+}
+
+const ENDING: [libc::c_int; 4] = [libc::SIGINT, libc::SIGQUIT, libc::SIGHUP, libc::SIGTERM];
+
+static QUIET_FD: AtomicI32 = AtomicI32::new(-1);
+static SAVED: AtomicPtr<libc::termios> = AtomicPtr::new(std::ptr::null_mut());
+
+/// The terminal with echo off, its settings put back when dropped or when a
+/// signal ends remuda first.
+struct Quiet {
+    fd: libc::c_int,
+    saved: Box<libc::termios>,
+    before: Vec<libc::sighandler_t>,
+}
+
+extern "C" fn put_back_and_end(signal: libc::c_int) {
+    let fd = QUIET_FD.load(Ordering::SeqCst);
+    let saved = SAVED.load(Ordering::SeqCst);
+    // SAFETY: tcsetattr, signal and raise are async-signal-safe, and `saved`
+    // points at settings `Quiet` keeps alive while the handler is installed.
+    unsafe {
+        if fd >= 0 && !saved.is_null() {
+            libc::tcsetattr(fd, libc::TCSANOW, saved);
+        }
+        libc::signal(signal, libc::SIG_DFL);
+        libc::raise(signal);
+    }
+}
+
+impl Quiet {
+    fn new(fd: libc::c_int) -> Result<Quiet> {
+        let mut saved = std::mem::MaybeUninit::<libc::termios>::uninit();
+        // SAFETY: `saved` is written by tcgetattr before it is read.
+        let saved = unsafe {
+            if libc::tcgetattr(fd, saved.as_mut_ptr()) != 0 {
+                bail!("could not read the terminal's settings");
+            }
+            Box::new(saved.assume_init())
+        };
+        let mut quiet = *saved;
+        quiet.c_lflag &= !libc::ECHO;
+        quiet.c_lflag |= libc::ECHONL;
+        QUIET_FD.store(fd, Ordering::SeqCst);
+        SAVED.store(std::ptr::from_ref(&*saved).cast_mut(), Ordering::SeqCst);
+        let handler = put_back_and_end as extern "C" fn(libc::c_int) as libc::sighandler_t;
+        // SAFETY: the handler only touches what `Quiet` keeps until drop,
+        // where the previous handlers are put back.
+        let before = ENDING
+            .iter()
+            .map(|s| unsafe { libc::signal(*s, handler) })
+            .collect();
+        // SAFETY: fd is an open terminal and `quiet` a copy of its own settings.
+        unsafe { libc::tcsetattr(fd, libc::TCSANOW, &quiet) };
+        Ok(Quiet { fd, saved, before })
+    }
+}
+
+impl Drop for Quiet {
+    fn drop(&mut self) {
+        // SAFETY: restores the settings read in `new` on the same terminal,
+        // then the handlers that were there before.
+        unsafe {
+            libc::tcsetattr(self.fd, libc::TCSANOW, &*self.saved);
+            for (s, h) in ENDING.iter().zip(&self.before) {
+                libc::signal(*s, *h);
+            }
+        }
+        SAVED.store(std::ptr::null_mut(), Ordering::SeqCst);
+        QUIET_FD.store(-1, Ordering::SeqCst);
+    }
 }
 
 #[cfg(test)]
