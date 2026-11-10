@@ -466,6 +466,30 @@ mod tests {
     }
 
     #[test]
+    fn a_sign_out_refuses_while_any_x_ai_entry_moved() {
+        let tmp = tempfile::tempdir().unwrap();
+        let g = grok(tmp.path(), &OFFLINE);
+        let path = tmp.path().join("auth.json");
+        let two = |second: &str| {
+            let mut file = auth("u-1", "a", "r-a", 1_900_000_000);
+            let other = format!("{OIDC_SCOPE}u-2");
+            file[&other] = auth("u-2", "b", second, 1_900_000_000)[&other].clone();
+            file
+        };
+        write_json(&path, &two("r-new")).unwrap();
+
+        let moved = g.sign_out(&two("r-old"));
+        assert!(moved.unwrap_err().is::<crate::fsx::Changed>());
+        assert_eq!(read_json(&path).unwrap().unwrap(), two("r-new"));
+
+        g.sign_out(&two("r-new")).unwrap();
+        let file = read_json(&path).unwrap().unwrap();
+        assert!(file.get(format!("{OIDC_SCOPE}u-1")).is_none());
+        assert!(file.get(format!("{OIDC_SCOPE}u-2")).is_none());
+        assert_eq!(g.live().unwrap(), None);
+    }
+
+    #[test]
     fn a_refresh_rotates_the_tokens_and_keeps_the_rest() {
         let mut server = mockito::Server::new();
         let token = server
