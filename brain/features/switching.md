@@ -46,9 +46,10 @@ using. `remuda use` puts one back.
 
 It syncs the live login back first and refuses as a switch does (unstored,
 unconfirmed, `--discard` drops it). A login remuda cannot store, such as an API
-key, is never signed out. Under `Provider::lock_live` it then calls
-`Provider::sign_out` against the login it read, retrying up to three times when
-the CLI rotated it meanwhile:
+key, is never signed out. Under `Provider::lock_live` it syncs again and
+calls `Provider::sign_out` against the very login that sync read, so what
+leaves the CLI is what the store holds, retrying up to three times when the CLI
+rotated it meanwhile:
 
 - **Claude Code**: removes `claudeAiOauth` from `.credentials.json`, then
   `oauthAccount` from `.claude.json`, keeping every other key (`mcpOAuth`).
