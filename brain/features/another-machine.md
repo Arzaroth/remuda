@@ -80,8 +80,9 @@ and `.set-aside-*` files.
 - The proxy's settings are written when there are none; `--force` replaces
   them but keeps the client keys here, since the bundle carries none.
 - The fleet goes to `tokengauge --sync-join -` on stdin (`--sync-force` with
-  `--force`), then `tokengauge --sync-test` runs. A TokenGauge that fails, or
-  exits before reading the fleet, is reported and the rest stays restored.
+  `--force`), then `tokengauge --sync-test` runs. A TokenGauge that cannot run,
+  fails, or exits before reading the fleet, is reported and the rest stays
+  restored, the sign-ins included.
   TokenGauge refuses a machine already in another fleet unless forced, and
   writes its own files: remuda never touches them.
 
