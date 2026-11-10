@@ -57,7 +57,11 @@ use crate::store::Store;
 
 /// Keep several Claude Code and Codex logins and switch between them.
 #[derive(Parser)]
-#[command(version, args_conflicts_with_subcommands = true)]
+#[command(
+    version,
+    args_conflicts_with_subcommands = true,
+    disable_help_subcommand = true
+)]
 struct Cli {
     /// Replace this binary with the latest release.
     #[arg(long, conflicts_with = "check_update")]
@@ -205,6 +209,9 @@ enum Cmd {
     },
     /// Print a completion script for a shell.
     Completions { shell: clap_complete::Shell },
+    /// Show the help of a command, or a topic: skill (a SKILL.md that tells
+    /// Claude Code sessions how to live with remuda, and the artifact hook).
+    Help { topic: Vec<String> },
     /// Run by Claude Code's hooks on its artifact tools: `remuda hook artifact`
     /// reads the event on stdin and switches to the login that published the
     /// artifact for the call. Never fails the call.
@@ -236,6 +243,7 @@ impl Cmd {
             | Cmd::Login { .. }
             | Cmd::Open { .. }
             | Cmd::Completions { .. }
+            | Cmd::Help { .. }
             | Cmd::Hook { .. }
             | Cmd::SyncUnits
             | Cmd::Status => None,
@@ -538,6 +546,24 @@ fn run(store: &Store, providers: &[&dyn Provider], target: &str, args: &[OsStrin
     exit_as(status.with_context(|| format!("failed to start {}", spec.command))?);
 }
 
+const SKILL: &str = include_str!("skill.md");
+
+fn help(topic: &[String]) -> Result<()> {
+    if topic == ["skill"] {
+        print!("{SKILL}");
+        return Ok(());
+    }
+    let mut cmd = Cli::command();
+    for word in topic {
+        cmd = cmd
+            .find_subcommand(word)
+            .cloned()
+            .with_context(|| format!("no command or help topic named {word}; topics: skill"))?;
+    }
+    cmd.print_long_help()?;
+    Ok(())
+}
+
 /// The login a `remuda run` session started this process on, from its
 /// directory: the hook must not move the CLI's own login for it.
 fn run_login(store: &Store) -> Option<String> {
@@ -596,6 +622,9 @@ fn main() -> Result<()> {
     if let Cmd::Completions { shell } = command {
         clap_complete::generate(shell, &mut Cli::command(), "remuda", &mut io::stdout());
         return Ok(());
+    }
+    if let Cmd::Help { topic } = &command {
+        return help(topic);
     }
     let store = Store::open(&paths::store_root());
     let claude = Claude::from_env()?;
@@ -893,6 +922,7 @@ fn main() -> Result<()> {
         | Cmd::Serve { .. }
         | Cmd::Open { .. }
         | Cmd::Completions { .. }
+        | Cmd::Help { .. }
         | Cmd::Hook { .. }
         | Cmd::SyncUnits => {
             unreachable!()

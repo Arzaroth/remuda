@@ -1253,3 +1253,17 @@ fn the_artifact_hook_switches_to_the_publishing_login_and_back() {
     let log = home.ok(&["log", "-n", "2"]);
     assert_eq!(log.matches("[artifact hook]").count(), 2, "{log}");
 }
+
+#[test]
+fn help_prints_the_skill_and_each_command() {
+    let home = Home::new();
+    let skill = home.ok(&["help", "skill"]);
+    assert!(skill.starts_with("---\nname: remuda\n"), "{skill}");
+    assert!(skill.contains("remuda hook artifact"));
+    assert!(
+        home.ok(&["help", "use"])
+            .contains("Make a stored credential")
+    );
+    assert!(home.ok(&["help"]).contains("Commands:"));
+    assert!(home.fails(&["help", "nope"]).contains("topics: skill"));
+}
