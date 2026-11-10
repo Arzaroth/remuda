@@ -91,9 +91,11 @@ refresh token into "sign this credential in again".
 - OAuth (from codex-cli 0.167.0): client id `app_EMoamEEZ73f0CkXaXp7hrann`,
   issuer `auth.openai.com`. Sign-in is PKCE with a callback to
   `localhost:1455/auth/callback`; the code exchange is form-encoded. With
-  `paste` it is `codex login --device-auth` instead: `CodexDevice` posts the
-  client id to `/api/accounts/deviceauth/usercode`, shows `/codex/device` and
-  the user code, polls `/deviceauth/token` (403 and 404 mean not yet) for up
+  `paste` (or over SSH, or with no display) it is `codex login --device-auth`
+  instead: `CodexDevice` posts the client id to
+  `/api/accounts/deviceauth/usercode` (a 404 there means the server has no
+  device login, and the error says to sign in by callback), shows
+  `/codex/device` and the user code, polls `/deviceauth/token` (403 and 404 mean not yet) for up
   to 15 minutes, and exchanges the `authorization_code` it answers with the
   `code_verifier` it sends along, against the redirect
   `<issuer>/deviceauth/callback`. Refresh is
