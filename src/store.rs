@@ -496,6 +496,23 @@ mod tests {
     }
 
     #[test]
+    fn files_put_over_a_sidecar_that_is_not_json_replace_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(tmp.path());
+        std::fs::create_dir_all(tmp.path().join("claude")).unwrap();
+        std::fs::write(tmp.path().join("claude/work.meta.json"), "not json").unwrap();
+        let mut meta = serde_json::to_value(&entry("work", "u-1").meta).unwrap();
+        meta.as_object_mut().unwrap().remove("credsDigest");
+        let creds = "{\"claudeAiOauth\": {\"accessToken\": \"b\"}}\n";
+
+        store.put_files("claude", "work", creds, &meta).unwrap();
+
+        let after = store.get("claude", "work").unwrap().unwrap();
+        assert!(after.verified);
+        assert_eq!(after.meta.account_id, "u-1");
+    }
+
+    #[test]
     fn removing_takes_the_sidecar_with_it() {
         let tmp = tempfile::tempdir().unwrap();
         let store = Store::open(tmp.path());

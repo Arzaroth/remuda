@@ -1277,6 +1277,57 @@ mod tests {
     }
 
     #[test]
+    fn restore_keeps_a_login_here_it_cannot_read_and_restores_the_rest() {
+        let from = env(&OFFLINE);
+        keyed(&from, "bare", "k-bare");
+        keyed(&from, "hollow", "k-hollow");
+        keyed(&from, "zed", "k-zed");
+        from.stored("perso", "u-2", HOUR);
+        from.stored("work", "u-1", HOUR);
+        let bundle = bundle_of(&from, &[(&from.claude, "perso".into())]).unwrap();
+
+        let to = env(&OFFLINE);
+        let root = to.store.root();
+        std::fs::create_dir_all(root.join("glm")).unwrap();
+        std::fs::create_dir_all(root.join("claude")).unwrap();
+        let damaged = [
+            ("glm/bare.json", "{\"key\": \"k-mine\"}\n"),
+            ("glm/hollow.json", "{\"key\": \"k-own\"}\n"),
+            ("glm/hollow.meta.json", "{}\n"),
+            ("claude/perso.json", "not json"),
+            ("claude/perso.meta.json", "{}\n"),
+            ("claude/work.json", "not json either"),
+        ];
+        for (file, bytes) in damaged {
+            std::fs::write(root.join(file), bytes).unwrap();
+        }
+
+        let (restored, out) = restore_into(&to, round_trip(&bundle), true);
+
+        for at in ["glm/bare", "glm/hollow", "claude/perso"] {
+            assert!(
+                out.contains(&format!("kept {at}: the one stored here cannot be read")),
+                "{out}"
+            );
+        }
+        assert!(
+            out.contains("skipped claude/work: the one stored here cannot be read"),
+            "{out}"
+        );
+        for (file, bytes) in damaged {
+            assert_eq!(std::fs::read_to_string(root.join(file)).unwrap(), bytes);
+        }
+        let kept = set_aside_in(&out, "the tokens it carried are set aside in ");
+        assert_eq!(refresh_token(&kept), "r-perso");
+        assert!(out.contains("stored glm/zed"), "{out}");
+        assert_eq!(
+            to.store.get("glm", "zed").unwrap().unwrap().creds["key"],
+            "k-zed"
+        );
+        assert!(restored.sign_in.is_empty());
+    }
+
+    #[test]
     fn restore_force_keeps_the_proxy_client_keys_here() {
         let from = env(&OFFLINE);
         crate::fsx::write_json(
