@@ -296,6 +296,15 @@ pub fn installed() -> Vec<&'static Browser> {
         .collect()
 }
 
+/// Whether the session evidently has no browser of its own, so a browser on
+/// another machine would have to sign in: an SSH login, or on Linux no
+/// display. `set` says whether an environment variable is set and not empty.
+pub fn remote(set: &dyn Fn(&str) -> bool) -> bool {
+    set("SSH_CONNECTION")
+        || set("SSH_TTY")
+        || (cfg!(target_os = "linux") && !set("DISPLAY") && !set("WAYLAND_DISPLAY"))
+}
+
 /// A login's own browser profile, under the store, so its sessions are kept
 /// with it and never in a profile the user browses with.
 pub fn profile_dir(store: &Path, provider: &str, name: &str) -> PathBuf {

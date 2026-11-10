@@ -119,8 +119,12 @@ enum Cmd {
         window: Option<browser::Window>,
         /// End with a code to paste rather than a callback, where the CLI
         /// offers one (Claude Code), so the browser can be on another machine.
+        /// The default over SSH, or with no display.
         #[arg(long)]
         paste: bool,
+        /// Be called back even over SSH, or with `[login] paste = true`.
+        #[arg(long, conflicts_with = "paste")]
+        no_paste: bool,
     },
     /// Make a stored credential the one its CLI uses. NAME or PROVIDER/NAME.
     Use {
@@ -770,6 +774,7 @@ fn main() -> Result<()> {
         browser: named,
         window,
         paste,
+        no_paste,
     } = &command
     {
         let p = commands::find(&providers, provider)?;
@@ -794,7 +799,12 @@ fn main() -> Result<()> {
             open: &open,
             opens_in: (!no_browser).then(|| choice.describe()),
             lines,
-            paste: *paste || set.paste,
+            paste: !no_paste
+                && (*paste
+                    || set.paste
+                    || browser::remote(&|var| {
+                        std::env::var_os(var).is_some_and(|v| !v.is_empty())
+                    })),
         };
         return commands::login(&store, p, name, *force, prompt, out);
     }
