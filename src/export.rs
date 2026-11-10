@@ -328,7 +328,17 @@ pub fn restore(
                     .entry(p.id())
                     .or_insert_with(|| ops::sync_live(store, p).map_err(|e| format!("{e:#}")));
             }
-            let here = store.files(p.id(), &carried.name)?;
+            let here = match store
+                .files(p.id(), &carried.name)
+                .and_then(|files| store.get(p.id(), &carried.name).map(|_| files))
+            {
+                Ok(here) => here,
+                Err(e) => {
+                    writeln!(out, "kept {at}: the one stored here cannot be read: {e:#}")?;
+                    set_aside_carried(store, p, carried, out)?;
+                    continue;
+                }
+            };
             if !force && let Some((creds, _)) = &here {
                 writeln!(out, "kept {at}, already stored here (--force replaces it)")?;
                 if *creds != carried.creds {
@@ -435,8 +445,17 @@ pub fn restore(
             )?;
             continue;
         };
-        if store.get(p.id(), &login.name)?.is_some() {
-            continue;
+        match store.get(p.id(), &login.name) {
+            Ok(None) => {}
+            Ok(Some(_)) => continue,
+            Err(e) => {
+                writeln!(
+                    out,
+                    "skipped {}: the one stored here cannot be read: {e:#}",
+                    login.qualified()
+                )?;
+                continue;
+            }
         }
         if let Some(other) = store
             .list(p.id())?
