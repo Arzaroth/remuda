@@ -26,7 +26,6 @@
   store, which stays signed in for the next time.
 - A banked Claude reset says what it resets: `1 Fable reset` with a Reset
   Fable limit button, from TokenGauge's `bankedResets.kinds`.
-
 - `remuda export` and `remuda restore` set another machine up in one step:
   the logins, config.toml, the proxy's settings and TokenGauge's fleet with its
   S3 keys (`--without-s3-keys` leaves them out), through wyrmyon or
