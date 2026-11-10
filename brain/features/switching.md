@@ -62,9 +62,12 @@ rotated it meanwhile:
 - **Grok**: removes the `auth.x.ai::` entries from `auth.json`. An API key the
   file holds stays, so Grok keeps using it and remuda reports it as a login it
   cannot store.
-- **GLM, opencode Go**: refused; the page shows no Sign out for them.
+- **GLM, opencode Go**: refused; they have no `signs_out`, so the page shows
+  no Sign out for them.
 
-It notes the time in `.last-switch.json`, writes a ledger line with no account,
+What that last sync read is what it reports: a login gone meanwhile is already
+signed out, and the message names the login it took out. It notes the time in
+`.last-switch.json`, writes a ledger line with no account,
 and logs a `switch` event. With auto mode on for that CLI, the message says
 auto mode will put a login back: the next round picks one unless it holds,
 as when TokenGauge has no figures, every login it may pick is full with no

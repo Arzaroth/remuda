@@ -150,10 +150,12 @@ Add a login opens a dialog that picks a CLI by its logo, preselecting the
 page's, and a name, and starts a sign-in. Nothing opens by itself: the dialog
 shows the provider's link, with Copy the link, and Open in, which asks the
 server to open it where `[login]` says, as `login` does on Enter (see
-[sign-in.md](sign-in.md); `POST /api/login/open`). When the server could not
-open it, or runs with `--no-browser`, Open opens a new tab of the page's own
-browser instead, which also serves a page viewed through a tunnel from another
-machine. Two selects above the box set where sign-ins open, the browser (the
+[sign-in.md](sign-in.md); `POST /api/login/open`). When the server has no
+display (`browser::displayed`) or runs with `--no-browser`, Open opens a new
+tab of the page's own browser instead, which also serves a page viewed through
+a tunnel from another machine. When the server tried and could not open it,
+Open says so and tries the tab too, which the browser may block since it
+follows the server's answer rather than the click. Two selects above the box set where sign-ins open, the browser (the
 desktop's default or one installed) and the window (private, the login's own
 profile, normal), saved to `[login]` (`GET`/`POST /api/login/settings`); for
 Claude, a checkbox saves `paste`. The box says whether any browser will do or
