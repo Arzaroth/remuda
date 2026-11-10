@@ -104,23 +104,46 @@ fn read_text(path: &Path) -> Result<Option<String>> {
 }
 
 /// Removes a file another program writes when it still holds `expected`, and
-/// refuses with [`Changed`] when it holds something else. A link is refused:
-/// removing it would undo the user's own setup, and removing what it points
-/// at would leave it dangling.
+/// refuses with [`Changed`] when it holds something else. The file is moved
+/// aside before it is read, so what is removed is what was compared; one that
+/// differs goes back unless the program has written a newer one since. A link
+/// is refused: removing it would undo the user's own setup, and removing what
+/// it points at would leave it dangling.
 pub fn remove_json_if(path: &Path, expected: &Value) -> Result<()> {
     if fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
         anyhow::bail!("{} is a link, which remuda does not remove", path.display());
     }
-    match read_json(path)? {
-        None => Ok(()),
-        Some(held) if &held != expected => Err(Changed.into()),
-        Some(_) => match fs::remove_file(path) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-                Err(e).with_context(|| format!("failed to remove {}", path.display()))
-            }
-            _ => Ok(()),
-        },
+    let name = path
+        .file_name()
+        .context("path has no file name")?
+        .to_string_lossy();
+    let aside = path.with_file_name(format!(".{name}.remuda-out-{}", std::process::id()));
+    match fs::rename(path, &aside) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e).with_context(|| format!("failed to remove {}", path.display())),
+        Ok(()) => {}
     }
+    let held = read_json(&aside);
+    if matches!(&held, Ok(Some(held)) if held == expected) {
+        return fs::remove_file(&aside)
+            .with_context(|| format!("failed to remove {}", aside.display()));
+    }
+    match fs::hard_link(&aside, path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => {
+            return Err(e).with_context(|| {
+                format!(
+                    "failed to put {} back; it is at {}",
+                    path.display(),
+                    aside.display()
+                )
+            });
+        }
+    }
+    let _ = fs::remove_file(&aside);
+    held.with_context(|| format!("failed to read {}", path.display()))?;
+    Err(Changed.into())
 }
 
 /// Rewrites a JSON object another program also writes, and takes no lock on:
