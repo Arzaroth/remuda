@@ -193,7 +193,10 @@ page and takes the pasted key (`asks_for`: "the API key").
 [device.rs](../../src/device.rs) is RFC 8628 for Grok and Kimi: ask for a
 device code, hand the verification URL to the browser, poll the token endpoint
 at the interval given (slower on `slow_down`) until it answers, the user
-refuses, the code expires, or the page cancels. Nothing listens locally, so
+refuses, the code expires, or the page cancels. A request that fails, or a
+429 or 5xx answer, is tried again at the next poll, since the user may already
+have approved; the third in a row ends the sign-in. Codex's and Cursor's polls
+do the same. Nothing listens locally, so
 the browser can be on another machine. Codex's device sign-in is not RFC 8628
 and lives in `codex.rs`; it shares `device::pause`, the sleep a cancel cuts
 short. A sign-in whose address does not carry the code to type hands it over
