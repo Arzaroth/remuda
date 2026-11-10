@@ -398,10 +398,22 @@ pub fn restore(
     }
     if let Some(proxy) = &bundle.proxy {
         if force || !places.proxy.exists() {
-            let settings: crate::proxy::settings::Settings = serde_json::from_value(proxy.clone())
-                .context("the proxy settings are malformed")?;
-            crate::fsx::write_json(places.proxy, &serde_json::to_value(settings)?)?;
-            writeln!(out, "set the proxy up as it was, with no client keys yet")?;
+            let mut settings: crate::proxy::settings::Settings =
+                serde_json::from_value(proxy.clone())
+                    .context("the proxy settings are malformed")?;
+            settings.keys = crate::proxy::settings::File::at(places.proxy.to_owned())
+                .read()
+                .map(|here| here.keys)
+                .unwrap_or_default();
+            crate::fsx::write_json(places.proxy, &serde_json::to_value(&settings)?)?;
+            if settings.keys.is_empty() {
+                writeln!(out, "set the proxy up as it was, with no client keys yet")?;
+            } else {
+                writeln!(
+                    out,
+                    "set the proxy up as it was, keeping its client keys here"
+                )?;
+            }
         } else {
             writeln!(
                 out,
