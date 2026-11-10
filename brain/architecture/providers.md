@@ -95,7 +95,7 @@ refresh token into "sign this credential in again".
   instead: `CodexDevice` posts the client id to
   `/api/accounts/deviceauth/usercode` (a 404 there means the server has no
   device login, and the error says to sign in by callback), shows
-  `/codex/device` and the user code, polls `/deviceauth/token` (403 and 404 mean not yet) for up
+  `/codex/device` and the user code, polls `/api/accounts/deviceauth/token` (403 and 404 mean not yet) for up
   to 15 minutes, and exchanges the `authorization_code` it answers with the
   `code_verifier` it sends along, against the redirect
   `<issuer>/deviceauth/callback`. Refresh is
