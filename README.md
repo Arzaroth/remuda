@@ -173,7 +173,8 @@ another login published, it switches Claude Code to that login, then back once
 the call returns. Every open session is on that login while the call runs.
 
 ```bash
-remuda help skill > ~/.claude/skills/remuda/SKILL.md   # or wherever your skills live
+mkdir -p ~/.claude/skills/remuda   # or wherever your skills live
+remuda help skill > ~/.claude/skills/remuda/SKILL.md
 ```
 
 The skill tells sessions what a switch does to them, and holds the hook lines
