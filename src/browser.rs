@@ -426,6 +426,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_session_over_ssh_or_with_no_display_is_remote() {
+        let only = |vars: &'static [&'static str]| move |var: &str| vars.contains(&var);
+        assert!(remote(&only(&["SSH_CONNECTION", "DISPLAY"])));
+        assert!(remote(&only(&["SSH_TTY", "WAYLAND_DISPLAY"])));
+        assert!(!remote(&only(&["DISPLAY"])));
+        assert!(!remote(&only(&["WAYLAND_DISPLAY"])));
+        assert_eq!(remote(&only(&[])), cfg!(target_os = "linux"));
+    }
+
+    #[test]
     fn the_redirect_page_quotes_the_url_for_both_of_its_uses() {
         let page = redirect_page("http://127.0.0.1:1/#a&b\"<c");
         assert!(page.contains("url=http://127.0.0.1:1/#a&amp;b&quot;&lt;c\""));

@@ -2986,6 +2986,8 @@ mod tests {
             (&callback["needsCode"], &callback["localOnly"]),
             (&json!(false), &json!(true))
         );
+        assert_eq!(callback["machine"], json!(hostname()));
+        assert!(hostname().is_some_and(|h| !h.contains('\0')));
         let pasted = begin(json!({"name": "a", "paste": true}));
         assert_eq!(
             (&pasted["needsCode"], &pasted["localOnly"]),

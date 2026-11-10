@@ -445,6 +445,24 @@ fn only_import_and_login_start_a_missing_store() {
 }
 
 #[test]
+fn claude_signs_in_by_pasting_over_ssh_unless_told_otherwise() {
+    let home = Home::new();
+    let out = home
+        .command(&["login", "perso", "--no-browser"])
+        .env("SSH_CONNECTION", "10.0.0.2 50000 10.0.0.1 22")
+        .env("DISPLAY", ":0")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    let said = String::from_utf8(out.stdout).unwrap();
+    assert!(said.contains("in any browser:"), "{said}");
+    assert!(said.contains("Paste the code"), "{said}");
+
+    let both = home.fails(&["login", "perso", "--paste", "--no-paste"]);
+    assert!(both.contains("cannot be used with"), "{both}");
+}
+
+#[test]
 fn auto_says_where_it_would_move_a_cli_and_moves_nothing() {
     let home = Home::new();
     home.sign_in("a-work", "r-work", "u-work");
