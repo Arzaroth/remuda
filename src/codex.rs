@@ -601,6 +601,9 @@ impl PendingLogin for CodexDevice {
 
     fn finish(self: Box<Self>, _code: Option<&str>) -> Result<Login> {
         let answer = self.poll()?;
+        if self.cancelled.load(Ordering::Relaxed) {
+            bail!("the sign-in was cancelled");
+        }
         let get = |k: &str| {
             oauth::text(&answer, k).with_context(|| format!("the device sign-in sent no {k}"))
         };
