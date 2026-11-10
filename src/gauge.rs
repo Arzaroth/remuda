@@ -225,11 +225,22 @@ fn banked(resets: Option<&Value>) -> Value {
                         .as_str()
                         .filter(|k| ["session", "weekly", "full", "fable"].contains(k))?;
                     let count = k.get("count")?.as_u64().filter(|&n| n > 0)?;
-                    Some(json!({
+                    let clears: Vec<&str> = k
+                        .get("clears")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .collect();
+                    let mut out = json!({
                         "kind": kind,
                         "count": count,
                         "expiresAt": k.get("expiresAt").and_then(Value::as_str),
-                    }))
+                    });
+                    if !clears.is_empty() {
+                        out["clears"] = json!(clears);
+                    }
+                    Some(out)
                 })
                 .collect();
             if !kinds.is_empty() {
@@ -386,7 +397,8 @@ mod tests {
             json!({"payloads": [{"provider": "claude", "credential": "work", "usage": {"bankedResets": {
                 "available": 1, "expiresAt": at,
                 "kinds": [
-                    {"kind": "fable", "count": 1, "expiresAt": at},
+                    {"kind": "fable", "count": 1, "expiresAt": at,
+                     "clears": ["five_hour", 7, "seven_day_overage_included"]},
                     {"kind": "lunar", "count": 1},
                     {"kind": "weekly", "count": 0},
                 ],
@@ -398,7 +410,8 @@ mod tests {
         assert_eq!(
             usage["providers"]["claude"]["accounts"]["work"]["bankedResets"],
             json!({"available": 1, "expiresAt": at,
-                   "kinds": [{"kind": "fable", "count": 1, "expiresAt": at}]})
+                   "kinds": [{"kind": "fable", "count": 1, "expiresAt": at,
+                              "clears": ["five_hour", "seven_day_overage_included"]}]})
         );
     }
 

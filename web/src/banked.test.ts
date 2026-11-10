@@ -16,6 +16,18 @@ describe('describeBanked', () => {
     );
   });
 
+  it('says a Fable reset clears the 5-hour limit on an account that has one', () => {
+    const fable = (clears?: string[]) =>
+      describeBanked({ available: 3, expiresAt: null, kinds: [{ kind: 'fable', count: 3, expiresAt: null, clears }] }).title;
+    expect(fable(['five_hour', 'seven_day_overage_included'])).toBe(
+      "Resets your Fable limit and your 5-hour limit, and takes this week's Fable use off your weekly limit",
+    );
+    expect(fable(['seven_day_overage_included'])).toBe(
+      "Resets your Fable limit, and takes this week's Fable use off your weekly limit",
+    );
+    expect(fable()).toBe("Resets your Fable limit, and takes this week's Fable use off your weekly limit");
+  });
+
   it('keeps the plain count for a mix or an unsplit snapshot', () => {
     const mix = describeBanked({
       available: 3,

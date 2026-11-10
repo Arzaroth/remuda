@@ -12,10 +12,16 @@ const NAMES: Record<ResetKind, { noun: string; button: string; title: string }> 
   },
 };
 
+const FABLE_AND_SESSION =
+  "Resets your Fable limit and your 5-hour limit, and takes this week's Fable use off your weekly limit";
+
 export function describeBanked(r: Banked): { label: string; button: string; title: string } {
   const kinds = r.kinds ?? [];
   const only = kinds.length === 1 ? NAMES[kinds[0].kind] : undefined;
-  if (only) return { label: plural(r.available, only.noun), button: only.button, title: only.title };
+  if (only) {
+    const title = kinds[0].kind === 'fable' && kinds[0].clears?.includes('five_hour') ? FABLE_AND_SESSION : only.title;
+    return { label: plural(r.available, only.noun), button: only.button, title };
+  }
   return {
     label: plural(r.available, 'banked reset'),
     button: 'Reset limits',
