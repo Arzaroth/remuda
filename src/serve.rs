@@ -1138,6 +1138,7 @@ impl App {
                 let needs_code = login.needs_code();
                 let asks_for = login.asks_for();
                 let local_only = login.local_only();
+                let user_code = login.user_code().map(str::to_owned);
                 pending.insert(
                     id.clone(),
                     Pending {
@@ -1152,7 +1153,7 @@ impl App {
                 drop(pending);
                 let opens_in = self.open.opens_in(&self.login_settings());
                 Ok(
-                    json!({"id": id, "url": url, "needsCode": needs_code, "asksFor": asks_for, "localOnly": local_only, "machine": hostname(), "opensIn": opens_in}),
+                    json!({"id": id, "url": url, "needsCode": needs_code, "asksFor": asks_for, "localOnly": local_only, "userCode": user_code, "machine": hostname(), "opensIn": opens_in}),
                 )
             }
             ("POST", "/api/login/open") => {

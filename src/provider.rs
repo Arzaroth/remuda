@@ -80,6 +80,11 @@ pub trait PendingLogin: Send {
     fn canceller(&self) -> Box<dyn Fn() + Send + Sync> {
         Box::new(|| {})
     }
+    /// The code to type on the page `url` opens, when the address does not
+    /// carry it.
+    fn user_code(&self) -> Option<&str> {
+        None
+    }
     /// The browser must be on this machine: it calls back to a local port.
     fn local_only(&self) -> bool {
         false
@@ -179,8 +184,9 @@ pub trait Provider: Send + Sync {
     fn redeem_reset(&self, _entry: &Entry) -> Result<String> {
         bail!("{} has no banked resets", self.name())
     }
-    /// `paste` asks for a sign-in that ends with a code to paste rather than a
-    /// callback, where the CLI offers one, so the browser can be anywhere.
+    /// `paste` asks for a sign-in the browser can finish from anywhere rather
+    /// than through a callback to this machine, where the CLI offers one: a
+    /// code to paste back, or a device code to type in.
     fn begin_login(&self, paste: bool) -> Result<Box<dyn PendingLogin>>;
     /// The formats the CLI's inference endpoint takes for `model`, best
     /// first. Empty when the proxy cannot spend this login.

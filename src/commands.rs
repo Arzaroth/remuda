@@ -428,6 +428,9 @@ pub fn login(
         "Sign in to {} with the account to store as {name}, in {browser}:\n\n{url}\n",
         p.name()
     )?;
+    if let Some(code) = pending.user_code() {
+        writeln!(out, "Enter the code {code} there.\n")?;
+    }
     let offer = match &prompt.opens_in {
         Some(place) => format!(", or press Enter to open it in {place}"),
         None => String::new(),

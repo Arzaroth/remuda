@@ -1,4 +1,7 @@
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value, json};
@@ -11,7 +14,7 @@ use crate::pkce;
 use crate::provider::{Format, Identity, Login, PendingLogin, Provider, RunSpec, Upstream};
 use crate::store::Entry;
 
-const MIRRORS: &str = "0.153.4";
+const MIRRORS: &str = "0.167.0";
 const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const ISSUER: &str = "https://auth.openai.com";
 const CALLBACK_PORT: u16 = 1455;
@@ -20,6 +23,7 @@ const LOGIN_SCOPE: &str =
 const REFRESH_SCOPE: &str = "openid profile email";
 const AUTH_CLAIMS: &str = "https://api.openai.com/auth";
 const INFERENCE: &str = "https://chatgpt.com/backend-api/codex";
+const DEVICE_WAIT: Duration = Duration::from_secs(15 * 60);
 
 #[derive(Clone)]
 pub struct Api {
@@ -53,6 +57,21 @@ impl Api {
 
     fn token_url(&self) -> String {
         format!("{}/oauth/token", self.issuer)
+    }
+
+    fn device_url(&self, step: &str) -> String {
+        format!("{}/api/accounts/deviceauth/{step}", self.issuer)
+    }
+
+    fn post_json(&self, url: &str, body: &Value) -> Result<(reqwest::StatusCode, String)> {
+        let resp = self
+            .client
+            .post(url)
+            .json(body)
+            .send()
+            .context("device sign-in request failed")?;
+        let status = resp.status();
+        Ok((status, resp.text().unwrap_or_default()))
     }
 }
 
@@ -289,7 +308,10 @@ impl Provider for Codex {
         Ok(seat_of(&access, fresh("id_token").as_deref()))
     }
 
-    fn begin_login(&self, _paste: bool) -> Result<Box<dyn PendingLogin>> {
+    fn begin_login(&self, paste: bool) -> Result<Box<dyn PendingLogin>> {
+        if paste {
+            return CodexDevice::begin(&self.api);
+        }
         let state = pkce::random()?;
         let callback = Callback::bind(
             self.callback_port,
@@ -460,6 +482,125 @@ impl PendingLogin for CodexPending {
             ),
         }
         outcome
+    }
+}
+
+/// codex-cli's `codex login --device-auth`: the user types a code at
+/// `/codex/device` while this side polls, and the approval comes back as an
+/// authorization code and the verifier to exchange it with.
+struct CodexDevice {
+    api: Api,
+    device_auth_id: String,
+    user_code: String,
+    url: String,
+    interval: Duration,
+    cancelled: Arc<AtomicBool>,
+}
+
+fn excerpt(body: &str) -> String {
+    body.chars().take(200).collect()
+}
+
+impl CodexDevice {
+    fn begin(api: &Api) -> Result<Box<dyn PendingLogin>> {
+        let (status, body) = api.post_json(
+            &api.device_url("usercode"),
+            &json!({"client_id": CLIENT_ID}),
+        )?;
+        if !status.is_success() {
+            bail!(
+                "the device code request answered {status}: {}",
+                excerpt(&body)
+            );
+        }
+        let answer: Value =
+            serde_json::from_str(&body).context("malformed device code response")?;
+        let device_auth_id =
+            oauth::text(&answer, "device_auth_id").context("no device code was issued")?;
+        let user_code = ["user_code", "usercode"]
+            .iter()
+            .find_map(|k| oauth::text(&answer, k))
+            .context("no user code was issued")?;
+        let interval = answer
+            .get("interval")
+            .and_then(|v| v.as_u64().or_else(|| v.as_str()?.trim().parse().ok()))
+            .unwrap_or(5)
+            .max(1);
+        Ok(Box::new(CodexDevice {
+            api: api.clone(),
+            device_auth_id,
+            user_code,
+            url: format!("{}/codex/device", api.issuer),
+            interval: Duration::from_secs(interval),
+            cancelled: Arc::new(AtomicBool::new(false)),
+        }))
+    }
+
+    fn poll(&self) -> Result<Value> {
+        let deadline = Instant::now() + DEVICE_WAIT;
+        let body = json!({"device_auth_id": self.device_auth_id, "user_code": self.user_code});
+        let mut errors = 0;
+        loop {
+            crate::device::pause(&self.cancelled, self.interval)?;
+            if Instant::now() >= deadline {
+                bail!("the sign-in was not approved in time");
+            }
+            let (status, answer) = match self.api.post_json(&self.api.device_url("token"), &body) {
+                Ok(sent) => {
+                    errors = 0;
+                    sent
+                }
+                Err(e) => {
+                    errors += 1;
+                    if errors >= 3 {
+                        return Err(e);
+                    }
+                    continue;
+                }
+            };
+            if status == reqwest::StatusCode::FORBIDDEN || status == reqwest::StatusCode::NOT_FOUND
+            {
+                continue;
+            }
+            if !status.is_success() {
+                bail!("the device sign-in answered {status}: {}", excerpt(&answer));
+            }
+            return serde_json::from_str(&answer).context("malformed device sign-in response");
+        }
+    }
+}
+
+impl PendingLogin for CodexDevice {
+    fn url(&self) -> &str {
+        &self.url
+    }
+
+    fn needs_code(&self) -> bool {
+        false
+    }
+
+    fn user_code(&self) -> Option<&str> {
+        Some(&self.user_code)
+    }
+
+    fn canceller(&self) -> Box<dyn Fn() + Send + Sync> {
+        let cancelled = self.cancelled.clone();
+        Box::new(move || cancelled.store(true, Ordering::Relaxed))
+    }
+
+    fn finish(self: Box<Self>, _code: Option<&str>) -> Result<Login> {
+        let answer = self.poll()?;
+        let get = |k: &str| {
+            oauth::text(&answer, k).with_context(|| format!("the device sign-in sent no {k}"))
+        };
+        let creds = exchange(
+            &self.api,
+            &format!("{}/deviceauth/callback", self.api.issuer),
+            &get("code_verifier")?,
+            &get("authorization_code")?,
+        )?;
+        let identity = identity_of(&creds).context("the new login names no account")?;
+        Ok(Login { creds, identity })
     }
 }
 
