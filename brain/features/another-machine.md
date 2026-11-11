@@ -98,7 +98,9 @@ and `.set-aside-*` files.
 - `config.toml` is checked (`Config::check`) against the logins stored here plus
   those listed to sign in, since names do not change, and written only when it
   passes; problems, the logins here not being listed, or a config that cannot
-  be read or written are printed and the config here stays.
+  be read or written are printed and the config here stays. A listed login
+  whose sign-in is put off or fails stays named there, and the page still saves
+  the config, as long as an edit names no other unknown login.
 - The proxy's settings are written when there are none; `--force` replaces
   them but keeps the client keys here, since the bundle carries none. Settings
   here that cannot be read, or sent malformed, leave the ones here as they

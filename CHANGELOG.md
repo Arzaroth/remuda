@@ -54,7 +54,8 @@
   tokens are, the kept bundle, or the sending machine's store or set-aside file
   when it could not be kept. Nothing else keeps it, a config.toml or proxy
   settings it cannot write included. restore signs in the way `remuda
-  login` does, with `--paste` and `--no-paste`.
+  login` does, with `--paste` and `--no-paste`; the page saves a config.toml
+  that names a login still to sign in, but not one an edit adds.
 
 ### Changed
 

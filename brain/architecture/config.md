@@ -73,7 +73,7 @@ login outside its rule's order, a rule after an `otherwise` one (never in
 force), a rule with no tier at all, a ceiling outside 1 to 100, a ceiling or a
 fallback naming a login not stored, a dwell under a minute or over seven days,
 a negative margin; and in `[warm]`, a provider remuda does not have or cannot ping, a login not
-stored, or one named twice; and in `[login]`, a browser remuda does not know. Renaming or removing a login keeps `[warm]` in step. The page cannot save a config with any of them; a
+stored, or one named twice; and in `[login]`, a browser remuda does not know. Renaming or removing a login keeps `[warm]` in step. The page cannot save a config with any of them, except a login not stored that config.toml already names, as a restore leaves one whose sign-in was put off or failed: a save may keep it but not add one (`serve::check_save`). A
 file edited by hand is still read, and the page shows them.
 
 ## Writes
