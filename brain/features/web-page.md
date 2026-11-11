@@ -288,7 +288,9 @@ it gives back and whose it is, and the burn.
   was needed. An hour of the week never on record takes that hour's average
   over the other days. Its sum is the figure: what a usual week needs of the
   pool, with how many days it was learnt from; under a day on record there is
-  none. Each login's own usual burn comes from every hour that login was on
+  none. A login with no hours on record is named beside the figure, since
+  whatever it spent is missing from it. Hours follow the clock's, through
+  daylight saving changes of an hour or half of one. Each login's own usual burn comes from every hour that login was on
   record, which can reach further back than the pool's, the ones it sat full
   left out. A window with no trail adds no hours, whatever its opening.
 - **Pace** picks what the projection spends: Usual week (the default) spends
@@ -300,7 +302,8 @@ it gives back and whose it is, and the burn.
   not opened, or has just reset, opens when it is first spent from, so such a
   login is spent last. It is the best case the pool allows, since what a login
   has left at its reset is lost. With no pace on record the figures that need
-  one say so. On Usual week the last 3 hours' pace is drawn beside it, dotted,
+  one say so, and the next reset is named without a gain, which would assume
+  nothing more is spent before it. On Usual week the last 3 hours' pace is drawn beside it, dotted,
   for a day that is not going the usual way.
 - **Drain rate** charts the burn instead, hour by hour over the record, and
   the pace ahead: hour by hour on Usual week, flat otherwise.
@@ -308,7 +311,9 @@ it gives back and whose it is, and the burn.
   of its own window, its burn over the same hours in its own percent, and,
   weighted, that burn in the pool's units ("Of the pool"), so the rows add up
   to the card's burn and a login on a smaller plan shows its meter's real
-  pace (its usual burn, an average over the week, on Usual week). It says when
+  pace. On Usual week the burn is the login's usual burn, an average over the
+  week from its own hours on record, so the rows need not add up to the
+  pool's. It says when
   the login runs dry at that pace (spending its own usual hours on Usual
   week), or that its reset comes first or it is not burning, and when it
   resets. The projection's order
