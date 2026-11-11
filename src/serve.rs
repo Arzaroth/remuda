@@ -3325,6 +3325,63 @@ mod tests {
     }
 
     #[test]
+    fn a_key_sign_in_asks_its_fields_and_stores_the_answers() {
+        let e = env(&OFFLINE);
+        let providers: Vec<Box<dyn Provider>> = vec![
+            Box::new(crate::apikey::ApiKey::minimax().with(None, |_| None)),
+            Box::new(crate::apikey::ApiKey::deepseek().with(None, |_| None)),
+        ];
+        let app = App::new(
+            Store::open(e.store.root()),
+            places(&e),
+            providers,
+            TOKEN.into(),
+            PORT,
+            Box::new(Nowhere),
+        );
+        let (_, begun) = call(
+            &app,
+            "POST",
+            "/api/login",
+            json!({"provider": "minimax", "name": "cn"}),
+        );
+        assert_eq!(begun["needsCode"], true);
+        assert_eq!(
+            begun["fields"],
+            json!([{"name": "region", "label": "the region", "choices": ["global", "cn"]}])
+        );
+        let (status, _) = call(
+            &app,
+            "POST",
+            "/api/login/finish",
+            json!({"id": begun["id"], "code": "mm-1", "fields": {"region": "cn"}}),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(
+            e.store.get("minimax", "cn").unwrap().unwrap().creds,
+            json!({"key": "mm-1", "region": "cn"})
+        );
+
+        let (_, begun) = call(
+            &app,
+            "POST",
+            "/api/login",
+            json!({"provider": "deepseek", "name": "work"}),
+        );
+        assert_eq!(begun["fields"], json!([]));
+        call(
+            &app,
+            "POST",
+            "/api/login/finish",
+            json!({"id": begun["id"], "code": "ds-1"}),
+        );
+        assert_eq!(
+            e.store.get("deepseek", "work").unwrap().unwrap().creds,
+            json!({"key": "ds-1"})
+        );
+    }
+
+    #[test]
     fn a_sign_in_cancelled_while_it_finishes_is_not_stored() {
         use crate::codex::{Api as CodexApi, Codex};
         use crate::oauth::fake_jwt as jwt;

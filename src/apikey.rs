@@ -350,6 +350,15 @@ impl ApiKey {
     }
 
     #[cfg(test)]
+    pub fn falling_back_to(
+        mut self,
+        lookup: impl Fn() -> Option<String> + Send + Sync + 'static,
+    ) -> Self {
+        self.fallback = Some(Box::new(lookup));
+        self
+    }
+
+    #[cfg(test)]
     pub fn inferring_at(mut self, base: &str) -> Self {
         self.inference = base.to_owned();
         self
@@ -1120,10 +1129,21 @@ mod tests {
     }
 
     fn row(conn: &Connection, id: &str, value: Value, active: Option<bool>, created: i64) {
+        row_in(conn, "opencode-go", id, value, active, created);
+    }
+
+    fn row_in(
+        conn: &Connection,
+        integration: &str,
+        id: &str,
+        value: Value,
+        active: Option<bool>,
+        created: i64,
+    ) {
         conn.execute(
             "INSERT INTO credential (id, integration_id, label, value, active, time_created, time_updated) \
-             VALUES (?1, 'opencode-go', 'API key', ?2, ?3, ?4, ?4)",
-            rusqlite::params![id, value.to_string(), active, created],
+             VALUES (?1, ?2, 'API key', ?3, ?4, ?5, ?5)",
+            rusqlite::params![id, integration, value.to_string(), active, created],
         )
         .unwrap();
     }
@@ -1379,5 +1399,442 @@ mod tests {
         assert_eq!(p.live().unwrap(), None);
         assert!(!p.renews());
         assert!(!p.signs_out());
+    }
+
+    /// A login signed in through `p`'s own sign-in, answering its fields.
+    fn sign_in(store: &Store, p: &ApiKey, name: &str, key: &str, answers: Value) {
+        let login = p
+            .begin_login(false)
+            .unwrap()
+            .finish_with(Some(key), answers.as_object().unwrap())
+            .unwrap();
+        store
+            .save(&Entry::new(p.id(), name, login.creds, login.identity, 1))
+            .unwrap();
+    }
+
+    fn vars(pairs: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {
+        move |name| {
+            pairs
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, v)| (*v).to_owned())
+        }
+    }
+
+    #[test]
+    fn a_key_is_named_as_tokengauge_names_it() {
+        let hex: String = Sha256::digest(b"sk-or-v1-abc")
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(
+            identity_of(" sk-or-v1-abc ").account_id,
+            format!("key-{}", &hex[..16])
+        );
+    }
+
+    #[test]
+    fn deepseek_is_switched_in_opencodes_deepseek_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = ApiKey::deepseek().with(Some(tmp.path().join("auth.json")), |_| None);
+        write_json(
+            &tmp.path().join("auth.json"),
+            &json!({
+                "deepseek": {"type": "api", "key": "ds-work"},
+                "opencode-go": {"type": "api", "key": "go-1"},
+            }),
+        )
+        .unwrap();
+        save(&store, &p, "work", "ds-work");
+        save(&store, &p, "perso", "ds-perso");
+        assert_eq!(p.live().unwrap(), Some(json!({"key": "ds-work"})));
+        ops::switch(&store, &p, "perso", false).unwrap();
+        let file = read_json(&tmp.path().join("auth.json")).unwrap().unwrap();
+        assert_eq!(file["deepseek"], json!({"type": "api", "key": "ds-perso"}));
+        assert_eq!(file["opencode-go"], json!({"type": "api", "key": "go-1"}));
+    }
+
+    #[test]
+    fn deepseek_in_the_environment_is_switched_by_the_shell() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = ApiKey::deepseek().with(
+            Some(tmp.path().join("auth.json")),
+            vars(&[("DEEPSEEK_API_KEY", "ds-work")]),
+        );
+        save(&store, &p, "work", "ds-work");
+        save(&store, &p, "perso", "ds-perso");
+        let err = ops::switch(&store, &p, "perso", false).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("eval \"$(remuda env deepseek/perso)\""),
+            "{err:#}"
+        );
+        let perso = store.get("deepseek", "perso").unwrap().unwrap();
+        assert_eq!(
+            p.env_line(&perso).unwrap(),
+            "export DEEPSEEK_API_KEY='ds-perso'"
+        );
+        assert!(!tmp.path().join("auth.json").exists());
+    }
+
+    #[test]
+    fn deepseek_is_switched_in_opencode_2s_database() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = ApiKey::deepseek().with(Some(tmp.path().join("auth.json")), |_| None);
+        let db = database(tmp.path(), true);
+        row_in(
+            &db,
+            "deepseek",
+            "cred_d",
+            json!({"type": "key", "key": "ds-work"}),
+            Some(true),
+            1,
+        );
+        row(
+            &db,
+            "cred_g",
+            json!({"type": "key", "key": "go-1"}),
+            Some(true),
+            2,
+        );
+        save(&store, &p, "work", "ds-work");
+        save(&store, &p, "perso", "ds-perso");
+        ops::switch(&store, &p, "perso", false).unwrap();
+        let after = rows(&db);
+        assert_eq!(after[0].1, json!({"type": "key", "key": "ds-perso"}));
+        assert_eq!(after[1].1, json!({"type": "key", "key": "go-1"}));
+    }
+
+    fn minimax(dir: &std::path::Path, env: &'static [(&'static str, &'static str)]) -> ApiKey {
+        ApiKey::minimax().with(Some(dir.join("auth.json")), vars(env))
+    }
+
+    #[test]
+    fn a_minimax_sign_in_stores_its_region() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = minimax(tmp.path(), &[]);
+        let fields = p.begin_login(false).unwrap().fields();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].name, "region");
+        assert_eq!(fields[0].choices, ["global", "cn"]);
+        sign_in(&store, &p, "cn", "mm-cn", json!({"region": "CN"}));
+        sign_in(&store, &p, "global", "mm-global", json!({}));
+        assert_eq!(
+            store.get("minimax", "cn").unwrap().unwrap().creds,
+            json!({"key": "mm-cn", "region": "cn"})
+        );
+        assert_eq!(
+            store.get("minimax", "global").unwrap().unwrap().creds,
+            json!({"key": "mm-global", "region": "global"})
+        );
+        let err = p
+            .begin_login(false)
+            .unwrap()
+            .finish_with(Some("k"), json!({"region": "eu"}).as_object().unwrap())
+            .err()
+            .unwrap();
+        assert!(err.to_string().contains("global or cn"), "{err}");
+    }
+
+    #[test]
+    fn minimax_reads_the_region_off_the_entry_or_the_environment() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_json(
+            &tmp.path().join("auth.json"),
+            &json!({"minimax-cn-coding-plan": {"type": "api", "key": "mm-cn"}}),
+        )
+        .unwrap();
+        assert_eq!(
+            minimax(tmp.path(), &[]).live().unwrap(),
+            Some(json!({"key": "mm-cn", "region": "cn"}))
+        );
+        assert_eq!(
+            minimax(
+                tmp.path(),
+                &[("MINIMAX_API_KEY", "mm-env"), ("MINIMAX_REGION", "cn")]
+            )
+            .live()
+            .unwrap(),
+            Some(json!({"key": "mm-env", "region": "cn"}))
+        );
+        assert_eq!(
+            minimax(tmp.path(), &[("MINIMAX_API_KEY", "mm-env")])
+                .live()
+                .unwrap(),
+            Some(json!({"key": "mm-env"}))
+        );
+    }
+
+    #[test]
+    fn a_sync_keeps_what_the_store_holds_beside_the_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = minimax(tmp.path(), &[("MINIMAX_API_KEY", "mm-cn")]);
+        sign_in(&store, &p, "cn", "mm-cn", json!({"region": "cn"}));
+        assert_eq!(
+            ops::sync_live(&store, &p).unwrap(),
+            LiveState::Stored {
+                name: "cn".into(),
+                synced: true
+            }
+        );
+        assert_eq!(
+            store.get("minimax", "cn").unwrap().unwrap().creds,
+            json!({"key": "mm-cn", "region": "cn"})
+        );
+    }
+
+    #[test]
+    fn minimax_is_switched_in_its_regions_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = minimax(tmp.path(), &[]);
+        write_json(
+            &tmp.path().join("auth.json"),
+            &json!({"minimax-coding-plan": {"type": "api", "key": "mm-g1"}}),
+        )
+        .unwrap();
+        sign_in(&store, &p, "g1", "mm-g1", json!({"region": "global"}));
+        sign_in(&store, &p, "g2", "mm-g2", json!({"region": "global"}));
+        sign_in(&store, &p, "cn", "mm-cn", json!({"region": "cn"}));
+        let file = || read_json(&tmp.path().join("auth.json")).unwrap().unwrap();
+
+        ops::switch(&store, &p, "g2", false).unwrap();
+        assert_eq!(
+            file(),
+            json!({"minimax-coding-plan": {"type": "api", "key": "mm-g2"}})
+        );
+
+        ops::switch(&store, &p, "cn", false).unwrap();
+        assert_eq!(
+            file(),
+            json!({"minimax-cn-coding-plan": {"type": "api", "key": "mm-cn"}})
+        );
+        assert_eq!(
+            p.live().unwrap(),
+            Some(json!({"key": "mm-cn", "region": "cn"}))
+        );
+
+        ops::switch(&store, &p, "g1", false).unwrap();
+        assert_eq!(
+            file(),
+            json!({"minimax-coding-plan": {"type": "api", "key": "mm-g1"}})
+        );
+        assert_eq!(
+            p.live().unwrap(),
+            Some(json!({"key": "mm-g1", "region": "global"}))
+        );
+    }
+
+    #[test]
+    fn a_minimax_key_that_is_not_the_live_one_is_never_overwritten() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = minimax(tmp.path(), &[]);
+        let before = json!({
+            "minimax": {"type": "api", "key": "mm-g1"},
+            "minimax-cn": {"type": "api", "key": "mm-other"},
+        });
+        write_json(&tmp.path().join("auth.json"), &before).unwrap();
+        sign_in(&store, &p, "g1", "mm-g1", json!({"region": "global"}));
+        sign_in(&store, &p, "cn2", "mm-cn2", json!({"region": "cn"}));
+        let err = ops::switch(&store, &p, "cn2", false).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("minimax-cn entry holds a login"),
+            "{err:#}"
+        );
+        assert_eq!(
+            read_json(&tmp.path().join("auth.json")).unwrap(),
+            Some(before)
+        );
+    }
+
+    #[test]
+    fn a_minimax_key_read_ahead_of_the_live_one_refuses_the_switch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = minimax(tmp.path(), &[]);
+        let before = json!({
+            "minimax": {"type": "api", "key": "mm-g1"},
+            "minimax-coding-plan": {"type": "api", "key": "mm-g-other"},
+            "minimax-cn-coding-plan": {"type": "api", "key": "mm-cn"},
+        });
+        write_json(&tmp.path().join("auth.json"), &before).unwrap();
+        sign_in(&store, &p, "g1", "mm-g1", json!({"region": "global"}));
+        sign_in(&store, &p, "cn", "mm-cn", json!({"region": "cn"}));
+        let err = ops::switch(&store, &p, "cn", false).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("remove minimax-coding-plan from opencode"),
+            "{err:#}"
+        );
+        assert_eq!(
+            read_json(&tmp.path().join("auth.json")).unwrap(),
+            Some(before)
+        );
+    }
+
+    #[test]
+    fn minimax_moves_regions_in_opencode_2s_database() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = minimax(tmp.path(), &[]);
+        let db = database(tmp.path(), true);
+        row_in(
+            &db,
+            "minimax-cn",
+            "cred_c",
+            json!({"type": "key", "key": "mm-cn"}),
+            Some(true),
+            1,
+        );
+        row_in(
+            &db,
+            "minimax-coding-plan",
+            "cred_g",
+            json!({"type": "key", "key": "mm-old"}),
+            Some(true),
+            2,
+        );
+        sign_in(&store, &p, "cn", "mm-cn", json!({"region": "cn"}));
+        sign_in(&store, &p, "g", "mm-g", json!({"region": "global"}));
+        ops::switch(&store, &p, "g", false).unwrap();
+        let after = rows(&db);
+        assert_eq!(after.len(), 2, "{after:?}");
+        assert_eq!(
+            after[0],
+            (
+                "cred_g".to_owned(),
+                json!({"type": "key", "key": "mm-old"}),
+                Some(false)
+            )
+        );
+        assert_eq!(after[1].1, json!({"type": "key", "key": "mm-g"}));
+        assert_eq!(
+            p.live().unwrap(),
+            Some(json!({"key": "mm-g", "region": "global"}))
+        );
+
+        let before = rows(&db);
+        let err = ops::switch(&store, &p, "cn", false).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("remove them from opencode"),
+            "{err:#}"
+        );
+        assert_eq!(rows(&db), before);
+    }
+
+    #[test]
+    fn minimax_puts_its_region_in_the_environment() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = minimax(tmp.path(), &[]);
+        sign_in(&store, &p, "cn", "mm-cn", json!({"region": "cn"}));
+        assert_eq!(
+            p.env_line(&store.get("minimax", "cn").unwrap().unwrap())
+                .unwrap(),
+            "export MINIMAX_API_KEY='mm-cn'\nexport MINIMAX_REGION='cn'"
+        );
+    }
+
+    #[test]
+    fn openrouter_is_switched_by_the_shell_with_its_management_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = ApiKey::openrouter().with(None, |_| None);
+        let fields = p.begin_login(false).unwrap().fields();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].name, "management");
+        assert!(fields[0].choices.is_empty());
+        sign_in(&store, &p, "full", "or-1", json!({"management": " mg-1 "}));
+        sign_in(&store, &p, "bare", "or-2", json!({"management": ""}));
+        let full = store.get("openrouter", "full").unwrap().unwrap();
+        let bare = store.get("openrouter", "bare").unwrap().unwrap();
+        assert_eq!(full.creds, json!({"key": "or-1", "management": "mg-1"}));
+        assert_eq!(bare.creds, json!({"key": "or-2"}));
+        assert_eq!(full.meta.account_id, identity_of("or-1").account_id);
+        assert_eq!(
+            p.env_line(&full).unwrap(),
+            "export OPENROUTER_API_KEY='or-1'\nexport OPENROUTER_MANAGEMENT_KEY='mg-1'"
+        );
+        assert_eq!(
+            p.env_line(&bare).unwrap(),
+            "export OPENROUTER_API_KEY='or-2'\nunset OPENROUTER_MANAGEMENT_KEY\nunset OPENROUTER_PROVISIONING_KEY"
+        );
+        let err = p.install(&full, None).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("eval \"$(remuda env openrouter/full)\""),
+            "{err}"
+        );
+        assert_eq!(p.live().unwrap(), None);
+    }
+
+    #[test]
+    fn openrouter_keeps_the_management_key_when_the_shell_has_the_inference_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = ApiKey::openrouter().with(None, vars(&[("OPENROUTER_KEY", "or-1")]));
+        sign_in(&store, &p, "full", "or-1", json!({"management": "mg-1"}));
+        assert_eq!(p.live().unwrap(), Some(json!({"key": "or-1"})));
+        ops::sync_live(&store, &p).unwrap();
+        assert_eq!(
+            store.get("openrouter", "full").unwrap().unwrap().creds,
+            json!({"key": "or-1", "management": "mg-1"})
+        );
+    }
+
+    #[test]
+    fn copilot_reads_the_environment_then_the_github_cli() {
+        let p = ApiKey::copilot()
+            .with(None, |_| None)
+            .falling_back_to(|| Some("gho_cli\n".into()));
+        assert_eq!(p.live().unwrap(), Some(json!({"key": "gho_cli"})));
+        let p = ApiKey::copilot()
+            .with(
+                None,
+                vars(&[
+                    ("GITHUB_TOKEN", "ghp_late"),
+                    ("COPILOT_QUOTA_TOKEN", "ghp_first"),
+                ]),
+            )
+            .falling_back_to(|| Some("gho_cli".into()));
+        assert_eq!(p.live().unwrap(), Some(json!({"key": "ghp_first"})));
+        let p = ApiKey::copilot()
+            .with(None, |_| None)
+            .falling_back_to(|| Some(" ".into()));
+        assert_eq!(p.live().unwrap(), None);
+    }
+
+    #[test]
+    fn copilot_is_switched_by_gh_token() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = ApiKey::copilot()
+            .with(None, |_| None)
+            .falling_back_to(|| Some("gho_work".into()));
+        save(&store, &p, "work", "gho_work");
+        save(&store, &p, "perso", "ghp_perso");
+        assert_eq!(
+            ops::sync_live(&store, &p).unwrap(),
+            LiveState::Stored {
+                name: "work".into(),
+                synced: true
+            }
+        );
+        let perso = store.get("copilot", "perso").unwrap().unwrap();
+        assert_eq!(
+            p.env_line(&perso).unwrap(),
+            "unset COPILOT_QUOTA_TOKEN\nexport GH_TOKEN='ghp_perso'"
+        );
+        let err = ops::switch(&store, &p, "perso", false).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("reads its key from GH_TOKEN"),
+            "{err:#}"
+        );
+        assert_eq!(perso.meta.account_id, identity_of("ghp_perso").account_id);
     }
 }
