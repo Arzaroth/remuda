@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-11-11
+
 ### Added
 
 - Usage's Value tab shows each login's plan weight as measured beside the one
