@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { HOUR, MIN } from './format';
-import { burn, capacity, knownFrom, logins, pick, project, recorded, remaining, type Login } from './quota';
+import { burn, capacity, knownFrom, logins, pick, project, recorded, remaining, shares, type Login } from './quota';
 import type { Combined, Window } from './types';
 
 const NOW = Date.UTC(2026, 10, 4, 12);
@@ -111,6 +111,33 @@ describe('burn', () => {
     expect(burn(ls, NOW, 6)).toBeCloseTo(10);
     expect(burn([login('a', 30, HOUR, [[NOW - 10 * MIN, 10]])], NOW, 1)).toBeNull();
     expect(burn([], NOW, 1)).toBeNull();
+  });
+});
+
+describe('shares', () => {
+  it("gives each login its own burn and its part of the pool's, which add up to the pool's", () => {
+    const ls = [login('max', 40, 20 * HOUR, [[NOW - 2 * HOUR, 30]]), login('pro', 70, 20 * HOUR, [[NOW - 2 * HOUR, 50]], 0.25)];
+    const each = shares(ls, NOW, 3);
+    expect(each.map((s) => [s.name, s.left, s.own, s.pooled])).toEqual([
+      ['max', 60, 5, 5],
+      ['pro', 30, 10, 2.5],
+    ]);
+    expect(each.reduce((a, s) => a + s.pooled!, 0)).toBeCloseTo(burn(ls, NOW, 3)!);
+  });
+
+  it('says when a login runs dry at its own pace, unless its reset comes first or it is not burning', () => {
+    const ls = [
+      login('dry', 40, 20 * HOUR, [[NOW - 2 * HOUR, 30]]),
+      login('saved', 40, 4 * HOUR, [[NOW - 2 * HOUR, 30]]),
+      login('idle', 40, null, [[NOW - 2 * HOUR, 40]]),
+    ];
+    expect(shares(ls, NOW, 3).map((s) => s.empty)).toEqual([NOW + 12 * HOUR, null, null]);
+    expect(shares(ls, NOW, 3)[2].own).toBe(0);
+  });
+
+  it('has no burn while too little is on record', () => {
+    const [s] = shares([login('a', 30, HOUR, [[NOW - 10 * MIN, 10]])], NOW, 1);
+    expect([s.own, s.pooled, s.empty, s.left]).toEqual([null, null, null, 70]);
   });
 });
 

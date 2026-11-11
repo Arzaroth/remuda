@@ -4,9 +4,9 @@ import { DAY, HOUR } from '../format';
 import { now, store } from '../state';
 import { remember, remembered } from '../storage';
 import { go } from '../route';
-import { burn, capacity, knownFrom, logins, pick, project, recorded, remaining, type Login, type Point, type Refill } from '../quota';
+import { burn, capacity, knownFrom, logins, pick, project, recorded, remaining, shares, type Login, type Point, type Refill } from '../quota';
 import { inUse } from '../windows';
-import { windows } from './Strip';
+import { weighted, Weighting, windows } from './Strip';
 import { Chips } from './Usage';
 import { ProviderIcon } from './ProviderIcon';
 
@@ -26,6 +26,7 @@ const FUTURES = [
 
 const pct = (v: number) => `${Math.round(v)}%`;
 const rate = (v: number) => `${v >= 10 ? Math.round(v) : v.toFixed(1)}%/h`;
+const factor = (w: number) => `×${w >= 0.995 ? 1 : w.toFixed(2)}`;
 const dayFrom = (ms: number, days: number) => {
   const d = new Date(ms);
   d.setDate(d.getDate() + days);
@@ -253,6 +254,7 @@ function Pool(props: { id: string; name: string; prefs: Prefs; offset: number; s
     return out;
   });
   const next = () => ahead().refills.find((r) => r.at > t());
+  const each = createMemo(() => shares(ls(), t(), props.prefs.hours));
   const cap = () => capacity(ls());
   return (
     <section class="u-card pool" style={{ '--brand': brand(props.id) }}>
@@ -265,17 +267,31 @@ function Pool(props: { id: string; name: string; prefs: Prefs; offset: number; s
             <Show when={c() && all().length < 2}> · {c()!.title}</Show>
           </small>
         </h3>
-        <Show when={all().length > 1}>
-          <label class="u-select">
-            <span class="sr">Window</span>
-            <select
-              value={c()?.title}
-              onChange={(e) => props.setPrefs({ windows: { ...props.prefs.windows, [props.id]: e.currentTarget.value } })}
-            >
-              <For each={all()}>{(w) => <option value={w.title}>{w.title}</option>}</For>
-            </select>
-          </label>
-        </Show>
+        <div class="pool-tools">
+          <Weighting id={props.id} />
+          <Show when={c() && weighted(props.id) && !c()!.weighted}>
+            <small class="u-sub" title="TokenGauge has no plan weights for this window, so its figures count each login once">
+              each login once here
+            </small>
+          </Show>
+          <Show when={all().length > 1}>
+            <label class="u-select">
+              <span class="sr">Window</span>
+              <select
+                value={c()?.title}
+                onChange={(e) => props.setPrefs({ windows: { ...props.prefs.windows, [props.id]: e.currentTarget.value } })}
+              >
+                <For each={all()}>
+                  {(w) => (
+                    <option value={w.title} selected={w.title === c()?.title}>
+                      {w.title}
+                    </option>
+                  )}
+                </For>
+              </select>
+            </label>
+          </Show>
+        </div>
       </header>
       <Show when={c()} fallback={<p class="note">TokenGauge has no figures for this CLI's logins yet.</p>}>
         <dl class="pool-top">
@@ -301,6 +317,43 @@ function Pool(props: { id: string; name: string; prefs: Prefs; offset: number; s
             note={spent() === null ? 'not recorded yet' : `over the last ${props.prefs.hours}h`}
           />
         </dl>
+        <div class="pool-logins">
+          <table class="u-table">
+            <thead>
+              <tr>
+                <th>Login</th>
+                <th>Left</th>
+                <th>Burn</th>
+                <Show when={c()!.weighted}>
+                  <th title="In units of the largest plan, so the logins add up to the Burn figure">Of the pool</th>
+                </Show>
+                <th>Empty at its pace</th>
+                <th>Resets</th>
+              </tr>
+            </thead>
+            <tbody>
+              <For each={each()}>
+                {(l) => (
+                  <tr>
+                    <td>
+                      {l.name}
+                      <Show when={c()!.weighted}>
+                        <small class="u-sub"> {factor(l.weight)}</small>
+                      </Show>
+                    </td>
+                    <td>{pct(l.left)}</td>
+                    <td>{l.own === null ? '-' : rate(l.own)}</td>
+                    <Show when={c()!.weighted}>
+                      <td>{l.pooled === null ? '-' : rate(l.pooled)}</td>
+                    </Show>
+                    <td>{l.empty ? when(l.empty) : l.own === null ? '-' : l.own ? 'Resets first' : 'Not burning'}</td>
+                    <td>{l.resetsAt ? when(l.resetsAt) : '-'}</td>
+                  </tr>
+                )}
+              </For>
+            </tbody>
+          </table>
+        </div>
         <Show
           when={props.prefs.view === 'remaining'}
           fallback={

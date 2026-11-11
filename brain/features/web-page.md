@@ -43,8 +43,8 @@ Add a login.
   with `selvedge::plans`, TokenGauge's own code, and sends both sums
   (`shown` in the state), so the switch needs no round trip.
   Absolute counts every login once ("131% of 200%"). The switch shows only
-  where there are weights, and the choice is kept per CLI in
-  `localStorage`. The tile shows the window with the highest share
+  where there are weights, also on the CLI's Quota card, and the choice is
+  kept per CLI in `localStorage` (`Weighting` in `Strip.tsx`). The tile shows the window with the highest share
   used until Show, beside one of the other windows listed under it with
   their totals, picks another (5 hours, Weekly, a model-scoped limit, ...);
   the pick is kept per CLI in the browser's `localStorage`. Each tile links
@@ -254,7 +254,7 @@ legend or labelled values.
 Every login of a CLI pooled into one allowance, a card per CLI (or the one
 picked by its chip), for the window shown: the longest one the logins report
 unless the card's picker chose another. The logins add up as the overview's
-tile does, weighted or absolute by the same switch, in units of the largest
+tile does, weighted or absolute by the same switch (which the card repeats), in units of the largest
 plan (`quota.ts`). The card says what is left of how much ("85% of 161%"),
 when the pool runs dry or that it does not over the projection, the first
 login to run dry and when, the next reset with what it gives back and whose
@@ -279,6 +279,16 @@ it is, and the burn.
   one say so.
 - **Drain rate** charts the burn instead, hour by hour over the record, and
   flat at the projected rate ahead.
+- **Each login** gets a row under the figures (`shares`): what it has left
+  of its own window, its burn over the same hours in its own percent, and,
+  weighted, that burn in the pool's units ("Of the pool"), so the rows add up
+  to the card's burn and a login on a smaller plan shows its meter's real
+  pace. It says when the login runs dry at that pace, or that its reset comes
+  first or it is not burning, and when it resets. The projection's order
+  does not change these: they are each login on its own.
+- A window no login with a weight reports falls back to counting each login
+  once even with the switch on Weighted; the card says "each login once here"
+  beside the switch rather than flipping the CLI's saved choice.
 
 The range is two weeks from three days before today, moved a week at a time.
 The view, the burn's hours, the future usage and each CLI's window are kept in

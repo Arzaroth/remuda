@@ -56,6 +56,9 @@
   settings it cannot write included. restore signs in the way `remuda
   login` does, with `--paste` and `--no-paste`; the page saves a config.toml
   that names a login still to sign in, but not one an edit adds.
+- The Quota card has a row per login: what it has left, its own burn, its
+  share of the pool's burn when weighted, and when it runs dry at that pace.
+  The card carries the Weighted/Absolute switch the Overview tile has.
 
 ### Changed
 
@@ -83,6 +86,8 @@
 
 ### Fixed
 
+- The Quota card's window picker no longer shows another window after the
+  list of windows is rebuilt.
 - A sign-in cancelled on the page, or replaced by another for the same CLI,
   while it was finishing is no longer stored.
 

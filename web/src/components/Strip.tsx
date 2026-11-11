@@ -24,11 +24,29 @@ export function Strip() {
   );
 }
 
-export const windows = (id: string) => {
-  const s = store.s!;
-  const weighted = (s.shown?.[id]?.weighable ?? false) && modes[id] !== 'absolute';
-  return s.shown?.[id]?.[weighted ? 'weighted' : 'absolute'] ?? [];
-};
+const canWeigh = (id: string) => store.s!.shown?.[id]?.weighable ?? false;
+export const weighted = (id: string) => canWeigh(id) && modes[id] !== 'absolute';
+
+export const windows = (id: string) => store.s!.shown?.[id]?.[weighted(id) ? 'weighted' : 'absolute'] ?? [];
+
+export function Weighting(props: { id: string }) {
+  const setMode = (mode: 'weighted' | 'absolute') => {
+    setModes(props.id, mode);
+    remember('remuda-weighting', { ...modes });
+  };
+  return (
+    <Show when={canWeigh(props.id)}>
+      <div class="weighting" role="group" aria-label="How logins add up">
+        <button aria-pressed={weighted(props.id)} title="Each login counts by its plan's multiplier" onClick={() => setMode('weighted')}>
+          Weighted
+        </button>
+        <button aria-pressed={!weighted(props.id)} title="Each login counts once" onClick={() => setMode('absolute')}>
+          Absolute
+        </button>
+      </div>
+    </Show>
+  );
+}
 
 function lead(id: string) {
   const all = windows(id);
@@ -42,12 +60,6 @@ export function Tile(props: { p: Provider; link?: boolean; bare?: boolean }) {
   const active = () => creds().find((c) => c.active);
   const live = () => liveOf(s(), props.p.id);
   const usage = () => providerUsage(s(), props.p.id);
-  const canWeigh = () => s().shown?.[props.p.id]?.weighable ?? false;
-  const weighted = () => canWeigh() && modes[props.p.id] !== 'absolute';
-  const setMode = (mode: 'weighted' | 'absolute') => {
-    setModes(props.p.id, mode);
-    remember('remuda-weighting', { ...modes });
-  };
   const combined = createMemo(() => windows(props.p.id));
   const shown = () => lead(props.p.id)!;
   const others = () => combined().filter((w) => w !== shown());
@@ -80,20 +92,7 @@ export function Tile(props: { p: Provider; link?: boolean; bare?: boolean }) {
       >
         <div class="tile-window">
           <span>{shown().title}</span>
-          <Show when={canWeigh()}>
-            <div class="weighting" role="group" aria-label="How logins add up">
-              <button
-                aria-pressed={weighted()}
-                title="Each login counts by its plan's multiplier"
-                onClick={() => setMode('weighted')}
-              >
-                Weighted
-              </button>
-              <button aria-pressed={!weighted()} title="Each login counts once" onClick={() => setMode('absolute')}>
-                Absolute
-              </button>
-            </div>
-          </Show>
+          <Weighting id={props.p.id} />
         </div>
         <div class="big" title={shown().weighted ? ESTIMATE : undefined}>
           {shown().used}%<small>of {shown().of}%</small>
