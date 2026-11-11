@@ -80,3 +80,7 @@ sessions, which auto mode waits out for Codex.
 - [src/provider.rs](../src/provider.rs)
 - [src/store.rs](../src/store.rs)
 - [src/ops.rs](../src/ops.rs)
+
+**Usual week**: what the pool of a CLI's logins spends in each hour of the
+week, averaged over the hours on record (`quota.ts` `usual`). Quota projects
+with it by default, and its sum is what a week needs of the pool.

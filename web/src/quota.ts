@@ -8,7 +8,12 @@ export type Login = {
   resetsAt: number | null;
   length: number | null;
   samples: [number, number][];
+  trailed: boolean;
+  seenUntil: number;
+  past: Instance[];
 };
+
+export type Instance = { opened: number | null; samples: Point[] };
 
 export type Point = [number, number];
 export type Refill = { at: number; gain: number; name: string };
@@ -26,6 +31,9 @@ export function logins(c: Combined, now: number, written: number | null = null):
       resetsAt: Number.isFinite(at) ? at : null,
       length: p.window.minutes ? p.window.minutes * MIN : null,
       samples: [...trail, ...(p.window.trail && until < now ? [[until, p.window.usedPercent] as Point] : []), [now, p.window.usedPercent]],
+      trailed: trail.length > 0,
+      seenUntil: until,
+      past: (p.window.past ?? []).map((i) => ({ opened: i.openedAt, samples: i.samples })),
     };
   });
 }
@@ -99,11 +107,12 @@ export type Share = {
   empty: number | null;
 };
 
-export function shares(ls: Login[], at: number, hours: number): Share[] {
+export function shares(ls: Login[], at: number, hours: number, week: Usual | null = null): Share[] {
   const from = since(ls, at, hours);
-  return ls.map((l) => {
-    const own = from === null ? null : rise(l, from, at) / ((at - from) / HOUR);
-    const dry = own ? at + ((100 - l.used) / own) * HOUR : null;
+  return ls.map((l, i) => {
+    const slots = week?.own[i] ?? null;
+    const own = week ? (slots ? slots.reduce((a, v) => a + v, 0) / slots.length : null) : from === null ? null : rise(l, from, at) / ((at - from) / HOUR);
+    const dry = slots ? emptyBy(l, at, rateAt(slots)) : own ? at + ((100 - l.used) / own) * HOUR : null;
     return {
       name: l.name,
       weight: l.weight,
@@ -123,7 +132,10 @@ export type Projection = {
   poolEmpty: number | null;
 };
 
-export function project(ls: Login[], now: number, rate: number, until: number): Projection {
+export type Rate = number | ((t: number) => number);
+
+export function project(ls: Login[], now: number, pace: Rate, until: number): Projection {
+  const rateOf = typeof pace === 'number' ? () => pace : pace;
   const left = ls.map((l) => 100 - l.used);
   const next = ls.map((l) => l.resetsAt);
   const pool = () => ls.reduce((a, l, i) => a + l.weight * left[i], 0);
@@ -133,12 +145,13 @@ export function project(ls: Login[], now: number, rate: number, until: number): 
   let poolEmpty: number | null = ls.length && pool() === 0 ? now : null;
   let t = now;
   for (let guard = 0; t < until && guard < 10_000; guard++) {
+    const rate = rateOf(t);
     const open = ls.map((_, i) => i).filter((i) => left[i] > 0);
     const d = open.length ? open.reduce((a, i) => ((next[i] ?? Infinity) < (next[a] ?? Infinity) ? i : a)) : null;
     if (d !== null && rate > 0 && next[d] === null && ls[d].length) next[d] = t + ls[d].length;
     const soonest = Math.max(t, Math.min(...next.map((n) => n ?? Infinity)));
     const dry = d !== null && rate > 0 ? t + ((left[d] * ls[d].weight) / rate) * HOUR : Infinity;
-    const to = Math.min(dry, soonest, until);
+    const to = Math.min(dry, soonest, until, typeof pace === 'number' ? Infinity : hourAfter(t));
     if (d !== null && rate > 0) left[d] = Math.max(0, left[d] - (((to - t) / HOUR) * rate) / ls[d].weight);
     t = to;
     points.push([t, pool()]);
@@ -159,6 +172,109 @@ export function project(ls: Login[], now: number, rate: number, until: number): 
     if (refilled) points.push([t, pool()]);
   }
   return { points, refills, firstEmpty, poolEmpty };
+}
+
+const WEEK_HOURS = 168;
+const FULL = 99.5;
+
+const hourOf = (t: number) => {
+  const wall = t - new Date(t).getTimezoneOffset() * MIN;
+  return t - (((wall % HOUR) + HOUR) % HOUR);
+};
+export const hourAfter = (t: number) => {
+  let next = hourOf(t + HOUR);
+  while (hourOf(next) !== next) next = hourOf(next + HOUR);
+  return next;
+};
+const hourFrom = (t: number) => (hourOf(t) === t ? t : hourAfter(t));
+
+const slotOf = (t: number) => {
+  const d = new Date(t);
+  return d.getDay() * 24 + d.getHours();
+};
+
+export const rateAt = (slots: number[]) => (t: number) => slots[slotOf(t)];
+
+type Hourly = { rise: Map<number, number>; seen: Set<number>; full: Set<number> };
+
+function hourly(l: Login): Hourly {
+  const out: Hourly = { rise: new Map(), seen: new Set(), full: new Set() };
+  const lastSeen = Math.max(-Infinity, ...l.past.map((i) => i.samples.at(-1)?.[0] ?? -Infinity));
+  const opened = l.resetsAt !== null && l.length ? Math.max(l.resetsAt - l.length, lastSeen) : null;
+  const current = l.trailed ? [{ opened, samples: l.samples.filter(([t]) => t <= l.seenUntil) }] : [];
+  for (const { opened, samples } of [...l.past, ...current]) {
+    if (!samples.length) continue;
+    const pts: Point[] = opened !== null && samples[0][0] > opened ? [[opened, 0], ...samples] : samples;
+    for (let k = hourFrom(pts[0][0]); hourAfter(k) <= pts.at(-1)![0]; k = hourAfter(k)) out.seen.add(k);
+    for (let i = 1; i < pts.length; i++) {
+      const [a, was] = pts[i - 1];
+      const [b, now] = pts[i];
+      if (b <= a) continue;
+      if (was >= FULL) for (let k = hourFrom(a); hourAfter(k) <= b; k = hourAfter(k)) out.full.add(k);
+      if (now <= was) continue;
+      for (let k = hourOf(a); k < b; k = hourAfter(k)) {
+        const part = (Math.min(b, hourAfter(k)) - Math.max(a, k)) / (b - a);
+        out.rise.set(k, (out.rise.get(k) ?? 0) + (now - was) * part);
+      }
+    }
+  }
+  return out;
+}
+
+function average(hours: Iterable<number>, before: number, value: (k: number) => number | null): { slots: number[]; hours: number } | null {
+  const sum = Array<number>(WEEK_HOURS).fill(0);
+  const n = Array<number>(WEEK_HOURS).fill(0);
+  for (const k of hours) {
+    if (k >= before) continue;
+    const v = value(k);
+    if (v === null) continue;
+    sum[slotOf(k)] += v;
+    n[slotOf(k)]++;
+  }
+  const count = n.reduce((a, v) => a + v, 0);
+  if (count < 24) return null;
+  const all = sum.reduce((a, v) => a + v, 0) / count;
+  const ofHour = (h: number) => {
+    let [s, c] = [0, 0];
+    for (let d = 0; d < 7; d++) [s, c] = [s + sum[d * 24 + h], c + n[d * 24 + h]];
+    return c ? s / c : all;
+  };
+  return { slots: sum.map((v, i) => (n[i] ? v / n[i] : ofHour(i % 24))), hours: count };
+}
+
+export type Usual = { slots: number[]; days: number; week: number; own: (number[] | null)[]; unseen: string[] };
+
+export function usual(ls: Login[], now: number): Usual | null {
+  if (!ls.length) return null;
+  const hs = ls.map(hourly);
+  const before = hourOf(now);
+  const known = hs.filter((h) => h.seen.size);
+  if (!known.length) return null;
+  const pool = average(known[0].seen, before, (k) => {
+    if (!known.every((h) => h.seen.has(k)) || known.every((h) => h.full.has(k))) return null;
+    return ls.reduce((a, l, i) => a + l.weight * (hs[i].rise.get(k) ?? 0), 0);
+  });
+  if (!pool) return null;
+  return {
+    slots: pool.slots,
+    days: pool.hours / 24,
+    week: pool.slots.reduce((a, v) => a + v, 0),
+    own: hs.map((h) => average(h.seen, before, (k) => (h.full.has(k) ? null : (h.rise.get(k) ?? 0)))?.slots ?? null),
+    unseen: ls.filter((_, i) => !hs[i].seen.size).map((l) => l.name),
+  };
+}
+
+function emptyBy(l: Login, at: number, rate: (t: number) => number): number | null {
+  let left = 100 - l.used;
+  const end = l.resetsAt ?? at + 14 * 24 * HOUR;
+  for (let t = at; t < end; ) {
+    const to = Math.min(end, hourAfter(t));
+    const spend = (rate(t) * (to - t)) / HOUR;
+    if (spend >= left) return spend > 0 ? t + (left / spend) * (to - t) : t;
+    left -= spend;
+    t = to;
+  }
+  return null;
 }
 
 export function pick(all: Combined[], title: string | undefined): Combined | null {

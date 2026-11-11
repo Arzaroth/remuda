@@ -213,7 +213,10 @@ and window: `primary`, `secondary`, `tertiary`, or an extra window's id, else
 title), from the window's opening on; null when the file or the trail is
 missing, its `resetsAt` has passed, or it is not the window's reset (the
 fleet's view can hold another machine's later instance under a login's name;
-resets within a twentieth of the window, an hour at most, are one).
+resets within a twentieth of the window, an hour at most, are one). `past`
+is the closed instances of the same window TokenGauge kept the samples of
+(its `closed` records with `samples`, eight weeks of them since TokenGauge
+0.61), oldest first, each `{openedAt, samples}` with `openedAt` in ms.
 The Quota page draws its pools from these trails
 ([web-page.md](../features/web-page.md#quota)).
 `bankedResets` (`available`, `expiresAt`, and `kinds`,

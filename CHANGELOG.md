@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Quota projects a usual week by default: each coming hour spends what that
+  hour of the week usually does, learnt from the pool's trails, so nights and
+  days off stay flat instead of the last 3 hours' burn running around the
+  clock. A new figure says what a usual week needs of the pool ("103%
+  needed, of 163%") and from how many days on record. The last 1, 3 and 6
+  hours stay as paces, and the last 3 hours' is drawn dotted beside the usual
+  week. Weeks before the current one count once TokenGauge keeps closed
+  windows' samples (0.61 or later).
+
 ## [0.39.0] - 2026-11-11
 
 ### Added
