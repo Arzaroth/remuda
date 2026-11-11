@@ -1983,6 +1983,54 @@ mod tests {
     }
 
     #[test]
+    fn the_page_saves_a_config_naming_a_login_still_to_sign_in_but_adds_none() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let app = app(&e, &OFFLINE);
+        let path = places(&e).config;
+        std::fs::write(
+            &path,
+            "[auto.claude]\nlogins = [\"work\", \"later\"]\nfallback = \"later\"\n",
+        )
+        .unwrap();
+        let (_, r) = call(&app, "GET", "/api/config", Value::Null);
+        assert_eq!(r["problems"][0]["message"], "no stored login claude/later");
+
+        let kept = json!({"auto": {"claude": {"enabled": true, "logins": ["work", "later"], "fallback": "later"}}});
+        let (_, checked) = call(&app, "POST", "/api/config/check", json!({"config": kept}));
+        assert_eq!(checked["problems"], json!([]));
+        let (status, saved) = call(
+            &app,
+            "POST",
+            "/api/config",
+            json!({"config": kept, "version": r["version"]}),
+        );
+        assert_eq!((status, &saved["config"]), (200, &kept));
+
+        let added = json!({"auto": {"claude": {"logins": ["work", "later", "ghost"]}}});
+        let (_, checked) = call(&app, "POST", "/api/config/check", json!({"config": added}));
+        assert_eq!(
+            checked["problems"],
+            json!([{"at": "auto.claude.logins", "message": "no stored login claude/ghost"}])
+        );
+        let text = std::fs::read_to_string(&path).unwrap();
+        let (status, r) = call(
+            &app,
+            "POST",
+            "/api/config",
+            json!({"config": added, "version": saved["version"]}),
+        );
+        assert_eq!(
+            (status, r["error"].as_str()),
+            (
+                400,
+                Some("the config was not saved: auto.claude.logins: no stored login claude/ghost")
+            )
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+    }
+
+    #[test]
     fn the_page_checks_a_config_without_saving_it() {
         let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);

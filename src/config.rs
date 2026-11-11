@@ -1061,6 +1061,24 @@ reserve = { work = "workday" }
     }
 
     #[test]
+    fn names_are_every_login_a_provider_names() {
+        let c = parse(
+            Path::new("config.toml"),
+            "[schedules.day]\n\
+             [auto.claude]\nlogins = [\"a\"]\nfallback = \"b\"\n\
+             ceilings = { c = 50 }\nlong_ceilings = { d = 60 }\n\
+             [[auto.claude.rule]]\nwhen = \"day\"\norder = [[\"e\"], [\"f\"]]\n\
+             [warm]\nclaude = [\"g\"]\ncodex = [\"h\"]\n",
+        )
+        .unwrap();
+        let mut names = c.names("claude");
+        names.sort();
+        assert_eq!(names, ["a", "b", "c", "d", "e", "f", "g"]);
+        assert_eq!(c.names("codex"), ["h"]);
+        assert!(c.names("grok").is_empty());
+    }
+
+    #[test]
     fn where_sign_ins_open_is_kept_and_checked() {
         let c: Config =
             toml_edit::de::from_str("[login]\nbrowser = \"firefox\"\nwindow = \"profile\"\n")
