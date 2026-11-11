@@ -431,6 +431,23 @@ The cost is that every open session runs on that login for the call's length;
 the switches are ordinary ones, so auto mode's dwell keeps it from moving the
 CLI under the call.
 
+## Quota projects a usual week, in percent
+
+The Quota card first spent the last 1, 3 or 6 hours' burn around the clock,
+which drains a pool in two days that a person working days spends in five.
+A usual week is learnt from what the pool's percent did hour by hour over the
+weeks on record. Two other sources were turned down. A week's total, from
+TokenGauge's closed windows, is capped at 100%: a login spent in two days and
+idle after says it needed what it held, not what was wanted, and says nothing
+of when. Spend in dollars, which goes back a year by day, would need each
+login's dollars per percent to become percent, which drifts with the model
+mix and is what the Value tab exists to measure, so the projection would move
+whenever the price of a percent did. Percent trails were only kept for the
+current window, so TokenGauge keeps closed windows' samples for eight weeks.
+An hour every login sat full is left out, since what was wanted then is
+unknown; a login at its cap does not hide the pool's need while another has
+room, because a switch moves the spending there.
+
 ## Sources
 
 - [src/ops.rs](../src/ops.rs)
@@ -441,6 +458,7 @@ CLI under the call.
 - [src/commands.rs](../src/commands.rs)
 - [src/serve.rs](../src/serve.rs)
 - [src/served.rs](../src/served.rs)
+- [web/src/quota.ts](../web/src/quota.ts)
 - [web/](../web/)
 - [src/project.rs](../src/project.rs)
 - [src/proxy/](../src/proxy/)

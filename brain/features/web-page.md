@@ -262,9 +262,9 @@ picked by its chip), for the window shown: the longest one the logins report
 unless the card's picker chose another. The logins add up as the overview's
 tile does, weighted or absolute by the same switch (which the card repeats), in units of the largest
 plan (`quota.ts`). The card says what is left of how much ("85% of 161%"),
-when the pool runs dry or that it does not over the projection, the first
-login to run dry and when, the next reset with what it gives back and whose
-it is, and the burn.
+what a usual week needs of it, when the pool runs dry or that it does not over
+the projection, the first login to run dry and when, the next reset with what
+it gives back and whose it is, and the burn.
 
 - **Recorded** is the pool from TokenGauge's trails (the samples of each
   login's current window, [architecture/web.md](../architecture/web.md)),
@@ -275,29 +275,49 @@ it is, and the burn.
   range two weeks earlier than the default at most.
 - **Burn** is what the logins' figures rose by over the last 1, 3 or 6 hours
   (no less than a quarter hour on record), a fall from a reset not counted and
-  a rise sampled across the start counted for the part inside it.
-- **Projected** spends that burn, times the Future usage pick (same, half,
+  a rise sampled across the start counted for the part inside it. The Usual
+  week pace shows it over the last 3.
+- **Usual week** (`usual`) is what the pool spends in each hour of the week
+  (Monday 10:00, Sunday 15:00, in the page's time zone), averaged over every
+  such hour on record: the current window's trail and the closed ones
+  TokenGauge kept the samples of, eight weeks of them. A rise between two
+  samples is spread over the time between them. An hour counts only when
+  every login with a trail was on record through it, and not when every one
+  of them sat full, since nothing could be spent then; while any login had
+  room, switching to it spent the pool, so a capped login does not hide what
+  was needed. An hour of the week never on record takes that hour's average
+  over the other days. Its sum is the figure: what a usual week needs of the
+  pool, with how many days it was learnt from; under a day on record there is
+  none. Each login's own usual burn comes from the same hours, the ones it sat
+  full left out.
+- **Pace** picks what the projection spends: Usual week (the default) spends
+  each coming hour what that hour of a usual week does, flat through the
+  nights and days off; Last 1h, 3h or 6h spend that burn around the clock.
+- **Projected** spends the pace, times the Future usage pick (same, half,
   double, none), from now on, always from the login that resets soonest while
   it has any left; each reset fills its login back up, and a window that has
   not opened, or has just reset, opens when it is first spent from, so such a
   login is spent last. It is the best case the pool allows, since what a login
-  has left at its reset is lost. With no burn on record the figures that need
-  one say so.
+  has left at its reset is lost. With no pace on record the figures that need
+  one say so. On Usual week the last 3 hours' pace is drawn beside it, dotted,
+  for a day that is not going the usual way.
 - **Drain rate** charts the burn instead, hour by hour over the record, and
-  flat at the projected rate ahead.
+  the pace ahead: hour by hour on Usual week, flat otherwise.
 - **Each login** gets a row under the figures (`shares`): what it has left
   of its own window, its burn over the same hours in its own percent, and,
   weighted, that burn in the pool's units ("Of the pool"), so the rows add up
   to the card's burn and a login on a smaller plan shows its meter's real
-  pace. It says when the login runs dry at that pace, or that its reset comes
-  first or it is not burning, and when it resets. The projection's order
+  pace (its usual burn, an average over the week, on Usual week). It says when
+  the login runs dry at that pace (spending its own usual hours on Usual
+  week), or that its reset comes first or it is not burning, and when it
+  resets. The projection's order
   does not change these: they are each login on its own.
 - A window no login with a weight reports falls back to counting each login
   once even with the switch on Weighted; the card says "each login once here"
   beside the switch rather than flipping the CLI's saved choice.
 
 The range is two weeks from three days before today, moved a week at a time.
-The view, the burn's hours, the future usage and each CLI's window are kept in
+The view, the pace, the future usage and each CLI's window are kept in
 `localStorage` (`remuda-quota`).
 
 ## Auto mode
