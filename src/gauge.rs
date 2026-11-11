@@ -32,6 +32,15 @@ type Trails = HashMap<Key, Trail>;
 type Key = (String, Option<String>, String);
 type Trail = (Timestamp, Samples);
 type Samples = Vec<(i64, u64)>;
+/// A closed instance TokenGauge kept the samples of: its opening, and them.
+type Past = (i64, Samples);
+type Seen<'t> = (Option<&'t Trail>, &'t [Past]);
+
+#[derive(Default)]
+struct History {
+    open: Trails,
+    closed: HashMap<Key, Vec<Past>>,
+}
 
 fn key(t: &Value) -> Option<Key> {
     let text = |key: &str| t.get(key).and_then(Value::as_str).map(str::to_owned);
@@ -48,26 +57,48 @@ fn samples(t: &Value) -> Option<Samples> {
     Some(samples.collect())
 }
 
-fn trails(snapshot: &Path, now: Timestamp) -> Trails {
+fn trails(snapshot: &Path, now: Timestamp) -> History {
     let Some(history) = crate::value::history_paths(snapshot)
         .iter()
         .find_map(|path| load(path))
     else {
-        return Trails::new();
+        return History::default();
     };
-    let trails = history.get("trails").and_then(Value::as_array);
-    trails
-        .into_iter()
-        .flatten()
+    let list = |name: &str| {
+        history
+            .get(name)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+    };
+    let instant = |t: &Value, name: &str| {
+        t.get(name)
+            .and_then(Value::as_str)
+            .and_then(|at| at.parse::<Timestamp>().ok())
+    };
+    let open = list("trails")
         .filter_map(|t| {
-            let resets = t
-                .get("resetsAt")
-                .and_then(Value::as_str)
-                .and_then(|at| at.parse::<Timestamp>().ok())
-                .filter(|at| *at > now)?;
+            let resets = instant(t, "resetsAt").filter(|at| *at > now)?;
             Some((key(t)?, (resets, samples(t)?)))
         })
-        .collect()
+        .collect();
+    let mut closed: HashMap<Key, Vec<Past>> = HashMap::new();
+    for t in list("closed") {
+        let (Some(key), Some(opened), Some(samples)) = (key(t), instant(t, "openedAt"), samples(t))
+        else {
+            continue;
+        };
+        if !samples.is_empty() {
+            closed
+                .entry(key)
+                .or_default()
+                .push((opened.as_millisecond(), samples));
+        }
+    }
+    for past in closed.values_mut() {
+        past.sort_unstable_by_key(|(opened, _)| *opened);
+    }
+    History { open, closed }
 }
 
 fn modified_ms(path: &Path) -> Option<i64> {
@@ -114,12 +145,16 @@ fn read_at(snapshot: &Path, now: Timestamp) -> Option<Value> {
             continue;
         };
         let credential = p.get("credential").and_then(Value::as_str);
-        let trail = |window: &str| {
-            trails.get(&(
+        let trail = |window: &str| -> Seen<'_> {
+            let key = (
                 id.to_owned(),
                 credential.map(str::to_owned),
                 window.to_owned(),
-            ))
+            );
+            (
+                trails.open.get(&key),
+                trails.closed.get(&key).map_or(&[], Vec::as_slice),
+            )
         };
         let fields = provider(p, now, &trail);
         let slot = slot(&mut providers, id, p.get("credential"), now);
@@ -154,7 +189,7 @@ fn slot<'a>(
     now: Timestamp,
 ) -> &'a mut Value {
     let entry = providers.entry(id.to_owned()).or_insert_with(|| {
-        let mut entry = provider(&Value::Null, now, &|_| None);
+        let mut entry = provider(&Value::Null, now, &|_| (None, &[]));
         entry["accounts"] = json!({});
         entry
     });
@@ -162,7 +197,7 @@ fn slot<'a>(
         Some(name) => {
             let account = &mut entry["accounts"][name];
             if account.is_null() {
-                *account = provider(&Value::Null, now, &|_| None);
+                *account = provider(&Value::Null, now, &|_| (None, &[]));
             }
             account
         }
@@ -170,7 +205,7 @@ fn slot<'a>(
     }
 }
 
-fn provider<'t>(p: &Value, now: Timestamp, trail: &dyn Fn(&str) -> Option<&'t Trail>) -> Value {
+fn provider<'t>(p: &Value, now: Timestamp, trail: &dyn Fn(&str) -> Seen<'t>) -> Value {
     let usage = p.get("usage").unwrap_or(&Value::Null);
     let fixed = ["primary", "secondary", "tertiary"]
         .into_iter()
@@ -264,7 +299,7 @@ fn window(
     w: &Value,
     extra: bool,
     now: Timestamp,
-    trail: Option<&Trail>,
+    (trail, past): Seen<'_>,
 ) -> Option<Value> {
     let used = w.get("usedPercent")?.as_u64()?;
     let title = match (title, w.get("windowMinutes").and_then(Value::as_u64)) {
@@ -302,6 +337,10 @@ fn window(
         "usedPercent": if elapsed { 0 } else { used.min(100) },
         "resetsAt": resets.filter(|_| !elapsed),
         "trail": trail,
+        "past": past
+            .iter()
+            .map(|(opened, samples)| json!({"openedAt": opened, "samples": samples}))
+            .collect::<Vec<_>>(),
     }))
 }
 
@@ -676,7 +715,7 @@ mod tests {
         let samples = vec![(now.as_millisecond() - 60_000, 30)];
         let w = json!({"usedPercent": 30, "resetsAt": "2026-11-03T13:00:00Z", "windowMinutes": u64::MAX / 2});
         let reset = "2026-11-03T13:00:00Z".parse().unwrap();
-        let shown = window(None, &w, false, now, Some(&(reset, samples))).unwrap();
+        let shown = window(None, &w, false, now, (Some(&(reset, samples)), &[])).unwrap();
         assert_eq!(shown["trail"], json!([[now.as_millisecond() - 60_000, 30]]));
     }
 
