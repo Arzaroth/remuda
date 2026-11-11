@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { change, changeText, plans, type Week } from './value';
+import { change, changeText, plans, rate, weights, type Week } from './value';
 
 const DAY = 86_400_000;
 const week = (n: number, over: Partial<Week> = {}): Week => ({
@@ -38,5 +38,34 @@ describe('value', () => {
     expect(changeText(2)).toBe('2.0x the weeks before');
     expect(changeText(0.5)).toBe('50% under the weeks before');
     expect(changeText(1.02)).toBe('about the same as the weeks before');
+  });
+
+  it('prices a percent over the last four whole closed weeks with use', () => {
+    const weeks = [
+      week(0, { usd: 1000, used: 10 }),
+      week(1, { usd: 100, used: 50 }),
+      week(2, { usd: 300, used: 50 }),
+      week(3, { usd: 50, used: 0 }),
+      week(4, { usd: 999, used: 50, partial: true }),
+      week(4, { usd: 999, used: 50, unattributedUsd: 20 }),
+      week(5, { usd: 200, used: 100 }),
+      week(6, { usd: 400, used: 100 }),
+      week(7, { usd: 999, used: 20, open: true }),
+    ];
+    expect(rate(weeks)).toBeCloseTo((100 + 300 + 200 + 400) / 300);
+    expect(rate([week(0, { open: true })])).toBeNull();
+  });
+
+  it("measures each login's weight against the largest plan's dollars per percent", () => {
+    const ps = plans([
+      week(1, { login: 'max', usd: 200, used: 100 }),
+      week(1, { login: 'pro', usd: 25, used: 100 }),
+      week(1, { login: 'lone', provider: 'claude', usd: 25, used: 100 }),
+    ]);
+    const got = weights(ps, { codex: { max: 20, pro: 2 }, claude: { lone: 5 } });
+    expect(got.get('codex/max')).toEqual({ advertised: 1, measured: 1 });
+    expect(got.get('codex/pro')!.advertised).toBeCloseTo(0.1);
+    expect(got.get('codex/pro')!.measured).toBeCloseTo(0.125);
+    expect(got.has('claude/lone')).toBe(false);
   });
 });
