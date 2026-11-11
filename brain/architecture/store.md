@@ -20,7 +20,8 @@
 <store>/glm/<name>.json           {"key": ...}
 <store>/opencode/<name>.json      {"key": ...}
 <store>/<cli>/<name>.meta.json
-<store>/<cli>/.set-aside-<account>-<ms>.json   tokens a refresh rotated for another account
+<store>/<cli>/.set-aside-<account>-<ms>.json   tokens no login holds: see "Set aside"
+<store>/.received-<ms>.json       a bundle received over a wormhole that restore stopped on with an error, or whose tokens it could neither store nor set aside
 ```
 
 A credential file has the shape of the CLI's own file, so a reader that parses
@@ -60,7 +61,10 @@ A credential and its sidecar are two renames, so the sidecar records
 lowercase hex characters. The credential is written first, so a crash in
 between leaves a sidecar whose digest does not match. The one exception is a
 sidecar with no digest (written by 0.1.0), which would pass for anything: it
-is replaced first. `Store::get` marks a mismatched entry unverified, and
+is replaced first. A sidecar that is not JSON is written over like one with
+a digest, the credential first. `Store::put_files` writes in the same order, and gives a
+sidecar it is handed without a digest the digest of the bytes it stores.
+`Store::get` marks a mismatched entry unverified, and
 `ops::heal` runs at the start of every sync, the CLI signed in or not: it asks
 the provider whose tokens the entry holds, refreshing them first if the access
 token has expired, and rewrites the sidecar. When the refresh names no account

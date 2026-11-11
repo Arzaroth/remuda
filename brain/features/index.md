@@ -5,6 +5,7 @@
 | Import, list and remove | [store-commands.md](store-commands.md) | `import`, `ls`, `rm` |
 | Switching | [switching.md](switching.md) | `use`, `signout` |
 | Sign-in | [sign-in.md](sign-in.md) | `login` |
+| Setting up another machine | [another-machine.md](another-machine.md) | `export`, `restore` |
 | Token refresh | [refresh.md](refresh.md) | `refresh`, the timer |
 | Names and labels | [names-and-labels.md](names-and-labels.md) | `label`, `rename`, `provider/name` |
 | Team seats | [team-seats.md](team-seats.md) | `ls` |

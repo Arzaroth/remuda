@@ -834,6 +834,17 @@ impl App {
         Some(entries.into_iter().map(|e| e.name).collect())
     }
 
+    fn check_save(&self, config: &config::Config) -> Vec<config::Problem> {
+        let here = config::load(&self.places.config)
+            .map(|l| l.config)
+            .unwrap_or_default();
+        config.check(&|id| {
+            let mut names = self.logins(id)?;
+            names.extend(here.names(id));
+            Some(names)
+        })
+    }
+
     fn login_settings(&self) -> config::Login {
         config::load(&self.places.config)
             .map(|l| l.config.login)
@@ -935,7 +946,7 @@ impl App {
             ("GET", "/api/log") => Ok(json!({ "events": logbook::recent(store, None, LOG_SHOWN) })),
             ("POST", "/api/config/check") => {
                 let problems = match sent_config(&body) {
-                    Ok(config) => config.check(&|id| self.logins(id)),
+                    Ok(config) => self.check_save(&config),
                     Err(e) => vec![config::Problem {
                         at: "config".into(),
                         message: format!("{e:#}"),
@@ -946,7 +957,7 @@ impl App {
             ("POST", "/api/config") => {
                 let config = sent_config(&body)?;
                 let version = text("version").context("version is required")?;
-                let problems = config.check(&|id| self.logins(id));
+                let problems = self.check_save(&config);
                 if !problems.is_empty() {
                     let list: Vec<String> = problems.iter().map(ToString::to_string).collect();
                     bail!("the config was not saved: {}", list.join("; "));
@@ -1969,6 +1980,54 @@ mod tests {
             )
         );
         assert!(!places(&e).config.exists());
+    }
+
+    #[test]
+    fn the_page_saves_a_config_naming_a_login_still_to_sign_in_but_adds_none() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let app = app(&e, &OFFLINE);
+        let path = places(&e).config;
+        std::fs::write(
+            &path,
+            "[auto.claude]\nlogins = [\"work\", \"later\"]\nfallback = \"later\"\n",
+        )
+        .unwrap();
+        let (_, r) = call(&app, "GET", "/api/config", Value::Null);
+        assert_eq!(r["problems"][0]["message"], "no stored login claude/later");
+
+        let kept = json!({"auto": {"claude": {"enabled": true, "logins": ["work", "later"], "fallback": "later"}}});
+        let (_, checked) = call(&app, "POST", "/api/config/check", json!({"config": kept}));
+        assert_eq!(checked["problems"], json!([]));
+        let (status, saved) = call(
+            &app,
+            "POST",
+            "/api/config",
+            json!({"config": kept, "version": r["version"]}),
+        );
+        assert_eq!((status, &saved["config"]), (200, &kept));
+
+        let added = json!({"auto": {"claude": {"logins": ["work", "later", "ghost"]}}});
+        let (_, checked) = call(&app, "POST", "/api/config/check", json!({"config": added}));
+        assert_eq!(
+            checked["problems"],
+            json!([{"at": "auto.claude.logins", "message": "no stored login claude/ghost"}])
+        );
+        let text = std::fs::read_to_string(&path).unwrap();
+        let (status, r) = call(
+            &app,
+            "POST",
+            "/api/config",
+            json!({"config": added, "version": saved["version"]}),
+        );
+        assert_eq!(
+            (status, r["error"].as_str()),
+            (
+                400,
+                Some("the config was not saved: auto.claude.logins: no stored login claude/ghost")
+            )
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
     }
 
     #[test]

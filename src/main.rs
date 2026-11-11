@@ -13,6 +13,7 @@ mod cursor;
 mod device;
 mod dirs;
 mod doctor;
+mod export;
 mod fsx;
 mod gauge;
 mod grok;
@@ -28,6 +29,7 @@ mod project;
 mod provider;
 mod proxy;
 mod runs;
+mod seal;
 mod serve;
 mod served;
 mod session;
@@ -121,6 +123,46 @@ enum Cmd {
         /// callback here: Claude Code ends with a code to paste back, Codex
         /// with a device code to type in.
         /// The default over SSH, or with no display.
+        #[arg(long)]
+        paste: bool,
+        /// Be called back even over SSH, or with `[login] paste = true`.
+        #[arg(long, conflicts_with = "paste")]
+        no_paste: bool,
+    },
+    /// Send this machine's logins and settings to another one, through
+    /// wyrmyon or magic-wormhole when installed, or sealed into FILE under a
+    /// passphrase.
+    Export {
+        /// Seal it into this file instead of sending it.
+        file: Option<std::path::PathBuf>,
+        /// Carry this login's tokens and drop it here once sent, for a machine
+        /// being retired. NAME or PROVIDER/NAME, repeatable.
+        #[arg(long = "move", value_name = "NAME")]
+        moved: Vec<String>,
+        /// Leave TokenGauge's S3 keys out of the fleet it carries.
+        #[arg(long)]
+        without_s3_keys: bool,
+        /// Read the passphrase from this file's first line.
+        #[arg(long, value_name = "FILE")]
+        passphrase_file: Option<std::path::PathBuf>,
+    },
+    /// Set this machine up from what `remuda export` sent, then sign in again
+    /// the logins that cannot be copied.
+    Restore {
+        /// Open this sealed file instead of receiving it.
+        file: Option<std::path::PathBuf>,
+        /// Replace logins, config.toml, the proxy's settings and the fleet
+        /// already here.
+        #[arg(long)]
+        force: bool,
+        /// Read the passphrase from this file's first line.
+        #[arg(long, value_name = "FILE")]
+        passphrase_file: Option<std::path::PathBuf>,
+        /// List the logins to sign in again instead of starting them.
+        #[arg(long)]
+        no_sign_in: bool,
+        /// Sign in again from a browser on another machine, as `remuda login
+        /// --paste` does. The default over SSH or, on Linux, with no display.
         #[arg(long)]
         paste: bool,
         /// Be called back even over SSH, or with `[login] paste = true`.
@@ -270,7 +312,9 @@ impl Cmd {
             Cmd::Run { .. } | Cmd::Cli(_) | Cmd::ShellInit { .. } => None,
             Cmd::Pin { name, .. } => name.as_ref().map(|_| "pinning"),
             Cmd::Serve { .. } => Some("serving"),
+            Cmd::Export { .. } => Some("exporting"),
             Cmd::Import { .. }
+            | Cmd::Restore { .. }
             | Cmd::Login { .. }
             | Cmd::Open { .. }
             | Cmd::Completions { .. }
@@ -280,6 +324,288 @@ impl Cmd {
             | Cmd::Status => None,
         }
     }
+}
+
+fn pastes(paste: bool, no_paste: bool, set: &config::Login) -> bool {
+    !no_paste
+        && (paste
+            || set.paste
+            || browser::remote(&|var| std::env::var_os(var).is_some_and(|v| !v.is_empty())))
+}
+
+fn stdin_lines() -> std::sync::mpsc::Receiver<String> {
+    let (tx, lines) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for line in io::stdin().lock().lines() {
+            let Ok(line) = line else { break };
+            if tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    lines
+}
+
+fn search_path() -> OsString {
+    std::env::var_os("PATH").unwrap_or_default()
+}
+
+fn export(
+    store: &Store,
+    providers: &[&dyn Provider],
+    file: Option<&Path>,
+    moved: &[String],
+    s3_keys: bool,
+    passphrase_file: Option<&Path>,
+    out: &mut dyn Write,
+) -> Result<()> {
+    let search = search_path();
+    let via = match file {
+        Some(_) => None,
+        None => Some(export::Via::find(&search).context(
+            "neither wyrmyon (wyrm) nor magic-wormhole (wormhole) is installed; seal it into a file instead: remuda export <file>",
+        )?),
+    };
+    let moved = moved
+        .iter()
+        .map(|m| commands::resolve(store, providers, m))
+        .collect::<Result<Vec<_>>>()?;
+    let tokengauge = doctor::which("tokengauge", &search);
+    let fleet = match export::fleet(tokengauge.as_deref(), s3_keys) {
+        Ok(fleet) => Some(fleet),
+        Err(why) => {
+            writeln!(out, "no TokenGauge fleet in it: {why}")?;
+            None
+        }
+    };
+    let bundle = {
+        let _lock = store.lock()?;
+        export::build(
+            store,
+            providers,
+            &paths::config_file(),
+            &store.root().join(".proxy.json"),
+            &moved,
+            fleet,
+        )?
+    };
+    writeln!(out, "{}", export::describe(&bundle))?;
+    let json = serde_json::to_string(&bundle)?;
+    match (file, via) {
+        (Some(file), _) => {
+            let passphrase = seal::passphrase(passphrase_file, true)?;
+            let sealed = seal::seal(json.as_bytes(), &passphrase)?;
+            export::write_new_private(file, &sealed)?;
+            writeln!(
+                out,
+                "sealed into {}; open it on the other machine with `remuda restore {}`",
+                file.display(),
+                file.display()
+            )?;
+        }
+        (None, Some(via)) => {
+            let dir = export::Private::new()?;
+            let sent = dir.path().join("remuda-export.json");
+            fsx::write_private(&sent, &json)?;
+            writeln!(
+                out,
+                "sending it through {}; run `remuda restore` on the other machine and give it the code",
+                via.name()
+            )?;
+            out.flush()?;
+            via.send(&sent)?;
+        }
+        (None, None) => unreachable!(),
+    }
+    export::drop_moved(store, &paths::config_file(), &bundle, &moved, out)
+}
+
+struct Again {
+    skip: bool,
+    paste: bool,
+    no_paste: bool,
+}
+
+fn restore(
+    store: &Store,
+    providers: &[&dyn Provider],
+    file: Option<&Path>,
+    force: bool,
+    passphrase_file: Option<&Path>,
+    again: Again,
+    out: &mut dyn Write,
+) -> Result<()> {
+    let search = search_path();
+    let (bytes, received) = match file {
+        Some(file) => {
+            let read = std::fs::read(file)
+                .with_context(|| format!("could not read {}", file.display()))?;
+            if export::unsealed(&read) {
+                (read, false)
+            } else {
+                (
+                    seal::open(&read, &seal::passphrase(passphrase_file, false)?)?,
+                    false,
+                )
+            }
+        }
+        None => {
+            let via = export::Via::find(&search).context(
+                "neither wyrmyon (wyrm) nor magic-wormhole (wormhole) is installed here; restore from a sealed file: remuda restore <file>",
+            )?;
+            let dir = export::Private::new()?;
+            let into = dir.path().join("remuda-export.json");
+            writeln!(
+                out,
+                "receiving through {}: type the code `remuda export` printed",
+                via.name()
+            )?;
+            out.flush()?;
+            via.receive(&into)?;
+            (std::fs::read(&into)?, true)
+        }
+    };
+    let config_path = paths::config_file();
+    let proxy_path = store.root().join(".proxy.json");
+    let tokengauge = doctor::which("tokengauge", &search);
+    let places = export::Places {
+        config: &config_path,
+        proxy: &proxy_path,
+        tokengauge: tokengauge.as_deref(),
+    };
+    let restored = export::parse(&bytes)
+        .and_then(|bundle| export::restore(store, providers, &places, bundle, force, out));
+    let restored = match restored {
+        Ok(restored) => restored,
+        Err(e) if received => {
+            keep_received(store, &bytes, out)?;
+            return Err(e);
+        }
+        Err(e) => return Err(e),
+    };
+    let mut held = None;
+    if !restored.lost.is_empty() {
+        held = Some(match (received, file) {
+            (false, Some(file)) => format!("{} still holds them", file.display()),
+            _ => match keep_received(store, &bytes, out)? {
+                Some(kept) => format!("what was received is kept in {}", kept.display()),
+                None => "what was received could not be kept, so they are only in the sending machine's store or the set-aside file export printed there".to_owned(),
+            },
+        });
+    } else if let Some(kept) = file.filter(|f| export::was_kept(store, f))
+        && let Err(e) = std::fs::remove_file(kept)
+    {
+        writeln!(
+            out,
+            "warning: could not remove {}: {e}; remove it yourself",
+            kept.display()
+        )?;
+    }
+    sign_in_again(store, providers, &config_path, restored.sign_in, again, out)?;
+    if let Some(held) = held {
+        bail!(
+            "the tokens carried for {} could be neither stored nor set aside here; {held}",
+            restored.lost.join(", ")
+        );
+    }
+    Ok(())
+}
+
+fn keep_received(
+    store: &Store,
+    bytes: &[u8],
+    out: &mut dyn Write,
+) -> Result<Option<std::path::PathBuf>> {
+    match export::keep_received(store, bytes) {
+        Ok(kept) => {
+            writeln!(
+                out,
+                "what was received is kept in {}; `remuda restore {}` tries it again",
+                kept.display(),
+                kept.display()
+            )?;
+            Ok(Some(kept))
+        }
+        Err(k) => {
+            writeln!(out, "warning: what was received is lost: {k:#}")?;
+            Ok(None)
+        }
+    }
+}
+
+fn sign_in_again(
+    store: &Store,
+    providers: &[&dyn Provider],
+    config_path: &Path,
+    logins: Vec<export::ToSignIn>,
+    again: Again,
+    out: &mut dyn Write,
+) -> Result<()> {
+    if logins.is_empty() {
+        return Ok(());
+    }
+    let set = config::load(config_path)
+        .map(|l| l.config.login)
+        .unwrap_or_default();
+    let choice = browser::choose(set.browser.as_deref(), set.window);
+    let open = |url: &str, profile: &Path| choice.open(url, profile);
+    let lines = stdin_lines();
+    let mut left = Vec::new();
+    let mut pending = logins.into_iter();
+    for login in pending.by_ref() {
+        if again.skip {
+            left.push(login);
+            continue;
+        }
+        write!(
+            out,
+            "\nSign {} in again, as {}? [Y/n] ",
+            login.qualified(),
+            login.email
+        )?;
+        out.flush()?;
+        let Ok(answer) = lines.recv() else {
+            left.push(login);
+            break;
+        };
+        if answer.trim().to_ascii_lowercase().starts_with('n') {
+            left.push(login);
+            continue;
+        }
+        let p = commands::find(providers, &login.provider)?;
+        let prompt = commands::Prompt {
+            open: &open,
+            opens_in: browser::displayed().then(|| choice.describe()),
+            lines: &lines,
+            paste: pastes(again.paste, again.no_paste, &set),
+            expect: Some((&login.account_id, &login.email)),
+        };
+        match commands::login(store, p, &login.name, false, prompt, out) {
+            Ok(()) => {
+                if let Some(label) = &login.label
+                    && let Err(e) = commands::label(store, p, &login.name, Some(label), out)
+                {
+                    writeln!(out, "{e:#}")?;
+                }
+            }
+            Err(e) => {
+                writeln!(out, "{e:#}")?;
+                left.push(login);
+            }
+        }
+    }
+    left.extend(pending);
+    if !left.is_empty() {
+        writeln!(out, "\nStill to sign in, from any browser:")?;
+        for login in &left {
+            writeln!(
+                out,
+                "  remuda login {} -p {} --paste    ({})",
+                login.name, login.provider, login.email
+            )?;
+        }
+    }
+    Ok(())
 }
 
 fn update(check_only: bool) -> Result<()> {
@@ -786,28 +1112,56 @@ fn main() -> Result<()> {
             named.as_deref().or(set.browser.as_deref()),
             window.unwrap_or(set.window),
         );
-        let (tx, lines) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            for line in io::stdin().lock().lines() {
-                let Ok(line) = line else { break };
-                if tx.send(line).is_err() {
-                    break;
-                }
-            }
-        });
+        let lines = stdin_lines();
         let open = |url: &str, profile: &Path| choice.open(url, profile);
         let prompt = commands::Prompt {
             open: &open,
             opens_in: (!no_browser && browser::displayed()).then(|| choice.describe()),
-            lines,
-            paste: !no_paste
-                && (*paste
-                    || set.paste
-                    || browser::remote(&|var| {
-                        std::env::var_os(var).is_some_and(|v| !v.is_empty())
-                    })),
+            lines: &lines,
+            paste: pastes(*paste, *no_paste, &set),
+            expect: None,
         };
         return commands::login(&store, p, name, *force, prompt, out);
+    }
+    if let Cmd::Export {
+        file,
+        moved,
+        without_s3_keys,
+        passphrase_file,
+    } = &command
+    {
+        return export(
+            &store,
+            &providers,
+            file.as_deref(),
+            moved,
+            !without_s3_keys,
+            passphrase_file.as_deref(),
+            out,
+        );
+    }
+    if let Cmd::Restore {
+        file,
+        force,
+        passphrase_file,
+        no_sign_in,
+        paste,
+        no_paste,
+    } = &command
+    {
+        return restore(
+            &store,
+            &providers,
+            file.as_deref(),
+            *force,
+            passphrase_file.as_deref(),
+            Again {
+                skip: *no_sign_in,
+                paste: *paste,
+                no_paste: *no_paste,
+            },
+            out,
+        );
     }
 
     if let Cmd::Pin {
@@ -971,6 +1325,8 @@ fn main() -> Result<()> {
             commands::rename(&store, &paths::config_file(), p, &name, &new_name, out)
         }
         Cmd::Login { .. }
+        | Cmd::Export { .. }
+        | Cmd::Restore { .. }
         | Cmd::Run { .. }
         | Cmd::Cli(_)
         | Cmd::ShellInit { .. }

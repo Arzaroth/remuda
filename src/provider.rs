@@ -109,6 +109,12 @@ pub trait Provider: Send + Sync {
     fn renews(&self) -> bool {
         true
     }
+    /// Its tokens work from two machines at once, so another machine can be
+    /// given a copy rather than a sign-in of its own: nothing to refresh, or a
+    /// refresh that does not spend the refresh token.
+    fn portable(&self) -> bool {
+        !self.renews()
+    }
     /// The line a shell evaluates to use `entry`, for a CLI that reads its
     /// login from the environment.
     fn env_line(&self, _entry: &Entry) -> Result<String> {
