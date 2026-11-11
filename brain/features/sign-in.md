@@ -89,7 +89,14 @@ offer Enter, and the link is to be opened by hand.
 - **Cursor**: `cursor.com/loginDeepControl` with a PKCE challenge and a uuid;
   remuda polls `api2.cursor.sh/auth/poll` with the verifier until the tokens
   are there, backing off from 1 s to 10 s.
-- **GLM and opencode Go**: the key page opens and the pasted key is the login.
+- **API keys** (GLM, opencode Go, DeepSeek, MiniMax, OpenRouter, Copilot):
+  the key page opens and the pasted key is the login; Copilot's is a GitHub
+  token, OAuth or personal, with no device flow. A sign-in that asks for more
+  (`PendingLogin::fields`) asks it after the key: MiniMax's region, `global`
+  by default or `cn`, and OpenRouter's optional management key. The prompt
+  reads one line per field, an empty one taking the default; the page draws a
+  select or an optional secret input and sends them to `/api/login/finish` as
+  `fields`.
 
 Saving takes the store lock and re-checks: a name taken meanwhile, or an
 account already stored under another name, refuses the result.

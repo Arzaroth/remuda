@@ -63,8 +63,8 @@ rotated it meanwhile:
   when any of them differs from what sync read. An API key the
   file holds stays, so Grok keeps using it and remuda reports it as a login it
   cannot store.
-- **GLM, opencode Go**: refused; they have no `signs_out`, so the page shows
-  no Sign out for them.
+- **API keys** (GLM, opencode Go, DeepSeek, MiniMax, OpenRouter, Copilot):
+  refused; they have no `signs_out`, so the page shows no Sign out for them.
 
 What that last sync read is what it reports: a login gone meanwhile is already
 signed out, and the message names the login it took out. It notes the time in

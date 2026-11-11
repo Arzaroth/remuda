@@ -11,6 +11,11 @@ own logins.
   read `REMUDA_TEST_CLAUDE_API` / `REMUDA_TEST_OPENAI_API` under
   `#[cfg(debug_assertions)]`, which is how `tests/cli.rs` puts a mock in front
   of the built binary. A release build has no way to send a token elsewhere.
+  `REMUDA_TEST_GH` names the `gh` Copilot asks for the GitHub CLI's token the
+  same way; `tests/cli.rs` points it into the throwaway home, where a test
+  that wants one writes a stand-in, so the developer's own `gh` login, which
+  may live in the system keyring, is never read. `ApiKey::with` drops that
+  lookup for unit tests (`falling_back_to` gives one back).
 - **Offline is a bound port nobody listens on** (`ops::testing::OFFLINE`):
   bound once and kept for the whole run without listening, so connecting is
   refused at once and no other test's server can be given the port. It serves

@@ -4,7 +4,8 @@
 
 A remuda is the herd of spare horses a rider picks a fresh mount from each day,
 while the rest recover. This one holds Claude Code, Codex, Grok, Kimi Code and
-Cursor logins, and GLM and opencode Go API keys.
+Cursor logins, and GLM, opencode Go, DeepSeek, MiniMax, OpenRouter and Copilot
+API keys.
 
 Keep several accounts per CLI and switch the one it uses, without logging out
 and back in and without a separate `CLAUDE_CONFIG_DIR` or `CODEX_HOME`.
@@ -96,8 +97,8 @@ copies, and the units there run `~/.local/bin/remuda`.
 
 A credential is addressed by its name when only one CLI has that name, and as
 `<cli>/<name>` (`claude/work`, `grok/perso`) otherwise. Commands that create one
-take `-p <cli>`: `claude` (the default), `codex`, `cursor`, `glm`, `grok`,
-`kimi` or `opencode`.
+take `-p <cli>`: `claude` (the default), `codex`, `copilot`, `cursor`,
+`deepseek`, `glm`, `grok`, `kimi`, `minimax`, `opencode` or `openrouter`.
 
 | Command | Does |
 | --- | --- |
@@ -141,8 +142,11 @@ browser. Over SSH (`SSH_CONNECTION` or `SSH_TTY` set), or on Linux with
 neither `DISPLAY` nor `WAYLAND_DISPLAY`, both do so by default; `--no-paste`
 asks for the callback anyway, as when port forwarding brings it back. Grok and
 Kimi show a code to approve and Cursor a confirmation, and remuda waits for the
-provider to say it is done, from any machine's browser. GLM and opencode Go
-open their key page and ask for the key.
+provider to say it is done, from any machine's browser. The API key providers
+open their key page and ask for the key; Copilot asks for a GitHub token
+(`gh auth token` prints yours), MiniMax then for its region (`global` or
+`cn`), and OpenRouter for an optional management key, which TokenGauge needs
+to show the account balance.
 
 ## Another machine
 
@@ -420,6 +424,14 @@ running shell's environment, so `use` says to run
 `eval "$(remuda env glm/<name>)"` instead. The same goes for opencode when
 `OPENCODE_API_KEY` or `OPENCODE_GO_API_KEY` is set, since it wins over the
 stored key.
+DeepSeek and MiniMax are switched in opencode's store the same way, in its
+`deepseek` entry and in the MiniMax entry of the login's region (`minimax`,
+`minimax-cn`, or their `-coding-plan` forms); a switch from one region to the
+other moves the key out of the old region's entry. `DEEPSEEK_API_KEY` and
+`MINIMAX_API_KEY` win over them. OpenRouter (`OPENROUTER_API_KEY`) and Copilot
+(`GH_TOKEN`, which the GitHub and Copilot CLIs read) are switched by
+`remuda env` only; Copilot also recognises the token `gh auth token` prints
+as the live login, and never writes it.
 
 Each CLI rotates the refresh token of the account it is signed into, so before
 every command remuda copies the live login back into the credential it belongs
@@ -442,6 +454,10 @@ kimi/<name>.json          same shape as kimi-code.json
 cursor/<name>.json        same shape as cursor-agent's auth.json
 glm/<name>.json           {"key": ...}
 opencode/<name>.json      {"key": ...}
+deepseek/<name>.json      {"key": ...}
+minimax/<name>.json       {"key": ..., "region": "global" or "cn"}
+openrouter/<name>.json    {"key": ..., "management": ...}, management optional
+copilot/<name>.json       {"key": ...}, a GitHub token
 <cli>/<name>.meta.json    accountId, email, capturedAt, label, the
                           credential's credsDigest, and Claude's
                           oauthAccount block

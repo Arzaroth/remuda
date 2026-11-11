@@ -153,7 +153,10 @@ click within 400 ms, so a double-click only arms it.
 "Refresh tokens" refreshes every inactive credential due within the hour.
 
 Add a login opens a dialog that picks a CLI by its logo, preselecting the
-page's, and a name, and starts a sign-in. Nothing opens by itself: the dialog
+page's, and a name, and starts a sign-in. A sign-in with `fields` draws each
+under the box for the code ([signin.ts](../../web/src/signin.ts)): a choice
+as a select on its default (MiniMax's region), free text as an optional
+secret input (OpenRouter's management key). Nothing opens by itself: the dialog
 shows the provider's link, with Copy the link, and Open in, which asks the
 server to open it where `[login]` says, as `login` does on Enter (see
 [sign-in.md](sign-in.md); `POST /api/login/open`). When the server has no
@@ -380,6 +383,7 @@ refused.
   the settings in [AutoMode.tsx](../../web/src/components/AutoMode.tsx) and
   [config.ts](../../web/src/config.ts)
 - [src/serve.rs](../../src/serve.rs)
+- [web/src/components/AddAccount.tsx](../../web/src/components/AddAccount.tsx), [web/src/signin.ts](../../web/src/signin.ts)
 - [src/gauge.rs](../../src/gauge.rs)
 - [web/src/quota.ts](../../web/src/quota.ts), [web/src/components/Quota.tsx](../../web/src/components/Quota.tsx)
 - [src/runs.rs](../../src/runs.rs)

@@ -40,7 +40,7 @@ shared.
 | How do I start a CLI on a login without switching, or pin one per repo? | [features/run.md](features/run.md) |
 | What does TokenGauge rely on? | [architecture/store.md](architecture/store.md) |
 | How is Claude Code different from Codex? | [architecture/providers.md](architecture/providers.md) |
-| How do I add a third CLI? | [architecture/providers.md](architecture/providers.md) |
+| How do I add another CLI, or another API key provider? | [architecture/providers.md](architecture/providers.md) |
 | Which OAuth endpoints and client ids, and where did they come from? | [architecture/providers.md](architecture/providers.md) |
 | Is the local page safe to leave running? | [architecture/web.md](architecture/web.md) |
 | How does `remuda open` find the page, and what runs it as a service? | [architecture/web.md](architecture/web.md) |

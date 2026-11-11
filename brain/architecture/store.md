@@ -19,13 +19,20 @@
 <store>/cursor/<name>.json        cursor-agent's auth.json, whole
 <store>/glm/<name>.json           {"key": ...}
 <store>/opencode/<name>.json      {"key": ...}
+<store>/deepseek/<name>.json      {"key": ...}
+<store>/minimax/<name>.json       {"key": ..., "region": "global" | "cn"}
+<store>/openrouter/<name>.json    {"key": ..., "management": ...}, management optional
+<store>/copilot/<name>.json       {"key": ...}, a GitHub token
 <store>/<cli>/<name>.meta.json
 <store>/<cli>/.set-aside-<account>-<ms>.json   tokens no login holds: see "Set aside"
 <store>/.received-<ms>.json       a bundle received over a wormhole that restore stopped on with an error, or whose tokens it could neither store nor set aside
 ```
 
 A credential file has the shape of the CLI's own file, so a reader that parses
-the CLI's file parses the stored one unchanged. Claude's holds only
+the CLI's file parses the stored one unchanged. An API key's is `{"key"}` plus
+what its sign-in asked for: MiniMax's `region` (which host the key answers on;
+a file without it reads as `global`) and OpenRouter's optional `management`
+key, which a switch never writes anywhere. Claude's holds only
 `claudeAiOauth`: `mcpOAuth` stays in the live file, shared.
 
 The sidecar (`store::Meta`, camelCase): `accountId`, `email`, `capturedAt`

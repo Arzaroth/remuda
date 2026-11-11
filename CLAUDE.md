@@ -1,7 +1,8 @@
 # remuda
 
-Keeps several Claude Code, Codex, Grok, Kimi and Cursor logins, and GLM and
-opencode Go API keys, and switches the one each CLI uses.
+Keeps several Claude Code, Codex, Grok, Kimi and Cursor logins, and GLM,
+opencode Go, DeepSeek, MiniMax, OpenRouter and Copilot API keys, and switches
+the one each CLI uses.
 Start with `brain/BRAIN.md` to find how anything works.
 
 ## The brain
@@ -31,13 +32,19 @@ follow, and each has tests:
   through a private file.
 - opencode 2 reads its logins from `opencode.db` once it has imported
   `auth.json`, so a switch there goes into the row opencode selects, in one
-  transaction, and never touches another integration's row.
+  transaction, and never touches another integration's row. The one
+  exception is MiniMax moving regions, which deletes the live key's rows in
+  the region it leaves (or the live entry in `auth.json`), since that key is
+  stored by then; it never overwrites a slot holding another login.
+- Copilot reads the GitHub CLI's token through `gh auth token` and never
+  writes it: a switch is `remuda env`.
 
 Tests never touch the developer's real files or the network: providers are
 built with `::at(dir, Api::local(url))`, and `tests/cli.rs` points the binary
 at a mock through `REMUDA_TEST_CLAUDE_API`, `REMUDA_TEST_OPENAI_API`,
 `REMUDA_TEST_XAI_API`, `REMUDA_TEST_KIMI_API` and `REMUDA_TEST_CURSOR_API`,
-which exist in debug builds only. A release build has no way to redirect an OAuth
+and at a stand-in `gh` through `REMUDA_TEST_GH`, which exist in debug builds
+only. A release build has no way to redirect an OAuth
 endpoint; keep it that way. The suite must pass with no network and an empty
 `HOME`; `brain/architecture/testing.md` has the command. Manual smoke tests use
 `REMUDA_STORE` pointed at a scratch directory.
@@ -49,7 +56,9 @@ TokenGauge (ADR 0003) reads `<store>/<provider>/<name>.json` and the sidecar key
 credential file's bytes), `oauthAccount`'s `seatTier` and `userRateLimitTier`
 (which say which Team seat a login holds), and how each provider's `accountId` is derived: an
 API key's is `key-` and 16 hex digits of its SHA-256, which TokenGauge
-computes for the live key too. Changing any of them changes that ADR too.
+computes for the live key too, and the fields beside an API key (MiniMax's
+`region`, OpenRouter's `management`). Changing any of them changes that ADR
+too.
 
 ## Conventions
 
