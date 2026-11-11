@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-11-11
+
 ### Added
 
 - A Claude Code hook, `remuda hook artifact`: a call on an artifact another
