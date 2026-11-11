@@ -56,9 +56,10 @@ TokenGauge (ADR 0003) reads `<store>/<provider>/<name>.json` and the sidecar key
 credential file's bytes), `oauthAccount`'s `seatTier` and `userRateLimitTier`
 (which say which Team seat a login holds), and how each provider's `accountId` is derived: an
 API key's is `key-` and 16 hex digits of its SHA-256, which TokenGauge
-computes for the live key too, and the fields beside an API key (MiniMax's
-`region`, OpenRouter's `management`). Changing any of them changes that ADR
-too.
+computes for the live key too. The fields stored beside an API key (MiniMax's
+`region`, OpenRouter's `management`) are part of the same contract, for
+TokenGauge's store readers of those providers. Changing any of them changes
+that ADR too.
 
 ## Conventions
 

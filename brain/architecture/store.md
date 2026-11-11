@@ -32,7 +32,8 @@ A credential file has the shape of the CLI's own file, so a reader that parses
 the CLI's file parses the stored one unchanged. An API key's is `{"key"}` plus
 what its sign-in asked for: MiniMax's `region` (which host the key answers on;
 a file without it reads as `global`) and OpenRouter's optional `management`
-key, which a switch never writes anywhere. Claude's holds only
+key, which a switch never writes anywhere. Both are part of the TokenGauge
+contract below, for its readers of those providers. Claude's holds only
 `claudeAiOauth`: `mcpOAuth` stays in the live file, shared.
 
 The sidecar (`store::Meta`, camelCase): `accountId`, `email`, `capturedAt`

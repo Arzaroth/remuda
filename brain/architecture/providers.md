@@ -9,7 +9,7 @@ from a CLI. `creds` is always the store's shape for that CLI.
 | `home` | The directory the CLI keeps its login in, as this process resolves it |
 | `access_token`, `refresh_token`, `expires_at`, `refresh_expires_at`, `plan` | Read from `creds` |
 | `live` | The login the CLI is signed into, in store shape, or none |
-| `synced` | The stored credential once `live` is synced into it: `live` by default; a key provider merges it over the stored one, so a field only the store holds (MiniMax's `region` when the shell names none, OpenRouter's `management`) survives |
+| `synced` | The stored credential once `live` is synced into it: `live` by default; a key provider merges it over the stored one, so a field only the store holds (OpenRouter's `management` when the shell sets none) survives |
 | `foreign_login` | A live login `live` skips because it cannot be stored (an API key), described |
 | `live_identity` | Who the CLI's own files say that login is (`Identity`) |
 | `identify` | Whose tokens these are, per the tokens or the provider, never a file beside them |
@@ -193,9 +193,11 @@ is read from, in order: the first holding a key is the live login.
 - A provider with no slots (GLM, OpenRouter, Copilot) is switched by the
   shell alone: `install` refuses and points at `remuda env`. Copilot also
   reads the token the GitHub CLI prints (`gh auth token --hostname github.com`,
-  which may keep it in the system keyring), and never writes it back.
-- OpenRouter's `management` key is the only way to its account balance;
-  `remuda env` exports it as `OPENROUTER_MANAGEMENT_KEY`, or unsets that and
+  which may keep it in the system keyring, given 3 s as TokenGauge gives it,
+  after which it reads as no token), and never writes it back.
+- OpenRouter's `management` key is the only way to its account balance. The
+  shell's login carries `OPENROUTER_MANAGEMENT_KEY`, else
+  `OPENROUTER_PROVISIONING_KEY`, into the credential; `remuda env` exports it as `OPENROUTER_MANAGEMENT_KEY`, or unsets that and
   `OPENROUTER_PROVISIONING_KEY` for a login with none.
 - MiniMax's `region` says which host a key answers on. The environment's
   region is `MINIMAX_REGION` (`cn`, else global); a slot's is its name
