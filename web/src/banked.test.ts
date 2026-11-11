@@ -36,8 +36,24 @@ describe('bankedRows', () => {
   it('keeps one plain row when the count is not split, or the split does not add up', () => {
     const plain = (r: Parameters<typeof bankedRows>[0]) => bankedRows(r).map((x) => [x.kind, x.label, x.button]);
     expect(plain({ available: 1, expiresAt: null })).toEqual([[undefined, '1 banked reset', 'Reset limits']]);
-    expect(plain({ available: 2, expiresAt: null, kinds: [{ kind: 'fable', count: 1, expiresAt: null }] })).toEqual([
-      [undefined, '2 banked resets', 'Reset limits'],
+    expect(
+      plain({
+        available: 1,
+        expiresAt: null,
+        kinds: [
+          { kind: 'fable', count: 1, expiresAt: null },
+          { kind: 'weekly', count: 1, expiresAt: null },
+        ],
+      }),
+    ).toEqual([[undefined, '1 banked reset', 'Reset limits']]);
+  });
+
+  it('keeps the kinds it knows when TokenGauge counts more than it names', () => {
+    const rows = bankedRows({ available: 3, expiresAt: null, kinds: [{ kind: 'fable', count: 1, expiresAt: null }] });
+    expect(rows.map((r) => [r.kind, r.label, r.button])).toEqual([
+      ['fable', '1 Fable reset', 'Reset Fable limit'],
+      [undefined, '2 other banked resets', undefined],
     ]);
+    expect(rows[0].noun).toBe('Fable reset');
   });
 });

@@ -172,29 +172,30 @@ function Banked(props: { c: Credential }) {
     const r = shownFor(store.s!, props.c)?.bankedResets;
     return r && !(r.expiresAt && Date.parse(r.expiresAt) <= now()) ? r : null;
   };
-  const [spentWith, setSpentWith] = createSignal<string | null>(null);
-  const held = () => spentWith() !== null && spentWith() === JSON.stringify(resets());
-  const spend = (kind?: string) => {
-    setSpentWith(JSON.stringify(resets()));
-    return act('/api/reset', { name: `${props.c.provider}/${props.c.name}`, ...(kind ? { kind } : {}) });
+  const [spentWith, setSpentWith] = createSignal<Record<string, string>>({});
+  const state = (row: BankedRow) => JSON.stringify([row.label, row.expiresAt]);
+  const held = (row: BankedRow) => spentWith()[row.kind ?? ''] === state(row);
+  const spend = (row: BankedRow) => {
+    setSpentWith({ ...spentWith(), [row.kind ?? '']: state(row) });
+    return act('/api/reset', { name: `${props.c.provider}/${props.c.name}`, ...(row.kind ? { kind: row.kind } : {}) });
   };
   return (
     <Show when={resets()}>
       {(r) => (
         <For each={bankedRows(r())}>
-          {(row) => <BankedLine c={props.c} row={row} held={held()} spend={spend} />}
+          {(row) => <BankedLine c={props.c} row={row} held={held(row)} spend={() => spend(row)} />}
         </For>
       )}
     </Show>
   );
 }
 
-function BankedLine(props: { c: Credential; row: BankedRow; held: boolean; spend: (kind?: string) => unknown }) {
+function BankedLine(props: { c: Credential; row: BankedRow; held: boolean; spend: () => unknown }) {
   const confirm = createConfirm();
   const live = () => props.row.expiresAt && !(Date.parse(props.row.expiresAt) <= now()) && props.row.expiresAt;
   const onClick = () => {
-    if (props.held || props.row.idle || !confirm.ask(`Spend ${props.c.name}'s?`)) return;
-    return props.spend(props.row.kind);
+    if (props.held || props.row.idle || !confirm.ask(`Spend ${props.c.name}'s ${props.row.noun}?`)) return;
+    return props.spend();
   };
   return (
     <div class="banked">
@@ -205,15 +206,19 @@ function BankedLine(props: { c: Credential; row: BankedRow; held: boolean; spend
         </Show>
         <Show when={props.row.idle}>{(note) => <span class="banked-idle">{note()}</span>}</Show>
       </span>
-      <button
-        class="btn"
-        data-armed={confirm.text() ? '1' : undefined}
-        title={props.held ? 'Waiting for TokenGauge to report what is left' : props.row.title}
-        disabled={props.held || !!props.row.idle}
-        onClick={onClick}
-      >
-        {confirm.text() ?? props.row.button}
-      </button>
+      <Show when={props.row.button}>
+        {(button) => (
+          <button
+            class="btn"
+            data-armed={confirm.text() ? '1' : undefined}
+            title={props.held ? 'Waiting for TokenGauge to report what is left' : props.row.title}
+            disabled={props.held || !!props.row.idle}
+            onClick={onClick}
+          >
+            {confirm.text() ?? button()}
+          </button>
+        )}
+      </Show>
     </div>
   );
 }

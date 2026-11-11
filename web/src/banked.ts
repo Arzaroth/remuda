@@ -34,36 +34,54 @@ const FABLE_AND_SESSION =
 export type BankedRow = {
   kind?: ResetKind;
   label: string;
+  /** What one spend from this row spends, for the confirm prompt. */
+  noun: string;
   expiresAt: string | null;
-  button: string;
+  /** Absent for resets this page cannot name, which it cannot spend by kind. */
+  button?: string;
   title: string;
   idle?: string;
 };
 
-/** One row per kind TokenGauge reports, or a single row for a count it does not split. */
+/**
+ * One row per kind TokenGauge reports, plus one for resets of a kind this page
+ * does not know, or a single row for a count TokenGauge does not split.
+ */
 export function bankedRows(r: Banked): BankedRow[] {
-  const kinds = r.kinds ?? [];
-  const split =
-    kinds.length > 0 && kinds.every((k) => k.kind in NAMES) && kinds.reduce((n, k) => n + k.count, 0) === r.available;
-  if (!split) {
+  const kinds = (r.kinds ?? []).filter((k) => k.kind in NAMES);
+  const named = kinds.reduce((n, k) => n + k.count, 0);
+  if (!kinds.length || named > r.available) {
     return [
       {
         label: plural(r.available, 'banked reset'),
+        noun: 'banked reset',
         expiresAt: r.expiresAt,
         button: 'Reset limits',
         title: 'Spends the reset Claude names next',
       },
     ];
   }
-  return kinds.map((k) => {
+  const rest: BankedRow[] =
+    named < r.available
+      ? [
+          {
+            label: plural(r.available - named, 'other banked reset'),
+            noun: 'banked reset',
+            expiresAt: null,
+            title: 'A kind of reset this remuda cannot name yet',
+          },
+        ]
+      : [];
+  return kinds.map((k): BankedRow => {
     const names = NAMES[k.kind];
     return {
       kind: k.kind,
       label: plural(k.count, names.noun),
+      noun: names.noun,
       expiresAt: k.expiresAt,
       button: names.button,
       title: k.kind === 'fable' && k.clears?.includes('five_hour') ? FABLE_AND_SESSION : names.title,
       idle: k.idle ? names.idle : undefined,
     };
-  });
+  }).concat(rest);
 }
