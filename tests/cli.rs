@@ -1540,17 +1540,29 @@ fn carried_tokens_that_cannot_be_kept_leave_the_bundle_and_the_rest_restored() {
     std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o500)).unwrap();
     let enforced = std::fs::write(claude.join("probe"), "").is_err();
 
-    let out = enforced.then(|| {
+    let received = || {
         new.command(&["restore", "--no-sign-in"])
             .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
             .output()
             .unwrap()
-    });
+    };
+    let out = enforced.then(received);
+    let Some(out) = out else {
+        std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o700)).unwrap();
+        return;
+    };
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    let kept = said
+        .split_once("what was received is kept in ")
+        .map(|(_, rest)| rest.split(';').next().unwrap().to_owned())
+        .unwrap_or_default();
+    let again = new.run(&["restore", &kept, "--no-sign-in"]);
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let unkept = received();
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
     std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o700)).unwrap();
-    let Some(out) = out else { return };
 
     assert!(!out.status.success());
-    let said = String::from_utf8_lossy(&out.stdout);
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(said.contains("could not store claude/perso"), "{said}");
     assert!(said.contains("stored glm/k"), "{said}");
@@ -1558,16 +1570,35 @@ fn carried_tokens_that_cannot_be_kept_leave_the_bundle_and_the_rest_restored() {
         said.contains("remuda login work -p claude --paste"),
         "{said}"
     );
-    assert!(err.contains("claude/perso"), "{err}");
-    let kept = said
-        .split_once("what was received is kept in ")
-        .unwrap()
-        .1
-        .split(';')
-        .next()
-        .unwrap()
-        .to_owned();
     assert!(kept.starts_with(root.join(".received-").to_str().unwrap()));
+    assert!(
+        err.contains(&format!(
+            "the tokens carried for claude/perso could be neither stored nor set aside here; what was received is kept in {kept}"
+        )),
+        "{err}"
+    );
+
+    assert!(!again.status.success());
+    let err = String::from_utf8_lossy(&again.stderr);
+    assert!(err.contains(&format!("; {kept} still holds them")), "{err}");
+    assert!(Path::new(&kept).exists());
+
+    assert!(!unkept.status.success());
+    let said = String::from_utf8_lossy(&unkept.stdout);
+    let err = String::from_utf8_lossy(&unkept.stderr);
+    assert!(
+        said.contains("warning: what was received is lost"),
+        "{said}"
+    );
+    assert!(
+        said.contains("remuda login work -p claude --paste"),
+        "{said}"
+    );
+    assert!(
+        err.contains("what was received could not be kept, so they are only in the sending machine's store or the set-aside file export printed there"),
+        "{err}"
+    );
+    assert!(!err.contains("kept in"), "{err}");
 
     let said = new.ok(&["restore", &kept, "--no-sign-in"]);
     assert!(said.contains("stored claude/perso"), "{said}");
