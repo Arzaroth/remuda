@@ -279,6 +279,12 @@ describe('usual', () => {
     expect(usual([week('max', 0, mornings(-7, 0)), blind], MID)!.unseen).toEqual(['pro']);
   });
 
+  it('takes no hours from an empty trail held from an old snapshot', () => {
+    const ls = logins(combined('Weekly', [['max', win(40, new Date(NOW + 24 * HOUR).toISOString(), []), 1]]), NOW, NOW - 3 * 24 * HOUR);
+    expect(ls[0].trailed).toBe(false);
+    expect(usual(ls, NOW)).toBeNull();
+  });
+
   it('has no usual week with under a day on record', () => {
     const l = { ...week('max', 0, []), past: [{ opened: at(-1, 0), samples: mornings(-1, 0) }] };
     expect(usual([l], MID)).toBeNull();
