@@ -102,8 +102,9 @@ take `-p <cli>`: `claude` (the default), `codex`, `cursor`, `glm`, `grok`,
 | Command | Does |
 | --- | --- |
 | `remuda import <name> [-p <cli>]` | Store the login the CLI is signed into right now |
-| `remuda login <name> [-p <cli>] [--no-browser]` | Sign another account in through the browser and store it, without touching the CLI |
+| `remuda login <name> [-p <cli>] [--no-browser] [--browser <id>] [--window private\|profile\|normal] [--paste\|--no-paste]` | Sign another account in through the browser and store it, without touching the CLI. Prints the link first; Enter opens it where `[login]` in config.toml says, unless `--no-browser` is given or there is no display (`DISPLAY` or `WAYLAND_DISPLAY`), when you open it yourself. Claude and Codex call back to this machine; `--paste` lets a browser elsewhere finish, with a code to paste (Claude) or a device code (Codex), the default over SSH or, on Linux, with no display, and `--no-paste` asks for the callback anyway |
 | `remuda use <name>` | Make a stored credential the one its CLI uses |
+| `remuda signout <cli>` | Sign the CLI out, keeping its login in the store, so remuda can refresh and sign in again every login |
 | `remuda run <name> [-- args]` | Start Claude Code or Codex on a stored login for this session only, without switching; `remuda claude <name>` is the same |
 | `remuda pin [name] [--remove <cli>] [--allow]` | Pin a login to this directory in `.remuda.toml`, show the pins in force, or trust a `.remuda.toml` as it is |
 | `remuda shell-init <shell>` | Print functions that start `claude` and `codex` on the login pinned where they run |
@@ -124,16 +125,22 @@ take `-p <cli>`: `claude` (the default), `codex`, `cursor`, `glm`, `grok`,
 | `remuda --update` | Replace the binary with the latest release |
 | `remuda --check-update` | Report whether a newer release exists |
 
-`login` opens the provider's sign-in page in a private window of your default
-browser (Brave, Chrome, Chromium, Vivaldi, Edge, Firefox or LibreWolf, not
-their Snap or Flatpak packages), so the account you are signed into there stays
-put; with another browser, open it in a private window yourself. Sign in with the account to add. Claude
-then shows a `code#state` string to paste back; Codex calls back to
-`localhost:1455` on its own, so run it on the machine whose browser you use,
-and not while `codex login` is running. Grok and Kimi show a code to approve
-and Cursor a confirmation, and remuda waits for the provider to say it is
-done, from any machine's browser. GLM and opencode Go open their key page and
-ask for the key.
+`login` prints the provider's sign-in link first, so you choose the browser.
+Enter opens it where `[login]` says (`--browser` and `--window` for one run):
+by default a private window of your default browser, so the account you are
+signed into there stays put. remuda knows how to open Brave, Chrome, Chromium,
+Vivaldi, Edge, Firefox and LibreWolf, not their Snap or Flatpak packages; any
+other browser gets the link through `xdg-open`, in a normal window, where it
+may already be signed in. Sign in with the account to add. Claude and Codex call back to remuda, so their
+browser must be on this machine, and Codex's port 1455 must be free (not while
+`codex login` runs); with `--paste`, Claude shows a `code#state` string to
+paste back and Codex a device code to type in instead, from any machine's
+browser. Over SSH (`SSH_CONNECTION` or `SSH_TTY` set), or on Linux with
+neither `DISPLAY` nor `WAYLAND_DISPLAY`, both do so by default; `--no-paste`
+asks for the callback anyway, as when port forwarding brings it back. Grok and
+Kimi show a code to approve and Cursor a confirmation, and remuda waits for the
+provider to say it is done, from any machine's browser. GLM and opencode Go
+open their key page and ask for the key.
 
 ## A login per session, and per repository
 
@@ -407,8 +414,8 @@ shows a meter per stored credential (its ADR 0003 describes the contract).
 
 ## Caveats
 
-remuda talks to the same OAuth endpoints and clients as Claude Code 2.1.282,
-codex-cli 0.153.4, xAI's grok-build and MoonshotAI's kimi-code. They are not a
+remuda talks to the same OAuth endpoints and clients as Claude Code 2.1.322,
+codex-cli 0.167.0, xAI's grok-build and MoonshotAI's kimi-code. They are not a
 public API, and a release of any of them can change them. cursor-agent is
 closed source: its refresh endpoint and sign-in are the ones the open-source
 Cursor clients agree on, and the first to break. Claude's banked resets are

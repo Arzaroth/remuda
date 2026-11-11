@@ -69,7 +69,11 @@ Add a login.
   percentage and reset over a bar; then "Figures from N minutes ago" when
   TokenGauge carried them from an earlier ask than its snapshot, `windows.ts`
   `carriedSince`), a Claude login's banked usage-limit resets and when they
-  expire, with a Reset limits button that asks for a second click before it
+  expire, named by kind when all are of one (`1 Fable reset`, `banked.ts`),
+  with a button saying what it resets (Reset Fable limit, Reset limits; a
+  Fable reset's tooltip names the 5-hour limit too when its `clears` lists
+  `five_hour`, as on a Team Premium seat) that
+  asks for a second click before it
   spends one and then holds until TokenGauge reports the new count, how long
   its access token and its sign-in (refresh token) have left, its
   keep-warm line, and Refresh, Sign in again, Label, Rename and Remove.
@@ -77,7 +81,10 @@ Add a login.
   or name to pick and no overwrite to confirm, and closes it once stored; it
   stands out when the sign-in has run out. Remove asks
   for a second click; Use, Refresh and Remove are disabled on the active one,
-  and Sign in again too, since the CLI signs its own login in.
+  and Sign in again too, since the CLI signs its own login in. The active one
+  has Sign out instead, for every CLI but the API-key ones (the state's
+  `providers[].signsOut`), which asks for a second click and leaves the CLI
+  with no login ([switching.md](switching.md#signing-out)).
   Use asks for a second click too when switching would drop the CLI's live
   login, naming what goes: "Drop alice@example.com unsaved?" for one not
   stored, "Drop the API key?", or "Lose work's newest tokens?" for one that
@@ -140,14 +147,25 @@ click within 400 ms, so a double-click only arms it.
 "Refresh tokens" refreshes every inactive credential due within the hour.
 
 Add a login opens a dialog that picks a CLI by its logo, preselecting the
-page's, and a name, and starts a sign-in: the
-server opens the provider's page in a private window, as `login` does (see
-[sign-in.md](sign-in.md)). When it cannot, or runs with `--no-browser`, the page
-opens a new tab instead. Either way the box can copy the link for pasting into
-a private window by hand, which also serves a page viewed through a tunnel from
-another machine. Then Claude shows a box for the pasted code
-while Codex waits for its callback. Cancel, or closing the dialog, abandons
-it, and for Codex frees port 1455 immediately.
+page's, and a name, and starts a sign-in. Nothing opens by itself: the dialog
+shows the provider's link, with Copy the link, and Open in, which asks the
+server to open it where `[login]` says, as `login` does on Enter (see
+[sign-in.md](sign-in.md); `POST /api/login/open`). When the server has no
+display (`browser::displayed`) or runs with `--no-browser`, Open opens a new
+tab of the page's own browser instead, which also serves a page viewed through
+a tunnel from another machine. When the server tried and could not open it,
+Open says so and tries the tab too, which the browser may block since it
+follows the server's answer rather than the click. Two selects above the box set where sign-ins open, the browser (the
+desktop's default or one installed) and the window (private, the login's own
+profile, normal), saved to `[login]` (`GET`/`POST /api/login/settings`); for
+Claude and Codex, a checkbox saves `paste`. The box says whether any browser
+will do or only one on the machine remuda runs on, which it names by hostname
+(`localOnly`: Claude and Codex unless `paste`; `machine`), and shows Codex's
+device code (`userCode`) to type in. Then Claude shows a box for the pasted
+code when pasting, and otherwise waits for its callback, as Codex does for its
+callback or its device code.
+Cancel, or closing the dialog, abandons it, and frees the port a callback
+sign-in listens on immediately: Codex's 1455, or Claude's.
 
 Usage figures come from TokenGauge's snapshot, which remuda reads and never
 writes. A refresh or a switch made from the page asks TokenGauge's daemon to

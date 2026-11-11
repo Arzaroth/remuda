@@ -1052,18 +1052,18 @@ mod tests {
                 now: now_ms(),
             })
         };
-        let same = fake_cli(&e.tmp.path().join("same"), "2.1.282 (Claude Code)");
+        let same = fake_cli(&e.tmp.path().join("same"), "2.1.322 (Claude Code)");
         let same = version(&same);
         assert_eq!(same.len(), 1);
         assert_eq!(same[0].id, "version-claude");
         assert_eq!(same[0].level, Level::Ok);
 
-        let newer = fake_cli(&e.tmp.path().join("newer"), "2.1.314 (Claude Code)");
+        let newer = fake_cli(&e.tmp.path().join("newer"), "2.1.330 (Claude Code)");
         let newer = version(&newer);
         assert_eq!(newer[0].level, Level::Info);
         assert_eq!(
             newer[0].detail,
-            "2.1.314 is installed; remuda's sign-in was read from 2.1.282"
+            "2.1.330 is installed; remuda's sign-in was read from 2.1.322"
         );
 
         let mute = fake_cli(&e.tmp.path().join("mute"), "hello");

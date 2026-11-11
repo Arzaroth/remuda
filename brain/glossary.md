@@ -51,8 +51,8 @@ time, label, and for Claude the `oauthAccount` block.
 seat. Tokens rotate; this does not.
 
 **Pending login**: a sign-in the browser has been sent to and that has not
-finished (`provider::PendingLogin`). Claude's finishes with a pasted code,
-Codex's with a callback.
+finished (`provider::PendingLogin`). Claude's finishes with a callback or a
+pasted code, Codex's with a callback or a device code.
 
 **Store**: the directory of credentials, `$REMUDA_STORE` or
 `$XDG_DATA_HOME/remuda/credentials`.

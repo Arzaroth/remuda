@@ -214,6 +214,33 @@ fn two_accounts_imported_switched_and_removed() {
 }
 
 #[test]
+fn signout_leaves_the_cli_with_no_login_until_one_is_used() {
+    let home = Home::new();
+    home.sign_in("a-work", "r-work", "u-work");
+    home.ok(&["import", "work"]);
+
+    assert_eq!(
+        home.ok(&["signout", "claude"]),
+        "signed Claude Code out of work\n"
+    );
+    let creds = read(&home.creds());
+    assert!(creds.get("claudeAiOauth").is_none());
+    assert_eq!(creds["mcpOAuth"]["srv"]["accessToken"], "mcp");
+    assert!(read(&home.config()).get("oauthAccount").is_none());
+    assert!(home.ok(&["ls"]).contains("signed out"));
+    assert!(
+        home.ok(&["signout", "claude"])
+            .contains("already signed out")
+    );
+
+    home.ok(&["use", "work"]);
+    assert_eq!(
+        read(&home.creds())["claudeAiOauth"]["refreshToken"],
+        "r-work"
+    );
+}
+
+#[test]
 fn a_login_nobody_stored_is_not_switched_away_from_unless_discarded() {
     let home = Home::new();
     home.sign_in("a-work", "r-work", "u-work");
@@ -403,7 +430,7 @@ fn only_import_and_login_start_a_missing_store() {
     assert!(store.join(".dirs.json").exists());
     std::fs::remove_dir_all(home.path(".local/share/remuda")).unwrap();
 
-    let mut login = home.command(&["login", "perso", "--no-browser"]);
+    let mut login = home.command(&["login", "perso", "--no-browser", "--paste"]);
     login.stdin(std::process::Stdio::null());
     let _ = login.output().unwrap();
     let mode = std::fs::metadata(&store).unwrap().permissions().mode();
@@ -415,6 +442,55 @@ fn only_import_and_login_start_a_missing_store() {
     assert_eq!(mode & 0o777, 0o700);
     assert!(store.join("claude/work.json").exists());
     assert!(store.join(".dirs.json").exists());
+}
+
+#[test]
+fn claude_signs_in_by_pasting_over_ssh_unless_told_otherwise() {
+    let home = Home::new();
+    let out = home
+        .command(&["login", "perso", "--no-browser"])
+        .env("SSH_CONNECTION", "10.0.0.2 50000 10.0.0.1 22")
+        .env("DISPLAY", ":0")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    let said = String::from_utf8(out.stdout).unwrap();
+    assert!(said.contains("in any browser:"), "{said}");
+    assert!(said.contains("Paste the code"), "{said}");
+
+    let both = home.fails(&["login", "perso", "--paste", "--no-paste"]);
+    assert!(both.contains("cannot be used with"), "{both}");
+}
+
+#[test]
+fn codex_signs_in_by_device_code_over_ssh() {
+    let home = Home::new();
+    let usercode = home
+        .api
+        .borrow_mut()
+        .mock("POST", "/api/accounts/deviceauth/usercode")
+        .with_body(
+            json!({"device_auth_id": "da-1", "user_code": "WXYZ-9876", "interval": 1}).to_string(),
+        )
+        .create();
+    home.api
+        .borrow_mut()
+        .mock("POST", "/api/accounts/deviceauth/token")
+        .with_status(400)
+        .with_body("denied")
+        .create();
+    let out = home
+        .command(&["login", "perso", "-p", "codex", "--no-browser"])
+        .env("SSH_CONNECTION", "10.0.0.2 50000 10.0.0.1 22")
+        .env("DISPLAY", ":0")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    usercode.assert();
+    let said = String::from_utf8(out.stdout).unwrap();
+    assert!(said.contains("in any browser:"), "{said}");
+    assert!(said.contains("/codex/device"), "{said}");
+    assert!(said.contains("Enter the code WXYZ-9876 there."), "{said}");
 }
 
 #[test]

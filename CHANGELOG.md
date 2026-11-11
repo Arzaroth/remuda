@@ -12,14 +12,54 @@
   does to them, the hook and its settings, and the commands.
 - `remuda doctor` checks that the artifact hook is installed once two Claude
   logins are stored.
+- `remuda signout <cli>`, and Sign out on the page, take the login out of a
+  CLI's own files, keeping it in the store. remuda can then refresh and sign in again
+  every login, even a lone one, without going through the CLI.
+- Signing in shows the link before anything opens, so you choose where it
+  goes: Enter in the terminal, or Open on the page, opens it here, and Grok,
+  Kimi, Cursor and Claude with `--paste` can be signed in from a browser on
+  another machine.
+- Where a sign-in opens is a setting, `[login]` in config.toml, which the Add
+  a login dialog sets too, and `--browser` / `--window` for one run: any
+  browser remuda knows rather than only the default one, and a private window
+  as before, a normal window, or a profile of the login's own, kept under the
+  store, which stays signed in for the next time.
+- A banked Claude reset says what it resets: `1 Fable reset` with a Reset
+  Fable limit button, from TokenGauge's `bankedResets.kinds`.
 - The Quota card has a row per login: what it has left, its own burn, its
   share of the pool's burn when weighted, and when it runs dry at that pace.
   The card carries the Weighted/Absolute switch the Overview tile has.
+
+### Changed
+
+- Claude signs in the way Claude Code does: the browser calls back to remuda,
+  with nothing to paste. `--paste`, `paste = true` under `[login]`, or the
+  checkbox on the page brings the code to paste back, for a browser on another
+  machine. `remuda login` pastes by default over SSH, or on Linux with no
+  display, where the callback could not arrive, and `--no-paste` asks for the
+  callback anyway. The page names the machine a callback sign-in's browser must
+  be on.
+- The same switch signs Codex in by device code, as `codex login --device-auth`
+  does: remuda shows a code to type at auth.openai.com/codex/device from any
+  machine's browser, so Codex no longer needs the browser on this machine.
+  `remuda login` does so by default over SSH or, on Linux, with no display, as
+  it pastes for Claude, and `--no-paste` keeps the callback. Its sign-in constants now
+  follow codex-cli 0.167.0.
+- Spending a banked reset skips one whose limits are all at 0%, as claude.ai
+  does, rather than burning it on nothing.
+- A Grok, Kimi, Cursor or Codex device sign-in rides out a busy or failing
+  server the way it rides out a dropped connection, asking again until the
+  third in a row, instead of throwing away an approval already given. Codex
+  and Cursor count every 429 or 5xx; Grok and Kimi do not count one whose body
+  says "pending" or "slow down", and start the count over on it. An approval
+  cut off on its way back is asked for again the same way.
 
 ### Fixed
 
 - The Quota card's window picker no longer shows another window after the
   list of windows is rebuilt.
+- A sign-in cancelled on the page, or replaced by another for the same CLI,
+  while it was finishing is no longer stored.
 
 ## [0.38.0] - 2026-11-10
 

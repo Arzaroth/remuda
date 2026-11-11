@@ -9,6 +9,7 @@ use jiff::Zoned;
 use serde_json::{Value, json};
 
 use crate::auto;
+use crate::browser;
 use crate::commands::{self, RefreshScope};
 use crate::config;
 use crate::doctor;
@@ -33,6 +34,7 @@ const ICON: &str = include_str!("../assets/remuda.svg");
 struct Pending {
     provider: &'static str,
     name: String,
+    url: String,
     force: bool,
     login: Option<Box<dyn PendingLogin>>,
     cancel: Box<dyn Fn() + Send + Sync>,
@@ -104,7 +106,7 @@ pub struct App {
     providers: Vec<Box<dyn Provider>>,
     token: String,
     port: u16,
-    open: Opener,
+    open: Box<dyn Opener>,
     pending: Mutex<HashMap<String, Pending>>,
     auto: Mutex<BTreeMap<String, Value>>,
     /// `provider/name` to what keep-warm last did for that login.
@@ -122,8 +124,40 @@ pub struct App {
 /// The latest events the page's Log shows; `remuda log` reaches further back.
 const LOG_SHOWN: usize = 500;
 
-/// Opens a sign-in page in a private window; false leaves it to the page.
-pub type Opener = Box<dyn Fn(&str) -> bool + Send + Sync>;
+/// Where the page's sign-ins open.
+pub trait Opener: Send + Sync {
+    /// Where one opens with these settings; none leaves it to the page.
+    fn opens_in(&self, login: &config::Login) -> Option<String>;
+    /// False when nothing could open it.
+    fn open(&self, url: &str, profile: &Path, login: &config::Login) -> bool;
+}
+
+/// The desktop's browsers.
+pub struct Desktop;
+
+impl Opener for Desktop {
+    fn opens_in(&self, login: &config::Login) -> Option<String> {
+        browser::displayed()
+            .then(|| browser::choose(login.browser.as_deref(), login.window).describe())
+    }
+
+    fn open(&self, url: &str, profile: &Path, login: &config::Login) -> bool {
+        browser::choose(login.browser.as_deref(), login.window).open(url, profile)
+    }
+}
+
+/// `--no-browser`: the page opens sign-ins in a tab of its own.
+pub struct Nowhere;
+
+impl Opener for Nowhere {
+    fn opens_in(&self, _: &config::Login) -> Option<String> {
+        None
+    }
+
+    fn open(&self, _: &str, _: &Path, _: &config::Login) -> bool {
+        false
+    }
+}
 
 /// What a round decided, without its reasons, whose figures move every round.
 fn gist(seen: &Value) -> (&Value, &Value) {
@@ -179,6 +213,16 @@ impl Response {
     }
 }
 
+fn hostname() -> Option<String> {
+    let mut buf = [0u8; 256];
+    if unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) } != 0 {
+        return None;
+    }
+    let end = buf.iter().position(|&b| b == 0)?;
+    let name = std::str::from_utf8(&buf[..end]).ok()?;
+    (!name.is_empty()).then(|| name.to_owned())
+}
+
 fn sent_config(body: &Value) -> Result<config::Config> {
     serde_json::from_value(body.get("config").cloned().unwrap_or(json!({})))
         .context("config is not a valid config")
@@ -197,7 +241,7 @@ impl App {
         providers: Vec<Box<dyn Provider>>,
         token: String,
         port: u16,
-        open: Opener,
+        open: Box<dyn Opener>,
     ) -> Self {
         App {
             store,
@@ -790,6 +834,27 @@ impl App {
         Some(entries.into_iter().map(|e| e.name).collect())
     }
 
+    fn login_settings(&self) -> config::Login {
+        config::load(&self.places.config)
+            .map(|l| l.config.login)
+            .unwrap_or_default()
+    }
+
+    fn sign_in_settings(&self) -> Result<Value> {
+        let login = self.login_settings();
+        let browsers: Vec<Value> = browser::installed()
+            .iter()
+            .map(|b| json!({"id": b.id, "name": b.name}))
+            .collect();
+        Ok(json!({
+            "browsers": browsers,
+            "browser": login.browser,
+            "window": login.window,
+            "paste": login.paste,
+            "opensIn": self.open.opens_in(&login),
+        }))
+    }
+
     fn config(&self) -> Result<Value> {
         let loaded = config::load(&self.places.config)?;
         let problems = loaded.config.check(&|id| self.logins(id));
@@ -855,7 +920,7 @@ impl App {
                     .iter()
                     .map(|p| {
                         let warm = crate::proxy::route::cheapest(p.id()).is_some();
-                        json!({"id": p.id(), "name": p.name(), "warm": warm})
+                        json!({"id": p.id(), "name": p.name(), "warm": warm, "signsOut": p.signs_out()})
                     })
                     .collect();
                 state["health"] = self.health(&lives);
@@ -945,6 +1010,16 @@ impl App {
                 gauge::nudge(&self.places.snapshot);
                 Ok(json!({ "message": message }))
             }
+            ("POST", "/api/signout") => {
+                let p = commands::find(
+                    &providers,
+                    text("provider").context("provider is required")?,
+                )?;
+                let message =
+                    commands::sign_out(store, &self.places.config, p, flag("discard"), By::Page)?;
+                gauge::nudge(&self.places.snapshot);
+                Ok(json!({ "message": message }))
+            }
             ("POST", "/api/import") => {
                 let p = commands::find(
                     &providers,
@@ -1019,6 +1094,25 @@ impl App {
                     json!({"message": if out.is_empty() { "nothing was due".to_owned() } else { out }}),
                 )
             }
+            ("GET", "/api/login/settings") => self.sign_in_settings(),
+            ("POST", "/api/login/settings") => {
+                let window = match text("window") {
+                    Some(w) => w.parse().map_err(|e: String| anyhow!(e))?,
+                    None => browser::Window::default(),
+                };
+                let login = config::Login {
+                    browser: text("browser").filter(|b| !b.is_empty()).map(str::to_owned),
+                    window,
+                    paste: flag("paste"),
+                };
+                if let Some(id) = &login.browser
+                    && !browser::BROWSERS.iter().any(|b| b.id == id)
+                {
+                    bail!("remuda does not know a browser called {id}");
+                }
+                config::set_login(&self.places.config, login)?;
+                self.sign_in_settings()
+            }
             ("POST", "/api/login") => {
                 let p = commands::find(
                     &providers,
@@ -1034,26 +1128,46 @@ impl App {
                     }
                     keep
                 });
-                let login = commands::begin_login(store, p, name, force)?;
+                let paste = match body.get("paste").and_then(Value::as_bool) {
+                    Some(paste) => paste,
+                    None => self.login_settings().paste,
+                };
+                let login = commands::begin_login(store, p, name, force, paste)?;
                 let id = pkce::random()?;
                 let url = login.url().to_owned();
                 let needs_code = login.needs_code();
                 let asks_for = login.asks_for();
+                let local_only = login.local_only();
+                let user_code = login.user_code().map(str::to_owned);
                 pending.insert(
                     id.clone(),
                     Pending {
                         provider: p.id(),
                         name: name.to_owned(),
+                        url: url.clone(),
                         force,
                         cancel: login.canceller(),
                         login: Some(login),
                     },
                 );
                 drop(pending);
-                let opened = (self.open)(&url);
+                let opens_in = self.open.opens_in(&self.login_settings());
                 Ok(
-                    json!({"id": id, "url": url, "needsCode": needs_code, "asksFor": asks_for, "opened": opened}),
+                    json!({"id": id, "url": url, "needsCode": needs_code, "asksFor": asks_for, "localOnly": local_only, "userCode": user_code, "machine": hostname(), "opensIn": opens_in}),
                 )
+            }
+            ("POST", "/api/login/open") => {
+                let id = text("id").context("id is required")?;
+                let (url, provider, name) = {
+                    let all = self.pending.lock().map_err(|_| anyhow!("poisoned"))?;
+                    let pending = all
+                        .get(id)
+                        .context("that sign-in is no longer open; start it again")?;
+                    (pending.url.clone(), pending.provider, pending.name.clone())
+                };
+                let profile = browser::profile_dir(store.root(), provider, &name);
+                let opened = self.open.open(&url, &profile, &self.login_settings());
+                Ok(json!({ "opened": opened }))
             }
             ("POST", "/api/login/finish") => {
                 let id = text("id").context("id is required")?;
@@ -1069,11 +1183,18 @@ impl App {
                     (pending.provider, pending.name.clone(), pending.force, login)
                 };
                 let done = login.finish(text("code"));
-                if let Ok(mut all) = self.pending.lock() {
-                    all.remove(id);
+                let claimed = self
+                    .pending
+                    .lock()
+                    .map_err(|_| anyhow!("poisoned"))?
+                    .remove(id)
+                    .is_some();
+                let done = done?;
+                if !claimed {
+                    bail!("the sign-in was cancelled");
                 }
                 let p = commands::find(&providers, provider)?;
-                let entry = commands::save_login(store, p, &name, force, done?)?;
+                let entry = commands::save_login(store, p, &name, force, done)?;
                 Ok(json!({"message": commands::stored_message(p, &entry)}))
             }
             ("POST", "/api/login/cancel") => {
@@ -1165,11 +1286,32 @@ mod tests {
         }
     }
 
-    fn app(e: &Env, api_base: &str) -> App {
-        app_opening(e, api_base, Box::new(|_| false))
+    /// Opens nothing, and notes what it was asked to open and where.
+    struct Recording(Arc<Mutex<Vec<(String, PathBuf)>>>);
+
+    impl Opener for Recording {
+        fn opens_in(&self, login: &config::Login) -> Option<String> {
+            Some(match login.window {
+                browser::Window::Private => "a private window of a test browser".into(),
+                browser::Window::Profile => "a test browser, in this login's own profile".into(),
+                browser::Window::Normal => "a test browser".into(),
+            })
+        }
+
+        fn open(&self, url: &str, profile: &Path, _: &config::Login) -> bool {
+            self.0
+                .lock()
+                .unwrap()
+                .push((url.to_owned(), profile.to_owned()));
+            true
+        }
     }
 
-    fn app_opening(e: &Env, api_base: &str, open: Opener) -> App {
+    fn app(e: &Env, api_base: &str) -> App {
+        app_opening(e, api_base, Box::new(Nowhere))
+    }
+
+    fn app_opening(e: &Env, api_base: &str, open: Box<dyn Opener>) -> App {
         let providers: Vec<Box<dyn Provider>> =
             vec![Box::new(Claude::at(e.tmp.path(), Api::local(api_base)))];
         App::new(
@@ -1281,7 +1423,7 @@ mod tests {
             providers,
             TOKEN.into(),
             PORT,
-            Box::new(|_| false),
+            Box::new(Nowhere),
         ));
         app.start();
         let proxy = || call(&app, "GET", "/api/state", Value::Null).1["proxy"].clone();
@@ -1402,7 +1544,7 @@ mod tests {
             providers,
             TOKEN.into(),
             PORT,
-            Box::new(|_| false),
+            Box::new(Nowhere),
         ));
         app.start();
         let (status, _) = call(
@@ -1658,6 +1800,37 @@ mod tests {
         assert!(timer().as_str().unwrap().starts_with("not installed"));
         std::fs::write(global.join("remuda-refresh.timer"), "").unwrap();
         assert_eq!(timer(), "installed but off");
+    }
+
+    #[test]
+    fn the_page_signs_a_cli_out_and_says_when_auto_mode_will_undo_it() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let work = e.store.get("claude", "work").unwrap().unwrap();
+        e.sign_in(work.creds, account("u-work"));
+        std::fs::write(
+            e.tmp.path().join("config.toml"),
+            "[auto.claude]\nenabled = true\nlogins = [\"work\"]\n",
+        )
+        .unwrap();
+        let app = app(&e, &OFFLINE);
+
+        let (_, state) = call(&app, "GET", "/api/state", Value::Null);
+        assert_eq!(state["providers"][0]["signsOut"], true);
+
+        let (status, r) = call(&app, "POST", "/api/signout", json!({"provider": "claude"}));
+
+        assert_eq!(status, 200, "{r}");
+        assert_eq!(
+            r["message"],
+            "signed Claude Code out of work; auto mode is on for Claude Code and will put a login back"
+        );
+        assert_eq!(e.live_refresh_token(), None);
+        let logged = logbook::read(&e.store);
+        assert_eq!(
+            (logged[0].kind, logged[0].subject().as_str(), logged[0].by),
+            (Kind::Switch, "claude/work", Some(By::Page))
+        );
     }
 
     #[test]
@@ -2157,7 +2330,7 @@ mod tests {
             vec![Box::new(Claude::at(e.tmp.path(), Api::local(&OFFLINE)))],
             TOKEN.into(),
             PORT,
-            Box::new(|_| false),
+            Box::new(Nowhere),
         )
     }
 
@@ -2280,7 +2453,7 @@ mod tests {
             vec![Box::new(Claude::at(e.tmp.path(), Api::local(&OFFLINE)))],
             TOKEN.into(),
             PORT,
-            Box::new(|_| false),
+            Box::new(Nowhere),
         );
 
         let (status, body) = call(&app, "GET", "/api/versions", Value::Null);
@@ -2770,24 +2943,30 @@ mod tests {
             .create();
         let e = env(&server.url());
         let opened = Arc::new(Mutex::new(Vec::new()));
-        let seen = opened.clone();
-        let app = app_opening(
-            &e,
-            &server.url(),
-            Box::new(move |url| {
-                seen.lock().unwrap().push(url.to_owned());
-                true
-            }),
-        );
+        let app = app_opening(&e, &server.url(), Box::new(Recording(opened.clone())));
 
-        let (status, begun) = call(&app, "POST", "/api/login", json!({"name": "new"}));
+        let (status, begun) = call(
+            &app,
+            "POST",
+            "/api/login",
+            json!({"name": "new", "paste": true}),
+        );
         assert_eq!(status, 200);
         assert_eq!(begun["needsCode"], true);
-        assert_eq!(begun["opened"], true);
-        assert_eq!(*opened.lock().unwrap(), [begun["url"].as_str().unwrap()]);
+        assert_eq!(begun["opensIn"], "a private window of a test browser");
+        assert!(opened.lock().unwrap().is_empty());
+        let id = begun["id"].as_str().unwrap();
+        let (_, r) = call(&app, "POST", "/api/login/open", json!({"id": id}));
+        assert_eq!(r["opened"], true);
+        assert_eq!(
+            *opened.lock().unwrap(),
+            [(
+                begun["url"].as_str().unwrap().to_owned(),
+                e.store.root().join(".browser/claude/new")
+            )]
+        );
         let url = reqwest::Url::parse(begun["url"].as_str().unwrap()).unwrap();
         let state = url.query_pairs().find(|(k, _)| k == "state").unwrap().1;
-        let id = begun["id"].as_str().unwrap();
 
         let (_, r) = call(
             &app,
@@ -2803,6 +2982,146 @@ mod tests {
         let (status, r) = call(&app, "POST", "/api/login", json!({"name": "new"}));
         assert_eq!(status, 400);
         assert!(r["error"].as_str().unwrap().contains("already exists"));
+    }
+
+    #[test]
+    fn claude_calls_back_unless_pasting_is_asked_for_or_set() {
+        let e = env(&OFFLINE);
+        let app = app(&e, &OFFLINE);
+        let begin = |body: Value| call(&app, "POST", "/api/login", body).1;
+
+        let callback = begin(json!({"name": "a"}));
+        assert_eq!(
+            (&callback["needsCode"], &callback["localOnly"]),
+            (&json!(false), &json!(true))
+        );
+        assert_eq!(callback["machine"], json!(hostname()));
+        assert!(hostname().is_some_and(|h| !h.contains('\0')));
+        let pasted = begin(json!({"name": "a", "paste": true}));
+        assert_eq!(
+            (&pasted["needsCode"], &pasted["localOnly"]),
+            (&json!(true), &json!(false))
+        );
+
+        let (_, set) = call(&app, "POST", "/api/login/settings", json!({"paste": true}));
+        assert_eq!(set["paste"], true);
+        assert_eq!(begin(json!({"name": "a"}))["needsCode"], true);
+        assert_eq!(
+            begin(json!({"name": "a", "paste": false}))["needsCode"],
+            false
+        );
+        call(&app, "POST", "/api/login/cancel", json!({"id": "x"}));
+    }
+
+    #[test]
+    fn a_codex_device_sign_in_hands_the_page_its_code() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/api/accounts/deviceauth/usercode")
+            .with_body(json!({"device_auth_id": "da", "user_code": "ABCD-1234"}).to_string())
+            .create();
+        let e = env(&server.url());
+        let providers: Vec<Box<dyn Provider>> = vec![Box::new(crate::codex::Codex::at(
+            e.tmp.path(),
+            crate::codex::Api::local(&server.url()),
+            0,
+        ))];
+        let app = App::new(
+            Store::open(e.store.root()),
+            places(&e),
+            providers,
+            TOKEN.into(),
+            PORT,
+            Box::new(Nowhere),
+        );
+
+        let (_, begun) = call(
+            &app,
+            "POST",
+            "/api/login",
+            json!({"provider": "codex", "name": "a", "paste": true}),
+        );
+        assert_eq!(begun["userCode"], "ABCD-1234");
+        assert_eq!(begun["url"], format!("{}/codex/device", server.url()));
+        assert_eq!(
+            (&begun["needsCode"], &begun["localOnly"]),
+            (&json!(false), &json!(false))
+        );
+        call(
+            &app,
+            "POST",
+            "/api/login/cancel",
+            json!({"id": begun["id"]}),
+        );
+
+        let (_, callback) = call(
+            &app,
+            "POST",
+            "/api/login",
+            json!({"provider": "codex", "name": "a"}),
+        );
+        assert_eq!(callback["userCode"], Value::Null);
+        assert_eq!(callback["localOnly"], true);
+        call(
+            &app,
+            "POST",
+            "/api/login/cancel",
+            json!({"id": callback["id"]}),
+        );
+    }
+
+    #[test]
+    fn the_page_reads_and_sets_where_sign_ins_open() {
+        let e = env(&OFFLINE);
+        let opened = Arc::new(Mutex::new(Vec::new()));
+        let app = app_opening(&e, &OFFLINE, Box::new(Recording(opened)));
+
+        let (_, now) = call(&app, "GET", "/api/login/settings", Value::Null);
+        assert_eq!(
+            (&now["browser"], &now["window"], &now["opensIn"]),
+            (
+                &Value::Null,
+                &json!("private"),
+                &json!("a private window of a test browser")
+            )
+        );
+        assert!(now["browsers"].is_array());
+
+        let (status, set) = call(
+            &app,
+            "POST",
+            "/api/login/settings",
+            json!({"browser": "firefox", "window": "profile"}),
+        );
+        assert_eq!(status, 200, "{set}");
+        assert_eq!(set["browser"], "firefox");
+        assert_eq!(
+            set["opensIn"],
+            "a test browser, in this login's own profile"
+        );
+        let saved = std::fs::read_to_string(e.tmp.path().join("config.toml")).unwrap();
+        assert!(
+            saved.contains("[login]") && saved.contains("window = \"profile\""),
+            "{saved}"
+        );
+
+        let (status, r) = call(
+            &app,
+            "POST",
+            "/api/login/settings",
+            json!({"browser": "lynx"}),
+        );
+        assert_eq!(status, 400);
+        assert!(r["error"].as_str().unwrap().contains("lynx"));
+        let (status, _) = call(
+            &app,
+            "POST",
+            "/api/login/settings",
+            json!({"window": "tab"}),
+        );
+        assert_eq!(status, 400);
+        let (status, _) = call(&app, "POST", "/api/login/open", json!({"id": "gone"}));
+        assert_eq!(status, 400);
     }
 
     #[test]
@@ -2829,6 +3148,12 @@ mod tests {
     }
 
     #[test]
+    fn the_desktop_names_no_browser_without_a_display() {
+        let login = config::Login::default();
+        assert_eq!(Desktop.opens_in(&login).is_some(), browser::displayed());
+    }
+
+    #[test]
     fn a_cancelled_sign_in_stops_waiting() {
         use crate::codex::{Api as CodexApi, Codex};
         let e = env(&OFFLINE);
@@ -2843,7 +3168,7 @@ mod tests {
             providers,
             TOKEN.into(),
             PORT,
-            Box::new(|_| false),
+            Box::new(Nowhere),
         ));
         let (_, begun) = call(
             &app,
@@ -2851,7 +3176,7 @@ mod tests {
             "/api/login",
             json!({"provider": "codex", "name": "x"}),
         );
-        assert_eq!(begun["opened"], false);
+        assert_eq!(begun["opensIn"], Value::Null);
         let id = begun["id"].as_str().unwrap().to_owned();
         let waiting = {
             let app = Arc::clone(&app);
@@ -2865,6 +3190,69 @@ mod tests {
         let (status, r) = waiting.join().unwrap();
         assert_eq!(status, 400);
         assert_eq!(r["error"], "the sign-in was cancelled");
+    }
+
+    #[test]
+    fn a_sign_in_cancelled_while_it_finishes_is_not_stored() {
+        use crate::codex::{Api as CodexApi, Codex};
+        use crate::oauth::fake_jwt as jwt;
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/api/accounts/deviceauth/usercode")
+            .with_body(
+                json!({"device_auth_id": "da-1", "user_code": "WXYZ", "interval": 1}).to_string(),
+            )
+            .create();
+        server
+            .mock("POST", "/api/accounts/deviceauth/token")
+            .with_body(
+                json!({"authorization_code": "auth-1", "code_verifier": "ver-1"}).to_string(),
+            )
+            .create();
+        let e = env(&OFFLINE);
+        let providers: Vec<Box<dyn Provider>> = vec![Box::new(Codex::at(
+            e.tmp.path(),
+            CodexApi::local(&server.url()),
+            0,
+        ))];
+        let app = Arc::new(App::new(
+            Store::open(e.store.root()),
+            places(&e),
+            providers,
+            TOKEN.into(),
+            PORT,
+            Box::new(Nowhere),
+        ));
+        let (_, begun) = call(
+            &app,
+            "POST",
+            "/api/login",
+            json!({"provider": "codex", "name": "x", "paste": true}),
+        );
+        let id = begun["id"].as_str().unwrap().to_owned();
+        let exchange = {
+            let app = Arc::clone(&app);
+            let id = id.clone();
+            server
+                .mock("POST", "/oauth/token")
+                .with_body_from_request(move |_| {
+                    call(&app, "POST", "/api/login/cancel", json!({"id": id}));
+                    let claims = "https://api.openai.com/auth";
+                    json!({
+                        "id_token": jwt(json!({claims: {"chatgpt_account_id": "ws-1", "chatgpt_user_id": "user-a"}})),
+                        "access_token": jwt(json!({"exp": 1_900_000_000, claims: {"chatgpt_account_user_id": "a", "chatgpt_account_id": "ws-1"}})),
+                        "refresh_token": "r-device",
+                    })
+                    .to_string()
+                    .into_bytes()
+                })
+                .create()
+        };
+        let (status, r) = call(&app, "POST", "/api/login/finish", json!({"id": id}));
+        exchange.assert();
+        assert_eq!(status, 400, "{r}");
+        assert_eq!(r["error"], "the sign-in was cancelled");
+        assert!(e.store.get("codex", "x").unwrap().is_none());
     }
 
     #[test]

@@ -44,6 +44,22 @@ claude = ["work", "perso"]
 codex  = ["work"]
 ```
 
+Where a sign-in opens ([features/sign-in.md](../features/sign-in.md#where-it-opens)):
+
+```toml
+[login]
+browser = "firefox"   # a browser remuda knows; none: the desktop's default
+window  = "profile"   # private (default), profile (the login's own), normal
+paste   = true        # a browser anywhere: Claude pastes a code, Codex a device code
+```
+
+`remuda login` also acts as if `paste = true` over SSH or, on Linux, with no
+display, and `--no-paste` asks for the callback for one run whatever `paste`
+and the session say.
+
+The page sets it from the Add a login dialog (`config::set_login`, which
+starts the file when there is none).
+
 Unknown keys are refused. A key at its default is left out when remuda writes
 it anew, and kept when the file already sets it.
 
@@ -57,7 +73,7 @@ login outside its rule's order, a rule after an `otherwise` one (never in
 force), a rule with no tier at all, a ceiling outside 1 to 100, a ceiling or a
 fallback naming a login not stored, a dwell under a minute or over seven days,
 a negative margin; and in `[warm]`, a provider remuda does not have or cannot ping, a login not
-stored, or one named twice. Renaming or removing a login keeps `[warm]` in step. The page cannot save a config with any of them; a
+stored, or one named twice; and in `[login]`, a browser remuda does not know. Renaming or removing a login keeps `[warm]` in step. The page cannot save a config with any of them; a
 file edited by hand is still read, and the page shows them.
 
 ## Writes

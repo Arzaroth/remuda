@@ -3,6 +3,7 @@ mod artifacts;
 mod attribution;
 mod auto;
 mod browser;
+mod callback;
 mod child;
 mod claude;
 mod codex;
@@ -40,6 +41,7 @@ mod warm;
 
 use std::ffi::OsString;
 use std::io::{self, BufRead, Write};
+use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use clap::{CommandFactory, Parser, Subcommand};
@@ -77,6 +79,10 @@ const PROVIDERS: [&str; 7] = [
     "claude", "codex", "cursor", "glm", "grok", "kimi", "opencode",
 ];
 
+fn browser_ids() -> clap::builder::PossibleValuesParser {
+    clap::builder::PossibleValuesParser::new(browser::BROWSERS.iter().map(|b| b.id))
+}
+
 #[derive(Subcommand)]
 enum Cmd {
     /// List stored credentials and which one each CLI is using.
@@ -101,14 +107,38 @@ enum Cmd {
         provider: String,
         #[arg(long)]
         force: bool,
-        /// Print the URL instead of opening it.
+        /// Only print the link; never offer to open it here.
         #[arg(long)]
         no_browser: bool,
+        /// The browser to open it in, overriding `[login] browser`.
+        #[arg(long, value_parser = browser_ids())]
+        browser: Option<String>,
+        /// A private window, the login's own profile, or a normal window,
+        /// overriding `[login] window`.
+        #[arg(long)]
+        window: Option<browser::Window>,
+        /// Sign in from a browser on another machine instead of through a
+        /// callback here: Claude Code ends with a code to paste back, Codex
+        /// with a device code to type in.
+        /// The default over SSH, or with no display.
+        #[arg(long)]
+        paste: bool,
+        /// Be called back even over SSH, or with `[login] paste = true`.
+        #[arg(long, conflicts_with = "paste")]
+        no_paste: bool,
     },
     /// Make a stored credential the one its CLI uses. NAME or PROVIDER/NAME.
     Use {
         name: String,
         /// Switch even when the live login is not in the store, dropping it.
+        #[arg(long)]
+        discard: bool,
+    },
+    /// Take the login out of a CLI's own files, keeping it in the store.
+    Signout {
+        #[arg(value_parser = PROVIDERS)]
+        provider: String,
+        /// Sign out even when the live login is not in the store, dropping it.
         #[arg(long)]
         discard: bool,
     },
@@ -227,6 +257,7 @@ impl Cmd {
     fn needs_store(&self) -> Option<&'static str> {
         match self {
             Cmd::Use { .. } => Some("switching"),
+            Cmd::Signout { .. } => Some("signing out"),
             Cmd::List { .. } => Some("listing"),
             Cmd::Refresh { .. } => Some("refreshing"),
             Cmd::Label { .. } => Some("labelling"),
@@ -715,10 +746,10 @@ fn main() -> Result<()> {
         if !no_browser && !service {
             browser::open(&url);
         }
-        let open: serve::Opener = if no_browser {
-            Box::new(|_| false)
+        let open: Box<dyn serve::Opener> = if no_browser {
+            Box::new(serve::Nowhere)
         } else {
-            Box::new(browser::open_private)
+            Box::new(serve::Desktop)
         };
         let app = serve::App::new(
             store,
@@ -741,26 +772,40 @@ fn main() -> Result<()> {
         provider,
         force,
         no_browser,
+        browser: named,
+        window,
+        paste,
+        no_paste,
     } = &command
     {
         let p = commands::find(&providers, provider)?;
-        let open = |url: &str| {
-            if *no_browser {
-                return false;
+        let set = config::load(&paths::config_file())
+            .map(|l| l.config.login)
+            .unwrap_or_default();
+        let choice = browser::choose(
+            named.as_deref().or(set.browser.as_deref()),
+            window.unwrap_or(set.window),
+        );
+        let (tx, lines) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for line in io::stdin().lock().lines() {
+                let Ok(line) = line else { break };
+                if tx.send(line).is_err() {
+                    break;
+                }
             }
-            browser::open_private(url) || {
-                browser::open(url);
-                false
-            }
-        };
-        let mut read_code = || {
-            let mut line = String::new();
-            io::stdin().lock().read_line(&mut line)?;
-            Ok(line)
-        };
+        });
+        let open = |url: &str, profile: &Path| choice.open(url, profile);
         let prompt = commands::Prompt {
             open: &open,
-            read_code: &mut read_code,
+            opens_in: (!no_browser && browser::displayed()).then(|| choice.describe()),
+            lines,
+            paste: !no_paste
+                && (*paste
+                    || set.paste
+                    || browser::remote(&|var| {
+                        std::env::var_os(var).is_some_and(|v| !v.is_empty())
+                    })),
         };
         return commands::login(&store, p, name, *force, prompt, out);
     }
@@ -785,6 +830,16 @@ fn main() -> Result<()> {
         Cmd::Use { name, discard } => {
             let (p, name) = commands::resolve(&store, &providers, &name)?;
             println!("{}", ops::switch_by(&store, p, &name, discard, By::Cli)?);
+            gauge::nudge(&paths::tokengauge_snapshot());
+            Ok(())
+        }
+        Cmd::Signout { provider, discard } => {
+            let p = commands::find(&providers, &provider)?;
+            let config = paths::config_file();
+            println!(
+                "{}",
+                commands::sign_out(&store, &config, p, discard, By::Cli)?
+            );
             gauge::nudge(&paths::tokengauge_snapshot());
             Ok(())
         }

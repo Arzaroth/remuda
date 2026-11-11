@@ -1,6 +1,7 @@
 import { createSignal, For, Match, onMount, Show, Switch } from 'solid-js';
 import { createConfirm } from '../confirm';
-import { ago, date, DAY, HOUR, plural, span, until, usedTone } from '../format';
+import { describeBanked } from '../banked';
+import { ago, date, DAY, HOUR, span, until, usedTone } from '../format';
 import { openSheet } from '../sheet';
 import { act, now, store } from '../state';
 import type { Credential, Live, Provider, Window } from '../types';
@@ -184,7 +185,7 @@ function Banked(props: { c: Credential }) {
       {(r) => (
         <div class="banked">
           <span class="aside">
-            {plural(r().available, 'banked reset')}
+            {describeBanked(r()).label}
             <Show when={r().expiresAt && !Number.isNaN(Date.parse(r().expiresAt!)) && r().expiresAt}>
               {(at) => <span title={date(Date.parse(at()))}>, expires {until(Date.parse(at()), now())}</span>}
             </Show>
@@ -192,11 +193,11 @@ function Banked(props: { c: Credential }) {
           <button
             class="btn"
             data-armed={confirm.text() ? '1' : undefined}
-            title={held() ? 'Waiting for TokenGauge to report what is left' : 'Clears the session and weekly limits now'}
+            title={held() ? 'Waiting for TokenGauge to report what is left' : describeBanked(r()).title}
             disabled={held()}
             onClick={spend}
           >
-            {confirm.text() ?? 'Reset limits'}
+            {confirm.text() ?? describeBanked(r()).button}
           </button>
         </div>
       )}
@@ -268,7 +269,13 @@ function Row(props: { c: Credential; live: Live | undefined }) {
   const spec = () => `${c().provider}/${c().name}`;
   const [editing, setEditing] = createSignal<Editing | null>(null);
   let input: HTMLInputElement | undefined;
-  const confirms = { use: createConfirm(), remove: createConfirm(), label: createConfirm(), rename: createConfirm() };
+  const confirms = {
+    use: createConfirm(),
+    signout: createConfirm(),
+    remove: createConfirm(),
+    label: createConfirm(),
+    rename: createConfirm(),
+  };
 
   const open = (kind: Editing['kind']) => {
     const original = kind === 'rename' ? c().name : c().label || '';
@@ -308,6 +315,13 @@ function Row(props: { c: Credential; live: Live | undefined }) {
     const discard = dropsLive(live);
     if (discard && !confirms.use.ask(dropping(live!), spec())) return;
     return act('/api/use', { name: spec(), discard });
+  };
+  const signsOut = () => store.s!.providers.some((p) => p.id === c().provider && p.signsOut);
+  const signOut = () => {
+    const live = props.live;
+    const discard = dropsLive(live);
+    if (!confirms.signout.ask(discard ? dropping(live!) : 'Sign the CLI out?')) return;
+    return act('/api/signout', { provider: c().provider, discard });
   };
   const remove = () => {
     if (!confirms.remove.ask('Remove for good?')) return;
@@ -457,7 +471,9 @@ function Row(props: { c: Credential; live: Live | undefined }) {
                 disabled={c().active || c().running}
                 title={
                   c().active
-                    ? 'Sign in again through the CLI itself, then import it'
+                    ? signsOut()
+                      ? 'Sign the CLI out first, then sign this login in again here'
+                      : 'Sign in again through the CLI itself, then import it'
                     : c().running
                       ? 'End its `remuda run` session first'
                       : 'Sign this login in again in the browser'
@@ -466,6 +482,16 @@ function Row(props: { c: Credential; live: Live | undefined }) {
               >
                 <Icon name="signin" /> Sign in again
               </button>
+              <Show when={c().active && signsOut()}>
+                <button
+                  class="btn"
+                  data-armed={confirms.signout.text() ? '1' : undefined}
+                  title="Take this login out of the CLI's own files and keep it here; a remuda run session keeps its own"
+                  onClick={signOut}
+                >
+                  {confirms.signout.text() ?? 'Sign out'}
+                </button>
+              </Show>
               {iconButton('label', 'Label', unverified())}
               {iconButton('rename', 'Rename', false)}
               <button

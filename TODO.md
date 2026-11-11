@@ -29,6 +29,14 @@ done.
 - [ ] Proxy: a chat upstream that interleaves parallel tool calls' argument
       deltas by index is read as if each call came whole, in turn.
 - [ ] Hub and satellites: pairing and per-satellite tokens, TLS on a plain LAN.
+- [ ] Setting up another machine: check against a real Cursor login that a
+      copied refresh token keeps refreshing on both machines. That it does not
+      rotate comes from open-source clients, not from cursor-agent.
+- [ ] Setting up another machine: whether a browser profile kept per login
+      (Chromium's `--user-data-dir` under remuda's data directory, instead of
+      a private window) turns a later sign-in into one click. Sign a Claude
+      login in through one, sign it in again days later, and see whether
+      claude.ai still asks for the emailed link; the same for ChatGPT.
 - [ ] Banked resets: check Codex's credit fields against a real answer, and
       agree with TokenGauge on adding the credits to its snapshot.
 - [ ] More providers: whether `cursor-agent` honours a config-dir override,

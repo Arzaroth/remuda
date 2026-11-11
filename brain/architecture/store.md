@@ -83,6 +83,10 @@ records when each provider was last switched; see
 [../features/switching.md](../features/switching.md). None is under a
 provider directory, and all are dot-files, so none is a credential to
 TokenGauge. They are written through `fsx::write_record`, best effort.
+`<store>/.browser/<cli>/<name>/` is a login's own browser profile, made when a
+sign-in opens with `window = "profile"`; it holds that account's web session,
+so it is 0700 and goes with the login on `rename` and `rm`; see
+[../features/sign-in.md](../features/sign-in.md#where-it-opens).
 `<store>/.runs/<cli>/<name>/` holds a `remuda run` session's directory and
 lock while it runs, and `<store>/.pins.json` the `.remuda.toml` files allowed;
 see [../features/run.md](../features/run.md).

@@ -66,8 +66,8 @@ pub struct Copied {
     pub login_keys: &'static [&'static str],
 }
 
-/// A sign-in the browser has been sent to. Claude's ends with a code the user
-/// pastes back, Codex's with a callback to a local listener.
+/// A sign-in the browser has been sent to. Claude's ends with a callback or a
+/// pasted code, Codex's with a callback or a device code.
 pub trait PendingLogin: Send {
     fn url(&self) -> &str;
     fn needs_code(&self) -> bool;
@@ -79,6 +79,15 @@ pub trait PendingLogin: Send {
     /// Stops a `finish` that is still waiting, from another thread.
     fn canceller(&self) -> Box<dyn Fn() + Send + Sync> {
         Box::new(|| {})
+    }
+    /// The code to type on the page `url` opens, when the address does not
+    /// carry it.
+    fn user_code(&self) -> Option<&str> {
+        None
+    }
+    /// The browser must be on this machine: it calls back to a local port.
+    fn local_only(&self) -> bool {
+        false
     }
 }
 
@@ -126,6 +135,15 @@ pub trait Provider: Send + Sync {
     /// `outgoing` (store shape); otherwise fails with [`crate::fsx::Changed`]
     /// and writes nothing. `None` replaces whatever is there.
     fn install(&self, entry: &Entry, outgoing: Option<&Value>) -> Result<()>;
+    fn signs_out(&self) -> bool {
+        false
+    }
+    /// Takes the login out of the CLI's files and leaves the rest, but only
+    /// while the live login is still `outgoing` (store shape); otherwise fails
+    /// with [`crate::fsx::Changed`] and writes nothing.
+    fn sign_out(&self, _outgoing: &Value) -> Result<()> {
+        anyhow::bail!("remuda does not sign {} out", self.name())
+    }
     /// The file the live login is read from. Its mtime dates a login that
     /// changed outside remuda, which remuda only notices later.
     fn live_file(&self) -> Option<std::path::PathBuf> {
@@ -166,7 +184,10 @@ pub trait Provider: Send + Sync {
     fn redeem_reset(&self, _entry: &Entry) -> Result<String> {
         bail!("{} has no banked resets", self.name())
     }
-    fn begin_login(&self) -> Result<Box<dyn PendingLogin>>;
+    /// `paste` asks for a sign-in the browser can finish from anywhere rather
+    /// than through a callback to this machine, where the CLI offers one: a
+    /// code to paste back, or a device code to type in.
+    fn begin_login(&self, paste: bool) -> Result<Box<dyn PendingLogin>>;
     /// The formats the CLI's inference endpoint takes for `model`, best
     /// first. Empty when the proxy cannot spend this login.
     fn formats(&self, _model: &str) -> Vec<Format> {

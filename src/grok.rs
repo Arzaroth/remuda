@@ -76,6 +76,14 @@ fn oidc(file: &Value) -> Option<&Value> {
     file.get(oidc_scope(file)?)
 }
 
+fn oidc_entries(file: &Value) -> Vec<(&String, &Value)> {
+    file.as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(scope, _)| scope.starts_with(OIDC_SCOPE))
+        .collect()
+}
+
 fn oidc_mut(file: &mut Value) -> Option<&mut Map<String, Value>> {
     let scope = oidc_scope(file)?.to_owned();
     file.get_mut(&scope)?.as_object_mut()
@@ -228,12 +236,27 @@ impl Provider for Grok {
             .and_then(|s| Some((s.to_owned(), entry.creds.get(s)?.clone())))
             .context("stored credential has no x.ai sign-in")?;
         update_json(&self.auth_path, |file| {
-            if outgoing.is_some_and(|o| oidc(file) != oidc(o)) {
+            if outgoing.is_some_and(|o| oidc_entries(file) != oidc_entries(o)) {
                 return Err(Changed.into());
             }
             let map = file.as_object_mut().context("auth.json is not an object")?;
             map.retain(|k, _| !k.starts_with(OIDC_SCOPE));
             map.insert(scope.clone(), login.clone());
+            Ok(())
+        })
+    }
+
+    fn signs_out(&self) -> bool {
+        true
+    }
+
+    fn sign_out(&self, outgoing: &Value) -> Result<()> {
+        update_json(&self.auth_path, |file| {
+            if oidc_entries(file) != oidc_entries(outgoing) {
+                return Err(Changed.into());
+            }
+            let map = file.as_object_mut().context("auth.json is not an object")?;
+            map.retain(|k, _| !k.starts_with(OIDC_SCOPE));
             Ok(())
         })
     }
@@ -269,7 +292,7 @@ impl Provider for Grok {
         lock_file(&self.auth_path.with_file_name("auth.json.lock")).map(Some)
     }
 
-    fn begin_login(&self) -> Result<Box<dyn PendingLogin>> {
+    fn begin_login(&self, _paste: bool) -> Result<Box<dyn PendingLogin>> {
         DeviceFlow {
             client: self.api.client.clone(),
             device_url: self.api.device_url(),
@@ -425,6 +448,74 @@ mod tests {
     }
 
     #[test]
+    fn a_switch_refuses_while_any_x_ai_entry_moved() {
+        let tmp = tempfile::tempdir().unwrap();
+        let g = grok(tmp.path(), &OFFLINE);
+        let path = tmp.path().join("auth.json");
+        let two = |second: &str| {
+            let mut file = auth("u-1", "a", "r-a", 1_900_000_000);
+            let other = format!("{OIDC_SCOPE}u-2");
+            file[&other] = auth("u-2", "b", second, 1_900_000_000)[&other].clone();
+            file
+        };
+        write_json(&path, &two("r-new")).unwrap();
+        let creds = auth("u-3", "c", "r-c", 1_900_000_000);
+        let identity = g.identify(&creds).unwrap();
+        let perso = Entry::new("grok", "perso", creds, identity, 1);
+
+        let moved = g.install(&perso, Some(&two("r-old")));
+        assert!(moved.unwrap_err().is::<crate::fsx::Changed>());
+        assert_eq!(read_json(&path).unwrap().unwrap(), two("r-new"));
+
+        g.install(&perso, Some(&two("r-new"))).unwrap();
+        let file = read_json(&path).unwrap().unwrap();
+        assert!(file.get(format!("{OIDC_SCOPE}u-2")).is_none());
+        assert_eq!(g.identify(&file).unwrap().account_id, "u-3");
+    }
+
+    #[test]
+    fn a_sign_out_leaves_the_files_other_scopes_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let g = grok(tmp.path(), &OFFLINE);
+        let mut live = auth("u-1", "a", "r-a", 1_900_000_000);
+        live["https://accounts.x.ai/sign-in"] = json!({"key": "xai-key"});
+        write_json(&tmp.path().join("auth.json"), &live).unwrap();
+
+        let moved = g.sign_out(&auth("u-1", "a", "r-old", 1_900_000_000));
+        assert!(moved.unwrap_err().is::<crate::fsx::Changed>());
+        g.sign_out(&live).unwrap();
+
+        let file = read_json(&tmp.path().join("auth.json")).unwrap().unwrap();
+        assert_eq!(file["https://accounts.x.ai/sign-in"]["key"], "xai-key");
+        assert!(file.get(format!("{OIDC_SCOPE}u-1")).is_none());
+        assert_eq!(g.live().unwrap(), None);
+    }
+
+    #[test]
+    fn a_sign_out_refuses_while_any_x_ai_entry_moved() {
+        let tmp = tempfile::tempdir().unwrap();
+        let g = grok(tmp.path(), &OFFLINE);
+        let path = tmp.path().join("auth.json");
+        let two = |second: &str| {
+            let mut file = auth("u-1", "a", "r-a", 1_900_000_000);
+            let other = format!("{OIDC_SCOPE}u-2");
+            file[&other] = auth("u-2", "b", second, 1_900_000_000)[&other].clone();
+            file
+        };
+        write_json(&path, &two("r-new")).unwrap();
+
+        let moved = g.sign_out(&two("r-old"));
+        assert!(moved.unwrap_err().is::<crate::fsx::Changed>());
+        assert_eq!(read_json(&path).unwrap().unwrap(), two("r-new"));
+
+        g.sign_out(&two("r-new")).unwrap();
+        let file = read_json(&path).unwrap().unwrap();
+        assert!(file.get(format!("{OIDC_SCOPE}u-1")).is_none());
+        assert!(file.get(format!("{OIDC_SCOPE}u-2")).is_none());
+        assert_eq!(g.live().unwrap(), None);
+    }
+
+    #[test]
     fn a_refresh_rotates_the_tokens_and_keeps_the_rest() {
         let mut server = mockito::Server::new();
         let token = server
@@ -484,7 +575,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let g = grok(tmp.path(), &server.url());
 
-        let pending = g.begin_login().unwrap();
+        let pending = g.begin_login(false).unwrap();
         assert_eq!(pending.url(), "https://accounts.x.ai/device?code=X");
         let login = pending.finish(None).unwrap();
 

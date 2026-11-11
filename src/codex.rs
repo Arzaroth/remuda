@@ -1,5 +1,3 @@
-use std::io::{BufRead, BufReader, Write};
-use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -8,6 +6,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value, json};
 
+use crate::callback::{Callback, page, respond};
 use crate::fsx::{Changed, lock_file, now_ms, read_json, rfc3339, update_json};
 use crate::oauth::{self, claims};
 use crate::paths;
@@ -15,16 +14,16 @@ use crate::pkce;
 use crate::provider::{Format, Identity, Login, PendingLogin, Provider, RunSpec, Upstream};
 use crate::store::Entry;
 
-const MIRRORS: &str = "0.153.4";
+const MIRRORS: &str = "0.167.0";
 const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const ISSUER: &str = "https://auth.openai.com";
 const CALLBACK_PORT: u16 = 1455;
 const LOGIN_SCOPE: &str =
     "openid profile email offline_access api.connectors.read api.connectors.invoke";
 const REFRESH_SCOPE: &str = "openid profile email";
-const LOGIN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const AUTH_CLAIMS: &str = "https://api.openai.com/auth";
 const INFERENCE: &str = "https://chatgpt.com/backend-api/codex";
+const DEVICE_WAIT: Duration = Duration::from_secs(15 * 60);
 
 #[derive(Clone)]
 pub struct Api {
@@ -58,6 +57,26 @@ impl Api {
 
     fn token_url(&self) -> String {
         format!("{}/oauth/token", self.issuer)
+    }
+
+    fn device_url(&self, step: &str) -> String {
+        format!("{}/api/accounts/deviceauth/{step}", self.issuer)
+    }
+
+    fn post_json(&self, url: &str, body: &Value) -> Result<(reqwest::StatusCode, String)> {
+        let resp = self
+            .client
+            .post(url)
+            .json(body)
+            .send()
+            .context("device sign-in request failed")?;
+        let status = resp.status();
+        let body = if status.is_success() {
+            resp.text().context("device sign-in answer was cut off")?
+        } else {
+            resp.text().unwrap_or_default()
+        };
+        Ok((status, body))
     }
 }
 
@@ -227,6 +246,14 @@ impl Provider for Codex {
         })
     }
 
+    fn signs_out(&self) -> bool {
+        true
+    }
+
+    fn sign_out(&self, outgoing: &Value) -> Result<()> {
+        crate::fsx::remove_json_if(&self.auth_path, outgoing)
+    }
+
     /// Codex never re-reads auth.json while it runs, and a refresh in flight
     /// writes the old account's tokens into the new file.
     fn sessions(&self) -> &'static [&'static str] {
@@ -286,12 +313,19 @@ impl Provider for Codex {
         Ok(seat_of(&access, fresh("id_token").as_deref()))
     }
 
-    fn begin_login(&self) -> Result<Box<dyn PendingLogin>> {
-        let listeners = bind_callback(self.callback_port)?;
-        let port = listeners[0].local_addr()?.port();
-        let redirect_uri = format!("http://localhost:{port}/auth/callback");
-        let verifier = pkce::random()?;
+    fn begin_login(&self, paste: bool) -> Result<Box<dyn PendingLogin>> {
+        if paste {
+            return CodexDevice::begin(&self.api);
+        }
         let state = pkce::random()?;
+        let callback = Callback::bind(
+            self.callback_port,
+            "/auth/callback",
+            state.clone(),
+            "is `codex login` running?",
+        )?;
+        let redirect_uri = format!("http://localhost:{}/auth/callback", callback.port());
+        let verifier = pkce::random()?;
         let url = reqwest::Url::parse_with_params(
             &format!("{}/oauth/authorize", self.api.issuer),
             &[
@@ -310,11 +344,9 @@ impl Provider for Codex {
         .to_string();
         Ok(Box::new(CodexPending {
             api: self.api.clone(),
-            cancelled: Arc::new(AtomicBool::new(false)),
-            listeners,
+            callback,
             redirect_uri,
             verifier,
-            state,
             url,
         }))
     }
@@ -372,153 +404,42 @@ impl Provider for Codex {
 
 struct CodexPending {
     api: Api,
-    cancelled: Arc<AtomicBool>,
-    listeners: Vec<TcpListener>,
+    callback: Callback,
     redirect_uri: String,
     verifier: String,
-    state: String,
     url: String,
 }
 
-/// 127.0.0.1 and, when the machine has it, [::1]: the redirect names
-/// `localhost`, which a browser may resolve to either, and a port left free on
-/// one of them is a port another local user could answer on. A port still held
-/// by an attempt that is shutting down gets a moment to be released.
-fn bind_callback(port: u16) -> Result<Vec<TcpListener>> {
-    let deadline = Instant::now() + Duration::from_secs(2);
-    let v4 = loop {
-        match TcpListener::bind(("127.0.0.1", port)) {
-            Ok(listener) => break listener,
-            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse && Instant::now() < deadline => {
-                std::thread::sleep(Duration::from_millis(100));
-            }
-            Err(e) => {
-                return Err(e)
-                    .with_context(|| format!("port {port} is taken; is `codex login` running?"));
-            }
-        }
+fn exchange(api: &Api, redirect_uri: &str, verifier: &str, code: &str) -> Result<Value> {
+    let answer = oauth::token_request(api.client.post(api.token_url()).form(&[
+        ("grant_type", "authorization_code"),
+        ("code", code),
+        ("redirect_uri", redirect_uri),
+        ("client_id", CLIENT_ID),
+        ("code_verifier", verifier),
+    ]))?;
+    let get = |k: &str| {
+        oauth::text(&answer, k).with_context(|| format!("the token endpoint sent no {k}"))
     };
-    let port = v4.local_addr()?.port();
-    let mut listeners = vec![v4];
-    if let Ok(v6) = TcpListener::bind(("::1", port)) {
-        listeners.push(v6);
-    }
-    for listener in &listeners {
-        listener.set_nonblocking(true)?;
-    }
-    Ok(listeners)
-}
-
-fn read_request(stream: &TcpStream) -> Option<reqwest::Url> {
-    stream.set_nonblocking(false).ok()?;
-    stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
-    let mut line = String::new();
-    BufReader::new(std::io::Read::take(stream, 8192))
-        .read_line(&mut line)
-        .ok()?;
-    let target = line.split_whitespace().nth(1)?;
-    reqwest::Url::parse(&format!("http://localhost{target}")).ok()
-}
-
-fn respond(mut stream: &TcpStream, status: &str, body: &str) {
-    let _ = write!(
-        stream,
-        "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
-}
-
-fn page(message: &str) -> String {
-    let message = message
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;");
-    format!(
-        "<!doctype html><meta charset=utf-8><title>remuda</title><body style=\"font:16px system-ui;margin:3rem\"><p>{message}</p>"
-    )
-}
-
-impl CodexPending {
-    /// The query of the first request to `/auth/callback` carrying this
-    /// attempt's state. Anything else on the port, whether another path, a
-    /// stale or forged state, or a connection that never sends a request, is
-    /// answered or dropped and the wait goes on.
-    fn wait_for_callback(&self) -> Result<(TcpStream, Map<String, Value>)> {
-        let deadline = Instant::now() + LOGIN_TIMEOUT;
-        loop {
-            let mut accepted = false;
-            for listener in &self.listeners {
-                let stream = match listener.accept() {
-                    Ok((stream, _)) => stream,
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
-                    Err(e) => return Err(e).context("callback listener failed"),
-                };
-                accepted = true;
-                let Some(url) = read_request(&stream) else {
-                    continue;
-                };
-                if url.path() != "/auth/callback" {
-                    respond(&stream, "404 Not Found", &page("Not found."));
-                    continue;
-                }
-                let query: Map<String, Value> = url
-                    .query_pairs()
-                    .map(|(k, v)| (k.into_owned(), json!(v.into_owned())))
-                    .collect();
-                if query.get("state").and_then(Value::as_str) != Some(self.state.as_str()) {
-                    respond(
-                        &stream,
-                        "400 Bad Request",
-                        &page("This is not the sign-in remuda is waiting for."),
-                    );
-                    continue;
-                }
-                return Ok((stream, query));
-            }
-            if accepted {
-                continue;
-            }
-            if self.cancelled.load(Ordering::Relaxed) {
-                bail!("the sign-in was cancelled");
-            }
-            if Instant::now() > deadline {
-                bail!("gave up waiting for the browser to finish signing in");
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
-    }
-
-    fn exchange(&self, code: &str) -> Result<Value> {
-        let answer = oauth::token_request(self.api.client.post(self.api.token_url()).form(&[
-            ("grant_type", "authorization_code"),
-            ("code", code),
-            ("redirect_uri", &self.redirect_uri),
-            ("client_id", CLIENT_ID),
-            ("code_verifier", &self.verifier),
-        ]))?;
-        let get = |k: &str| {
-            oauth::text(&answer, k).with_context(|| format!("the token endpoint sent no {k}"))
-        };
-        let id_token = get("id_token")?;
-        let account_id = claims(&id_token)
-            .and_then(|c| {
-                auth_claim(&c, "chatgpt_account_id")?
-                    .as_str()
-                    .map(str::to_owned)
-            })
-            .context("the id token names no ChatGPT account")?;
-        Ok(json!({
-            "OPENAI_API_KEY": null,
-            "auth_mode": "chatgpt",
-            "tokens": {
-                "id_token": id_token,
-                "access_token": get("access_token")?,
-                "refresh_token": get("refresh_token")?,
-                "account_id": account_id,
-            },
-            "last_refresh": rfc3339(now_ms()),
-        }))
-    }
+    let id_token = get("id_token")?;
+    let account_id = claims(&id_token)
+        .and_then(|c| {
+            auth_claim(&c, "chatgpt_account_id")?
+                .as_str()
+                .map(str::to_owned)
+        })
+        .context("the id token names no ChatGPT account")?;
+    Ok(json!({
+        "OPENAI_API_KEY": null,
+        "auth_mode": "chatgpt",
+        "tokens": {
+            "id_token": id_token,
+            "access_token": get("access_token")?,
+            "refresh_token": get("refresh_token")?,
+            "account_id": account_id,
+        },
+        "last_refresh": rfc3339(now_ms()),
+    }))
 }
 
 impl PendingLogin for CodexPending {
@@ -531,12 +452,15 @@ impl PendingLogin for CodexPending {
     }
 
     fn canceller(&self) -> Box<dyn Fn() + Send + Sync> {
-        let cancelled = Arc::clone(&self.cancelled);
-        Box::new(move || cancelled.store(true, Ordering::Relaxed))
+        self.callback.canceller()
+    }
+
+    fn local_only(&self) -> bool {
+        true
     }
 
     fn finish(self: Box<Self>, _code: Option<&str>) -> Result<Login> {
-        let (stream, query) = self.wait_for_callback()?;
+        let (stream, query) = self.callback.wait()?;
         let param = |k: &str| query.get(k).and_then(Value::as_str);
         let outcome = (|| {
             if let Some(error) = param("error") {
@@ -546,7 +470,7 @@ impl PendingLogin for CodexPending {
                 );
             }
             let code = param("code").context("the callback carried no code")?;
-            let creds = self.exchange(code)?;
+            let creds = exchange(&self.api, &self.redirect_uri, &self.verifier, code)?;
             let identity = identity_of(&creds).context("the new login names no account")?;
             Ok(Login { creds, identity })
         })();
@@ -566,6 +490,134 @@ impl PendingLogin for CodexPending {
     }
 }
 
+struct CodexDevice {
+    api: Api,
+    device_auth_id: String,
+    user_code: String,
+    url: String,
+    interval: Duration,
+    cancelled: Arc<AtomicBool>,
+}
+
+impl CodexDevice {
+    fn begin(api: &Api) -> Result<Box<dyn PendingLogin>> {
+        let (status, body) = api.post_json(
+            &api.device_url("usercode"),
+            &json!({"client_id": CLIENT_ID}),
+        )?;
+        if status == reqwest::StatusCode::NOT_FOUND {
+            bail!(
+                "device code login is not enabled for this Codex server ({status}): sign in by callback instead, without --paste or `paste = true` under [login], or with --no-paste"
+            );
+        }
+        if !status.is_success() {
+            bail!(
+                "the device code request answered {status}: {}",
+                oauth::excerpt(&body)
+            );
+        }
+        let answer: Value =
+            serde_json::from_str(&body).context("malformed device code response")?;
+        let device_auth_id =
+            oauth::text(&answer, "device_auth_id").context("no device code was issued")?;
+        let user_code = ["user_code", "usercode"]
+            .iter()
+            .find_map(|k| oauth::text(&answer, k))
+            .context("no user code was issued")?;
+        let interval = answer
+            .get("interval")
+            .and_then(|v| v.as_u64().or_else(|| v.as_str()?.trim().parse().ok()))
+            .unwrap_or(5)
+            .max(1);
+        Ok(Box::new(CodexDevice {
+            api: api.clone(),
+            device_auth_id,
+            user_code,
+            url: format!("{}/codex/device", api.issuer),
+            interval: Duration::from_secs(interval),
+            cancelled: Arc::new(AtomicBool::new(false)),
+        }))
+    }
+
+    fn poll(&self) -> Result<Value> {
+        let deadline = Instant::now() + DEVICE_WAIT;
+        let body = json!({"device_auth_id": self.device_auth_id, "user_code": self.user_code});
+        let mut errors = 0;
+        loop {
+            crate::device::pause(&self.cancelled, self.interval)?;
+            if Instant::now() >= deadline {
+                bail!("the sign-in was not approved in time");
+            }
+            let (status, answer) = match self.api.post_json(&self.api.device_url("token"), &body) {
+                Ok(sent) => sent,
+                Err(e) => {
+                    errors += 1;
+                    if errors >= 3 {
+                        return Err(e);
+                    }
+                    continue;
+                }
+            };
+            if crate::device::transient(status) {
+                errors += 1;
+                if errors < 3 {
+                    continue;
+                }
+            } else {
+                errors = 0;
+            }
+            if status == reqwest::StatusCode::FORBIDDEN || status == reqwest::StatusCode::NOT_FOUND
+            {
+                continue;
+            }
+            if !status.is_success() {
+                bail!(
+                    "the device sign-in answered {status}: {}",
+                    oauth::excerpt(&answer)
+                );
+            }
+            return serde_json::from_str(&answer).context("malformed device sign-in response");
+        }
+    }
+}
+
+impl PendingLogin for CodexDevice {
+    fn url(&self) -> &str {
+        &self.url
+    }
+
+    fn needs_code(&self) -> bool {
+        false
+    }
+
+    fn user_code(&self) -> Option<&str> {
+        Some(&self.user_code)
+    }
+
+    fn canceller(&self) -> Box<dyn Fn() + Send + Sync> {
+        let cancelled = self.cancelled.clone();
+        Box::new(move || cancelled.store(true, Ordering::Relaxed))
+    }
+
+    fn finish(self: Box<Self>, _code: Option<&str>) -> Result<Login> {
+        let answer = self.poll()?;
+        if self.cancelled.load(Ordering::Relaxed) {
+            bail!("the sign-in was cancelled");
+        }
+        let get = |k: &str| {
+            oauth::text(&answer, k).with_context(|| format!("the device sign-in sent no {k}"))
+        };
+        let creds = exchange(
+            &self.api,
+            &format!("{}/deviceauth/callback", self.api.issuer),
+            &get("code_verifier")?,
+            &get("authorization_code")?,
+        )?;
+        let identity = identity_of(&creds).context("the new login names no account")?;
+        Ok(Login { creds, identity })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -574,6 +626,8 @@ mod tests {
     use crate::ops::{self, LiveState};
     use crate::store::Store;
     use mockito::Matcher;
+    use std::io::Write;
+    use std::net::{TcpListener, TcpStream};
 
     use crate::oauth::fake_jwt as jwt;
 
@@ -724,6 +778,26 @@ mod tests {
     }
 
     #[test]
+    fn signing_out_removes_auth_json_once_its_login_is_stored() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let c = codex(tmp.path(), &OFFLINE);
+        let creds = auth("acct-1", "work", "r-work", 1_900_000_000);
+        let identity = c.live_identity(&creds).unwrap().unwrap();
+        store
+            .save(&Entry::new("codex", "work", creds, identity, 1))
+            .unwrap();
+        let work = store.get("codex", "work").unwrap().unwrap();
+        c.install(&work, None).unwrap();
+
+        let said = ops::sign_out(&store, &c, false, crate::logbook::By::Cli).unwrap();
+
+        assert_eq!(said, "signed Codex out of work");
+        assert!(!tmp.path().join("auth.json").exists());
+        assert!(store.get("codex", "work").unwrap().is_some());
+    }
+
+    #[test]
     fn switching_replaces_auth_json_whole() {
         let tmp = tempfile::tempdir().unwrap();
         let store = Store::open(&tmp.path().join("store"));
@@ -856,7 +930,7 @@ mod tests {
         let mut server = mockito::Server::new();
         let tmp = tempfile::tempdir().unwrap();
         let c = codex(tmp.path(), &server.url());
-        let pending = c.begin_login().unwrap();
+        let pending = c.begin_login(false).unwrap();
         assert!(!pending.needs_code());
         let url = pending.url().to_owned();
         assert!(url.starts_with(&format!("{}/oauth/authorize?", server.url())));
@@ -915,10 +989,246 @@ mod tests {
     }
 
     #[test]
+    fn a_device_sign_in_exchanges_the_approval_with_the_verifier_it_carries() {
+        let mut server = mockito::Server::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let c = codex(tmp.path(), &server.url());
+        let usercode = server
+            .mock("POST", "/api/accounts/deviceauth/usercode")
+            .match_body(Matcher::Json(json!({"client_id": CLIENT_ID})))
+            .with_body(
+                json!({"device_auth_id": "da-1", "usercode": "ABCD-1234", "interval": "1"})
+                    .to_string(),
+            )
+            .create();
+        let not_yet: Vec<_> = [403, 404]
+            .into_iter()
+            .map(|status| {
+                server
+                    .mock("POST", "/api/accounts/deviceauth/token")
+                    .with_status(status)
+                    .expect(1)
+                    .create()
+            })
+            .collect();
+        let approved = server
+            .mock("POST", "/api/accounts/deviceauth/token")
+            .match_body(Matcher::Json(json!({"device_auth_id": "da-1", "user_code": "ABCD-1234"})))
+            .with_body(
+                json!({"authorization_code": "auth-1", "code_challenge": "ch", "code_verifier": "ver-1"})
+                    .to_string(),
+            )
+            .create();
+        let exchange = server
+            .mock("POST", "/oauth/token")
+            .match_body(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("grant_type".into(), "authorization_code".into()),
+                Matcher::UrlEncoded("code".into(), "auth-1".into()),
+                Matcher::UrlEncoded("code_verifier".into(), "ver-1".into()),
+                Matcher::UrlEncoded(
+                    "redirect_uri".into(),
+                    format!("{}/deviceauth/callback", server.url()),
+                ),
+            ]))
+            .with_body(
+                json!({
+                    "id_token": id_token("acct-9", "plus"),
+                    "access_token": access_token("acct-9", "device", 1_900_000_000),
+                    "refresh_token": "r-device",
+                })
+                .to_string(),
+            )
+            .create();
+
+        let pending = c.begin_login(true).unwrap();
+        assert!(!pending.needs_code());
+        assert!(!pending.local_only());
+        assert_eq!(pending.url(), format!("{}/codex/device", server.url()));
+        assert_eq!(pending.user_code(), Some("ABCD-1234"));
+        let login = pending.finish(None).unwrap();
+
+        usercode.assert();
+        not_yet.iter().for_each(|m| m.assert());
+        approved.assert();
+        exchange.assert();
+        assert_eq!(login.identity.account_id, "acct-9");
+        assert_eq!(login.creds["tokens"]["refresh_token"], "r-device");
+        assert_eq!(c.plan(&login.creds), "plus");
+    }
+
+    #[test]
+    fn a_device_sign_in_stops_on_an_error_and_on_a_cancel() {
+        let mut server = mockito::Server::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let c = codex(tmp.path(), &server.url());
+        server
+            .mock("POST", "/api/accounts/deviceauth/usercode")
+            .with_body(
+                json!({"device_auth_id": "da-1", "user_code": "WXYZ", "interval": 1}).to_string(),
+            )
+            .create();
+        server
+            .mock("POST", "/api/accounts/deviceauth/token")
+            .with_status(400)
+            .with_body("denied")
+            .create();
+        let err = c.begin_login(true).unwrap().finish(None).err().unwrap();
+        assert!(err.to_string().contains("400"), "{err}");
+
+        let pending = c.begin_login(true).unwrap();
+        pending.canceller()();
+        let err = pending.finish(None).err().unwrap();
+        assert!(err.to_string().contains("cancelled"), "{err}");
+    }
+
+    #[test]
+    fn a_device_sign_in_cancelled_while_it_polls_skips_the_exchange() {
+        let mut server = mockito::Server::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let c = codex(tmp.path(), &server.url());
+        server
+            .mock("POST", "/api/accounts/deviceauth/usercode")
+            .with_body(
+                json!({"device_auth_id": "da-1", "user_code": "WXYZ", "interval": 1}).to_string(),
+            )
+            .create();
+        let exchange = server.mock("POST", "/oauth/token").expect(0).create();
+        let pending = c.begin_login(true).unwrap();
+        let cancel = pending.canceller();
+        server
+            .mock("POST", "/api/accounts/deviceauth/token")
+            .with_body_from_request(move |_| {
+                cancel();
+                json!({"authorization_code": "auth-1", "code_verifier": "ver-1"})
+                    .to_string()
+                    .into_bytes()
+            })
+            .create();
+        let err = pending.finish(None).err().unwrap();
+        assert!(err.to_string().contains("cancelled"), "{err}");
+        exchange.assert();
+    }
+
+    #[test]
+    fn a_device_sign_in_rides_out_two_busy_answers_but_not_a_third() {
+        let mut server = mockito::Server::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let c = codex(tmp.path(), &server.url());
+        server
+            .mock("POST", "/api/accounts/deviceauth/usercode")
+            .with_body(
+                json!({"device_auth_id": "da-1", "user_code": "WXYZ", "interval": 1}).to_string(),
+            )
+            .create();
+        let busy: Vec<_> = [503, 429]
+            .into_iter()
+            .map(|status| {
+                server
+                    .mock("POST", "/api/accounts/deviceauth/token")
+                    .with_status(status)
+                    .expect(1)
+                    .create()
+            })
+            .collect();
+        let approved = server
+            .mock("POST", "/api/accounts/deviceauth/token")
+            .with_body(
+                json!({"authorization_code": "auth-1", "code_verifier": "ver-1"}).to_string(),
+            )
+            .create();
+        server
+            .mock("POST", "/oauth/token")
+            .with_body(
+                json!({
+                    "id_token": id_token("acct-9", "plus"),
+                    "access_token": access_token("acct-9", "device", 1_900_000_000),
+                    "refresh_token": "r-device",
+                })
+                .to_string(),
+            )
+            .create();
+        let login = c.begin_login(true).unwrap().finish(None).unwrap();
+        busy.iter().for_each(|m| m.assert());
+        approved.assert();
+        assert_eq!(login.creds["tokens"]["refresh_token"], "r-device");
+        approved.remove();
+
+        let down = server
+            .mock("POST", "/api/accounts/deviceauth/token")
+            .with_status(502)
+            .with_body("bad gateway")
+            .expect(3)
+            .create();
+        let err = c.begin_login(true).unwrap().finish(None).err().unwrap();
+        down.assert();
+        assert!(err.to_string().contains("502"), "{err}");
+    }
+
+    #[test]
+    fn a_device_sign_in_asks_again_for_an_approval_cut_off_in_transit() {
+        let mut server = mockito::Server::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let c = codex(tmp.path(), &server.url());
+        server
+            .mock("POST", "/api/accounts/deviceauth/usercode")
+            .with_body(
+                json!({"device_auth_id": "da-1", "user_code": "WXYZ", "interval": 1}).to_string(),
+            )
+            .create();
+        let cut = server
+            .mock("POST", "/api/accounts/deviceauth/token")
+            .with_chunked_body(|w| {
+                w.write_all(br#"{"authorization_code":"#)?;
+                Err(std::io::Error::other("dropped"))
+            })
+            .expect(1)
+            .create();
+        let approved = server
+            .mock("POST", "/api/accounts/deviceauth/token")
+            .with_body(
+                json!({"authorization_code": "auth-1", "code_verifier": "ver-1"}).to_string(),
+            )
+            .create();
+        server
+            .mock("POST", "/oauth/token")
+            .with_body(
+                json!({
+                    "id_token": id_token("acct-9", "plus"),
+                    "access_token": access_token("acct-9", "device", 1_900_000_000),
+                    "refresh_token": "r-device",
+                })
+                .to_string(),
+            )
+            .create();
+        let login = c.begin_login(true).unwrap().finish(None).unwrap();
+        cut.assert();
+        approved.assert();
+        assert_eq!(login.creds["tokens"]["refresh_token"], "r-device");
+    }
+
+    #[test]
+    fn a_device_code_the_server_refuses_to_issue_is_an_error() {
+        let mut server = mockito::Server::new();
+        let tmp = tempfile::tempdir().unwrap();
+        server
+            .mock("POST", "/api/accounts/deviceauth/usercode")
+            .with_status(404)
+            .create();
+        let err = codex(tmp.path(), &server.url())
+            .begin_login(true)
+            .err()
+            .unwrap();
+        assert_eq!(
+            err.to_string(),
+            "device code login is not enabled for this Codex server (404 Not Found): sign in by callback instead, without --paste or `paste = true` under [login], or with --no-paste"
+        );
+    }
+
+    #[test]
     fn stray_connections_do_not_end_the_wait_and_a_refusal_does() {
         let tmp = tempfile::tempdir().unwrap();
         let c = codex(tmp.path(), &OFFLINE);
-        let pending = c.begin_login().unwrap();
+        let pending = c.begin_login(false).unwrap();
         let redirect = param(pending.url(), "redirect_uri").replace("localhost", "127.0.0.1");
         let state = param(pending.url(), "state");
         let browser = std::thread::spawn(move || {
@@ -958,12 +1268,14 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let store = Store::open(&tmp.path().join("store"));
         let c = codex(tmp.path(), &server.url());
-        let open = |url: &str| {
+        let open = |url: &str, _: &std::path::Path| {
             let redirect = param(url, "redirect_uri").replace("localhost", "127.0.0.1");
             let state = param(url, "state");
             std::thread::spawn(move || browse(&format!("{redirect}?code=c&state={state}")));
             true
         };
+        let (tx, lines) = std::sync::mpsc::channel();
+        tx.send(String::new()).unwrap();
         let mut out = Vec::new();
         crate::commands::login(
             &store,
@@ -972,17 +1284,22 @@ mod tests {
             false,
             crate::commands::Prompt {
                 open: &open,
-                read_code: &mut || unreachable!(),
+                opens_in: Some("a test browser".into()),
+                lines,
+                paste: false,
             },
             &mut out,
         )
         .unwrap();
         let out = String::from_utf8(out).unwrap();
+        assert!(out.starts_with("Sign in to Codex"), "{out}");
         assert!(
-            out.starts_with("Opened a private window to sign in to"),
+            out.contains(
+                "Waiting for the browser to finish, or press Enter to open it in a test browser"
+            ),
             "{out}"
         );
-        assert!(out.contains("Waiting for the browser"), "{out}");
+        assert!(out.contains("Opened it in a test browser."), "{out}");
         assert!(
             out.ends_with("stored codex/nine (seat-9@example.com, pro)\n"),
             "{out}"
@@ -1014,7 +1331,7 @@ mod tests {
         }
         let tmp = tempfile::tempdir().unwrap();
         let c = codex(tmp.path(), &OFFLINE);
-        let pending = c.begin_login().unwrap();
+        let pending = c.begin_login(false).unwrap();
         let port = reqwest::Url::parse(&param(pending.url(), "redirect_uri"))
             .unwrap()
             .port()
@@ -1024,12 +1341,24 @@ mod tests {
     }
 
     #[test]
+    fn a_callback_port_held_on_the_ipv6_loopback_is_taken() {
+        let Ok(held) = TcpListener::bind(("::1", 0)) else {
+            return;
+        };
+        let port = held.local_addr().unwrap().port();
+        let tmp = tempfile::tempdir().unwrap();
+        let c = Codex::at(tmp.path(), Api::local(&OFFLINE), port);
+        let err = c.begin_login(false).err().unwrap();
+        assert!(err.to_string().contains("codex login"), "{err}");
+    }
+
+    #[test]
     fn a_taken_callback_port_says_what_is_probably_holding_it() {
         let held = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let port = held.local_addr().unwrap().port();
         let tmp = tempfile::tempdir().unwrap();
         let c = Codex::at(tmp.path(), Api::local(&OFFLINE), port);
-        let err = c.begin_login().err().unwrap();
+        let err = c.begin_login(false).err().unwrap();
         assert!(err.to_string().contains("codex login"), "{err}");
     }
 }
