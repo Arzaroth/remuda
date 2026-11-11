@@ -129,16 +129,22 @@ fn gh_token() -> Option<String> {
     let gh = std::env::var_os("REMUDA_TEST_GH").unwrap_or_else(|| "gh".into());
     #[cfg(not(debug_assertions))]
     let gh = "gh";
-    let out = std::process::Command::new(gh)
-        .args(["auth", "token", "--hostname", "github.com"])
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
-    out.status
-        .success()
-        .then(|| String::from_utf8(out.stdout).ok())
-        .flatten()
+    gh_token_from(std::path::Path::new(&gh), GH_TIMEOUT)
+}
+
+/// TokenGauge's wait for the same command.
+const GH_TIMEOUT: Duration = Duration::from_secs(3);
+
+fn gh_token_from(gh: &std::path::Path, wait: Duration) -> Option<String> {
+    let ran = crate::child::run(
+        "gh",
+        gh,
+        &["auth", "token", "--hostname", "github.com"],
+        wait,
+        64 * 1024,
+    )
+    .ok()?;
+    ran.ok.then(|| String::from_utf8(ran.out).ok()).flatten()
 }
 
 fn key_of(creds: &Value) -> Option<&str> {
@@ -635,17 +641,24 @@ impl Provider for ApiKey {
     /// The environment wins, as it does for the CLI.
     fn live(&self) -> Result<Option<Value>> {
         if let Some((_, key)) = self.env_key() {
-            let region = self.region.as_ref().and_then(|r| {
-                let said = (self.env)(r.var)?;
-                Some(
-                    r.choices
-                        .iter()
-                        .copied()
-                        .find(|c| *c == said.trim())
-                        .unwrap_or(r.choices[0]),
-                )
+            let region = self.region.as_ref().map(|r| {
+                let said = (self.env)(r.var).unwrap_or_default();
+                r.choices
+                    .iter()
+                    .copied()
+                    .find(|c| *c == said.trim())
+                    .unwrap_or(r.choices[0])
             });
-            return Ok(Some(self.creds(&key, region)));
+            let mut creds = self.creds(&key, region);
+            for extra in self.extras {
+                let value = extra.vars.iter().find_map(|var| {
+                    Some((self.env)(var)?.trim().to_owned()).filter(|v| !v.is_empty())
+                });
+                if let Some(value) = value {
+                    creds[extra.field] = json!(value);
+                }
+            }
+            return Ok(Some(creds));
         }
         if let Some((slot, login)) = self.stored_login()?
             && let Some(key) = key_of(&login)
@@ -1565,12 +1578,12 @@ mod tests {
             minimax(tmp.path(), &[("MINIMAX_API_KEY", "mm-env")])
                 .live()
                 .unwrap(),
-            Some(json!({"key": "mm-env"}))
+            Some(json!({"key": "mm-env", "region": "global"}))
         );
     }
 
     #[test]
-    fn a_sync_keeps_what_the_store_holds_beside_the_key() {
+    fn the_shells_minimax_region_is_global_unless_it_says_cn() {
         let tmp = tempfile::tempdir().unwrap();
         let store = Store::open(&tmp.path().join("store"));
         let p = minimax(tmp.path(), &[("MINIMAX_API_KEY", "mm-cn")]);
@@ -1582,6 +1595,15 @@ mod tests {
                 synced: true
             }
         );
+        assert_eq!(
+            store.get("minimax", "cn").unwrap().unwrap().creds,
+            json!({"key": "mm-cn", "region": "global"})
+        );
+        let p = minimax(
+            tmp.path(),
+            &[("MINIMAX_API_KEY", "mm-cn"), ("MINIMAX_REGION", "cn")],
+        );
+        ops::sync_live(&store, &p).unwrap();
         assert_eq!(
             store.get("minimax", "cn").unwrap().unwrap().creds,
             json!({"key": "mm-cn", "region": "cn"})
