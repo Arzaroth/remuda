@@ -515,6 +515,34 @@ mod tests {
     }
 
     #[test]
+    fn a_week_with_unpriced_use_no_login_claims_says_so() {
+        let history = json!({"closed": [closed("work", "primary", WEEK_MINUTES, MON, 40)]});
+        let mut rows = export(
+            &[
+                ("2026-10-06", Some("d-work"), 1.0),
+                ("2026-10-07", None, 1.0),
+            ],
+            None,
+        );
+        let at = |rows: &_| {
+            weeks(
+                &history,
+                rows,
+                &digests(),
+                &known(),
+                &TimeZone::UTC,
+                MON + 30 * DAY,
+            )
+        };
+        assert!(!at(&rows)[0].unattributed_unpriced);
+        rows.rows[1].usd = None;
+        rows.rows[1].tokens.output = 5;
+        let got = at(&rows);
+        assert!(got[0].unattributed_unpriced);
+        assert!(!got[0].unpriced);
+    }
+
+    #[test]
     fn the_fleets_view_is_read_first_and_this_machines_history_without_it() {
         let dir = tempfile::tempdir().unwrap();
         let snapshot = dir.path().join("tokengauge-usage.json");
