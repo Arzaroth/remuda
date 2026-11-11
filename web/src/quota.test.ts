@@ -13,6 +13,7 @@ const login = (name: string, used: number, resetsIn: number | null, samples: [nu
   resetsAt: resetsIn === null ? null : NOW + resetsIn,
   length: WEEK,
   samples: [...samples, [NOW, used]],
+  past: [],
 });
 
 const win = (used: number, resetsAt: string | null, trail: [number, number][] = [], minutes = 10080): Window => ({

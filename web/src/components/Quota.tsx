@@ -4,16 +4,18 @@ import { DAY, HOUR } from '../format';
 import { now, store } from '../state';
 import { remember, remembered } from '../storage';
 import { go } from '../route';
-import { burn, capacity, knownFrom, logins, pick, project, recorded, remaining, shares, type Login, type Point, type Refill } from '../quota';
+import { burn, capacity, knownFrom, logins, pick, project, rateAt, recorded, remaining, shares, usual, type Login, type Point, type Refill } from '../quota';
 import { inUse } from '../windows';
 import { weighted, Weighting, windows } from './Strip';
 import { Chips } from './Usage';
 import { ProviderIcon } from './ProviderIcon';
 
 type View = 'remaining' | 'drain';
-type Prefs = { view: View; hours: number; future: number; windows: Record<string, string> };
+type Pace = 'usual' | 1 | 3 | 6;
+type Prefs = { view: View; pace: Pace; future: number; windows: Record<string, string> };
 
-const DEFAULTS: Prefs = { view: 'remaining', hours: 3, future: 1, windows: {} };
+const DEFAULTS: Prefs = { view: 'remaining', pace: 'usual', future: 1, windows: {} };
+const RECENT = 3;
 const SPAN = 14;
 const LEAD = 3;
 
@@ -25,6 +27,7 @@ const FUTURES = [
 ] as const;
 
 const pct = (v: number) => `${Math.round(v)}%`;
+const days = (d: number) => (d < 1.5 ? 'a day on record' : `${Math.round(d)} days on record`);
 const rate = (v: number) => `${v >= 10 ? Math.round(v) : v.toFixed(1)}%/h`;
 const factor = (w: number) => `×${w >= 0.995 ? 1 : w.toFixed(2)}`;
 const dayFrom = (ms: number, days: number) => {
@@ -77,6 +80,7 @@ function PoolChart(props: {
   max: number;
   was: Point[];
   ahead: Point[];
+  alt?: Point[];
   step: boolean;
   refills: Refill[];
   color: string;
@@ -181,6 +185,9 @@ function PoolChart(props: {
           <path class="pool-area ahead" d={area(props.ahead)} style={{ fill: `url(#${clip}-fill)` }} />
           <path class="line" d={steps(was(), x, y)} style={{ stroke: props.color }} />
           <path class="line ahead" d={steps(props.ahead, x, y)} style={{ stroke: props.color }} />
+          <Show when={props.alt?.length}>
+            <path class="line alt" d={steps(props.alt!, x, y)} style={{ stroke: props.color }} />
+          </Show>
         </g>
         <Show when={props.now >= props.from && props.now <= props.to}>
           <line class="now" x1={x(props.now)} x2={x(props.now)} y1={PAD.top - 8} y2={PAD.top + plotH} />
@@ -238,23 +245,49 @@ function Pool(props: { id: string; name: string; prefs: Prefs; offset: number; s
   const ls = createMemo((): Login[] => (c() ? logins(c()!, t(), store.s?.usage?.updatedAt ?? null) : []));
   const from = () => dayFrom(t(), props.offset * 7 - LEAD);
   const to = () => dayFrom(from(), SPAN);
-  const spent = () => burn(ls(), t(), props.prefs.hours);
+  const isUsual = () => props.prefs.pace === 'usual';
+  const hours = () => (props.prefs.pace === 'usual' ? RECENT : props.prefs.pace);
+  const spent = () => burn(ls(), t(), hours());
+  const week = createMemo(() => usual(ls(), t()));
   const horizon = () => Math.max(to(), t() + 7 * DAY);
-  const ahead = createMemo(() => project(ls(), t(), (spent() ?? 0) * props.prefs.future, horizon()));
+  const pace = createMemo(() => {
+    const f = props.prefs.future;
+    if (!isUsual()) return spent() === null ? null : spent()! * f;
+    const w = week();
+    if (!w) return null;
+    const at = rateAt(w.slots);
+    return (time: number) => at(time) * f;
+  });
+  const ahead = createMemo(() => project(ls(), t(), pace() ?? 0, horizon()));
+  const alt = createMemo(() => (isUsual() && spent() !== null ? project(ls(), t(), spent()! * props.prefs.future, horizon()).points : []));
+  const paceAt = (time: number) => {
+    const p = pace();
+    return p === null ? 0 : typeof p === 'number' ? p : p(time);
+  };
+  const drainAhead = createMemo((): Point[] => {
+    if (pace() === null) return [];
+    const out: Point[] = [];
+    for (let at = t(); at < Math.max(to(), t()); at = (Math.floor(at / HOUR) + 1) * HOUR) {
+      const next = Math.min(Math.max(to(), t()), (Math.floor(at / HOUR) + 1) * HOUR);
+      out.push([at, paceAt(at)], [next, paceAt(at)]);
+    }
+    return out;
+  });
   const was = createMemo(() => recorded(ls()));
   const drain = createMemo((): Point[] => {
     if (!ls().length) return [];
     const out: Point[] = [];
     for (let at = Math.max(knownFrom(ls()), from()); at <= t(); at += HOUR) {
-      const r = burn(ls(), at, props.prefs.hours);
+      const r = burn(ls(), at, hours());
       if (r !== null) out.push([at, r]);
     }
-    const last = burn(ls(), t(), props.prefs.hours);
+    const last = burn(ls(), t(), hours());
     if (last !== null) out.push([t(), last]);
     return out;
   });
   const next = () => ahead().refills.find((r) => r.at > t());
-  const each = createMemo(() => shares(ls(), t(), props.prefs.hours));
+  const each = createMemo(() => shares(ls(), t(), hours(), isUsual() ? week() : null));
+  const noPace = () => (isUsual() ? 'under a day on record' : 'no burn yet');
   const cap = () => capacity(ls());
   return (
     <section class="u-card pool" style={{ '--brand': brand(props.id) }}>
@@ -297,14 +330,19 @@ function Pool(props: { id: string; name: string; prefs: Prefs; offset: number; s
         <dl class="pool-top">
           <Fig label="Remaining" value={pct(remaining(ls()))} note={`of ${pct(cap())}`} lead />
           <Fig
+            label="Usual week"
+            value={week() ? pct(week()!.week) : '-'}
+            note={week() ? `needed, of ${pct(cap())}, from ${days(week()!.days)}` : 'under a day on record'}
+          />
+          <Fig
             label="Pool empty"
-            value={ahead().poolEmpty ? when(ahead().poolEmpty!) : spent() === null ? '-' : 'Never'}
-            note={ahead().poolEmpty ? 'at this pace' : spent() === null ? 'no burn yet' : `through ${shortDay(horizon())}`}
+            value={ahead().poolEmpty ? when(ahead().poolEmpty!) : pace() === null ? '-' : 'Never'}
+            note={ahead().poolEmpty ? (isUsual() ? 'in a usual week' : 'at this pace') : pace() === null ? noPace() : `through ${shortDay(horizon())}`}
           />
           <Fig
             label="First empty"
-            value={spent() === null ? '-' : ahead().firstEmpty ? ahead().firstEmpty!.name : 'None'}
-            note={spent() === null ? 'no burn yet' : ahead().firstEmpty ? when(ahead().firstEmpty!.at) : 'before a reset'}
+            value={pace() === null ? '-' : ahead().firstEmpty ? ahead().firstEmpty!.name : 'None'}
+            note={pace() === null ? noPace() : ahead().firstEmpty ? when(ahead().firstEmpty!.at) : 'before a reset'}
           />
           <Fig
             label="Next reset"
@@ -314,7 +352,7 @@ function Pool(props: { id: string; name: string; prefs: Prefs; offset: number; s
           <Fig
             label="Burn"
             value={spent() === null ? '-' : rate(spent()!)}
-            note={spent() === null ? 'not recorded yet' : `over the last ${props.prefs.hours}h`}
+            note={spent() === null ? 'not recorded yet' : `over the last ${hours()}h`}
           />
         </dl>
         <div class="pool-logins">
@@ -323,11 +361,11 @@ function Pool(props: { id: string; name: string; prefs: Prefs; offset: number; s
               <tr>
                 <th>Login</th>
                 <th>Left</th>
-                <th>Burn</th>
+                <th>{isUsual() ? 'Usual burn' : 'Burn'}</th>
                 <Show when={c()!.weighted}>
                   <th title="In units of the largest plan, so the logins add up to the Burn figure">Of the pool</th>
                 </Show>
-                <th>Empty at its pace</th>
+                <th>{isUsual() ? 'Empty in a usual week' : 'Empty at its pace'}</th>
                 <th>Resets</th>
               </tr>
             </thead>
@@ -361,9 +399,9 @@ function Pool(props: { id: string; name: string; prefs: Prefs; offset: number; s
               from={from()}
               to={to()}
               now={t()}
-              max={niceMax(Math.max(0.1, ...drain().map(([, v]) => v), (spent() ?? 0) * props.prefs.future))}
+              max={niceMax(Math.max(0.1, ...drain().map(([, v]) => v), ...drainAhead().map(([, v]) => v)))}
               was={drain()}
-              ahead={spent() === null ? [] : [[t(), spent()! * props.prefs.future], [Math.max(to(), t()), spent()! * props.prefs.future]]}
+              ahead={drainAhead()}
               step={false}
               refills={[]}
               color={brand(props.id)}
@@ -379,6 +417,7 @@ function Pool(props: { id: string; name: string; prefs: Prefs; offset: number; s
             max={cap()}
             was={was().points}
             ahead={ahead().points}
+            alt={alt()}
             step
             refills={[...was().refills, ...ahead().refills]}
             color={brand(props.id)}
@@ -393,8 +432,14 @@ function Pool(props: { id: string; name: string; prefs: Prefs; offset: number; s
           </li>
           <li>
             <i class="dashed" />
-            Projected
+            {isUsual() ? 'Projected, a usual week' : 'Projected'}
           </li>
+          <Show when={props.prefs.view === 'remaining' && alt().length}>
+            <li>
+              <i class="dotted" />
+              At the last {RECENT}h's pace
+            </li>
+          </Show>
           <Show when={c()!.leftOut.length}>
             <li class="u-sub">Left out, no known plan weight: {c()!.leftOut.join(', ')}</li>
           </Show>
@@ -420,8 +465,9 @@ export function Quota(props: { id: string | null }) {
         <div>
           <h1>Quota</h1>
           <p class="page-sub">
-            Every login of a CLI pooled into one allowance: what is left, and where it is heading if the recent burn holds and each
-            reset fills its login back up. The projection spends the login that resets soonest first.
+            Every login of a CLI pooled into one allowance: what is left, and where it is heading if the coming days go the way your
+            weeks usually do, hour by hour, or if the recent burn holds. Each reset fills its login back up, and the projection spends
+            the login that resets soonest first.
           </p>
         </div>
       </header>
@@ -452,16 +498,17 @@ export function Quota(props: { id: string | null }) {
           ]}
           onPick={(view) => setPrefs({ view })}
         />
-        <span class="u-label">Burn rate</span>
-        <Chips
-          label="Burn rate over"
-          value={prefs().hours}
+        <span class="u-label">Pace</span>
+        <Chips<Pace>
+          label="Pace"
+          value={prefs().pace}
           options={[
-            [1, '1h'],
-            [3, '3h'],
-            [6, '6h'],
+            ['usual', 'Usual week'],
+            [1, 'Last 1h'],
+            [3, 'Last 3h'],
+            [6, 'Last 6h'],
           ]}
-          onPick={(hours) => setPrefs({ hours })}
+          onPick={(pace) => setPrefs({ pace })}
         />
         <label class="u-select">
           <span class="u-label">Future usage</span>
