@@ -147,7 +147,7 @@ export function project(ls: Login[], now: number, pace: Rate, until: number): Pr
     if (d !== null && rate > 0 && next[d] === null && ls[d].length) next[d] = t + ls[d].length;
     const soonest = Math.max(t, Math.min(...next.map((n) => n ?? Infinity)));
     const dry = d !== null && rate > 0 ? t + ((left[d] * ls[d].weight) / rate) * HOUR : Infinity;
-    const to = Math.min(dry, soonest, until, typeof pace === 'number' ? Infinity : (Math.floor(t / HOUR) + 1) * HOUR);
+    const to = Math.min(dry, soonest, until, typeof pace === 'number' ? Infinity : hourAfter(t));
     if (d !== null && rate > 0) left[d] = Math.max(0, left[d] - (((to - t) / HOUR) * rate) / ls[d].weight);
     t = to;
     points.push([t, pool()]);
@@ -173,12 +173,16 @@ export function project(ls: Login[], now: number, pace: Rate, until: number): Pr
 const WEEK_HOURS = 168;
 const FULL = 99.5;
 
-const slotOf = (k: number) => {
-  const d = new Date(k * HOUR + HOUR / 2);
+const hourOf = (t: number) => new Date(t).setMinutes(0, 0, 0);
+export const hourAfter = (t: number) => hourOf(t) + HOUR;
+const hourFrom = (t: number) => (hourOf(t) === t ? t : hourAfter(t));
+
+const slotOf = (t: number) => {
+  const d = new Date(t);
   return d.getDay() * 24 + d.getHours();
 };
 
-export const rateAt = (slots: number[]) => (t: number) => slots[slotOf(Math.floor(t / HOUR))];
+export const rateAt = (slots: number[]) => (t: number) => slots[slotOf(t)];
 
 type Hourly = { rise: Map<number, number>; seen: Set<number>; full: Set<number> };
 
@@ -186,19 +190,19 @@ function hourly(l: Login): Hourly {
   const out: Hourly = { rise: new Map(), seen: new Set(), full: new Set() };
   const lastSeen = Math.max(-Infinity, ...l.past.map((i) => i.samples.at(-1)?.[0] ?? -Infinity));
   const opened = l.resetsAt !== null && l.length ? Math.max(l.resetsAt - l.length, lastSeen) : null;
-  const current = { opened, samples: l.samples };
-  for (const { opened, samples } of [...l.past, current]) {
+  const current = l.samples.length > 1 ? [{ opened, samples: l.samples }] : [];
+  for (const { opened, samples } of [...l.past, ...current]) {
     if (!samples.length) continue;
     const pts: Point[] = opened !== null && samples[0][0] > opened ? [[opened, 0], ...samples] : samples;
-    for (let k = Math.ceil(pts[0][0] / HOUR); (k + 1) * HOUR <= pts.at(-1)![0]; k++) out.seen.add(k);
+    for (let k = hourFrom(pts[0][0]); k + HOUR <= pts.at(-1)![0]; k += HOUR) out.seen.add(k);
     for (let i = 1; i < pts.length; i++) {
       const [a, was] = pts[i - 1];
       const [b, now] = pts[i];
       if (b <= a) continue;
-      if (was >= FULL) for (let k = Math.ceil(a / HOUR); (k + 1) * HOUR <= b; k++) out.full.add(k);
+      if (was >= FULL) for (let k = hourFrom(a); k + HOUR <= b; k += HOUR) out.full.add(k);
       if (now <= was) continue;
-      for (let k = Math.floor(a / HOUR); k * HOUR < b; k++) {
-        const part = (Math.min(b, (k + 1) * HOUR) - Math.max(a, k * HOUR)) / (b - a);
+      for (let k = hourOf(a); k < b; k += HOUR) {
+        const part = (Math.min(b, k + HOUR) - Math.max(a, k)) / (b - a);
         out.rise.set(k, (out.rise.get(k) ?? 0) + (now - was) * part);
       }
     }
@@ -232,7 +236,7 @@ export type Usual = { slots: number[]; days: number; week: number; own: (number[
 export function usual(ls: Login[], now: number): Usual | null {
   if (!ls.length) return null;
   const hs = ls.map(hourly);
-  const before = Math.floor(now / HOUR);
+  const before = hourOf(now);
   const known = hs.filter((h) => h.seen.size);
   if (!known.length) return null;
   const pool = average(known[0].seen, before, (k) => {
@@ -252,7 +256,7 @@ function emptyBy(l: Login, at: number, rate: (t: number) => number): number | nu
   let left = 100 - l.used;
   const end = l.resetsAt ?? at + 14 * 24 * HOUR;
   for (let t = at; t < end; ) {
-    const to = Math.min(end, (Math.floor(t / HOUR) + 1) * HOUR);
+    const to = Math.min(end, hourAfter(t));
     const spend = (rate(t) * (to - t)) / HOUR;
     if (spend >= left) return spend > 0 ? t + (left / spend) * (to - t) : t;
     left -= spend;

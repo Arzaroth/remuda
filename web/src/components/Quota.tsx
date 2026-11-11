@@ -4,7 +4,7 @@ import { DAY, HOUR } from '../format';
 import { now, store } from '../state';
 import { remember, remembered } from '../storage';
 import { go } from '../route';
-import { burn, capacity, knownFrom, logins, pick, project, rateAt, recorded, remaining, shares, usual, type Login, type Point, type Refill } from '../quota';
+import { burn, capacity, hourAfter, knownFrom, logins, pick, project, rateAt, recorded, remaining, shares, usual, type Login, type Point, type Refill } from '../quota';
 import { inUse } from '../windows';
 import { weighted, Weighting, windows } from './Strip';
 import { Chips } from './Usage';
@@ -267,8 +267,8 @@ function Pool(props: { id: string; name: string; prefs: Prefs; offset: number; s
   const drainAhead = createMemo((): Point[] => {
     if (pace() === null) return [];
     const out: Point[] = [];
-    for (let at = t(); at < Math.max(to(), t()); at = (Math.floor(at / HOUR) + 1) * HOUR) {
-      const next = Math.min(Math.max(to(), t()), (Math.floor(at / HOUR) + 1) * HOUR);
+    for (let at = t(); at < Math.max(to(), t()); at = hourAfter(at)) {
+      const next = Math.min(Math.max(to(), t()), hourAfter(at));
       out.push([at, paceAt(at)], [next, paceAt(at)]);
     }
     return out;
@@ -286,7 +286,10 @@ function Pool(props: { id: string; name: string; prefs: Prefs; offset: number; s
     return out;
   });
   const next = () => ahead().refills.find((r) => r.at > t());
-  const each = createMemo(() => shares(ls(), t(), hours(), isUsual() ? week() : null));
+  const each = createMemo(() => {
+    const all = shares(ls(), t(), hours(), isUsual() ? week() : null);
+    return isUsual() && !week() ? all.map((s) => ({ ...s, own: null, pooled: null, empty: null })) : all;
+  });
   const noPace = () => (isUsual() ? 'under a day on record' : 'no burn yet');
   const cap = () => capacity(ls());
   return (
@@ -416,7 +419,7 @@ function Pool(props: { id: string; name: string; prefs: Prefs; offset: number; s
             now={t()}
             max={cap()}
             was={was().points}
-            ahead={ahead().points}
+            ahead={pace() === null ? [] : ahead().points}
             alt={alt()}
             step
             refills={[...was().refills, ...ahead().refills]}
