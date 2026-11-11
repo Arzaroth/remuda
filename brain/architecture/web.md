@@ -132,7 +132,7 @@ access to anything, and it ends when they stop.
 | `POST /api/import` `{provider?, name, force?}` | Store the live login |
 | `POST /api/label` `{name, text?}` / `rename` `{name, to}` / `remove` `{name}` | As the commands |
 | `POST /api/refresh` `{name?, force?}` | Refresh inactive credentials, then nudge TokenGauge |
-| `POST /api/reset` `{name}` | Spend one of a Claude login's banked usage-limit resets with its own token, then nudge TokenGauge |
+| `POST /api/reset` `{name, kind?}` | Spend one of a Claude login's banked usage-limit resets with its own token, of `kind` (`session`, `weekly`, `full`, `fable`) when given, then nudge TokenGauge |
 | `POST /api/login` `{provider?, name, force?, paste?}` | Begin a sign-in, opening nothing yet: `{id, url, needsCode, asksFor, localOnly, userCode, machine, opensIn}`, `userCode` being the device code to type at `url` (null when there is none), `machine` being the hostname a callback sign-in's browser must be on; `paste` defaults to `[login] paste` |
 | `POST /api/login/open` `{id}` | Open its link where `[login]` says: `{opened}` |
 | `GET`/`POST /api/login/settings` `{browser?, window?, paste?}` | Read or save `[login]`: `{browsers, browser, window, paste, opensIn}` |
@@ -217,9 +217,10 @@ resets within a twentieth of the window, an hour at most, are one).
 The Quota page draws its pools from these trails
 ([web-page.md](../features/web-page.md#quota)).
 `bankedResets` (`available`, `expiresAt`, and `kinds`,
-`[{kind, count, expiresAt, clears}]` with `kind` one of `session`, `weekly`,
-`full`, `fable` and `clears` the window keys it resets when TokenGauge names
-them, when TokenGauge splits the count: the Claude resets TokenGauge
+`[{kind, count, expiresAt, clears, idle}]` with `kind` one of `session`,
+`weekly`, `full`, `fable`, `clears` the window keys it resets when TokenGauge
+names them and `idle` true when every reset of that kind would clear nothing
+now, when TokenGauge splits the count: the Claude resets TokenGauge
 counts usable, null when none are left), and `accounts`: the same fields per stored
 credential name. TokenGauge 0.37 (snapshot schema 2) names the credential a
 payload or an error belongs to in its `credential` field; those go under
