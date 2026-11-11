@@ -77,8 +77,18 @@ struct Cli {
     command: Option<Cmd>,
 }
 
-const PROVIDERS: [&str; 9] = [
-    "claude", "codex", "copilot", "cursor", "deepseek", "glm", "grok", "kimi", "opencode",
+const PROVIDERS: [&str; 11] = [
+    "claude",
+    "codex",
+    "copilot",
+    "cursor",
+    "deepseek",
+    "glm",
+    "grok",
+    "kimi",
+    "minimax",
+    "opencode",
+    "openrouter",
 ];
 
 fn browser_ids() -> clap::builder::PossibleValuesParser {
@@ -993,9 +1003,21 @@ fn main() -> Result<()> {
     let copilot = ApiKey::copilot();
     let deepseek = ApiKey::deepseek();
     let glm = ApiKey::glm();
+    let minimax = ApiKey::minimax();
     let opencode = ApiKey::opencode();
-    let providers: [&dyn Provider; 9] = [
-        &claude, &codex, &copilot, &cursor, &deepseek, &glm, &grok, &kimi, &opencode,
+    let openrouter = ApiKey::openrouter();
+    let providers: [&dyn Provider; 11] = [
+        &claude,
+        &codex,
+        &copilot,
+        &cursor,
+        &deepseek,
+        &glm,
+        &grok,
+        &kimi,
+        &minimax,
+        &opencode,
+        &openrouter,
     ];
     if let Cmd::Hook { what } = &command {
         return hook(&store, &claude, what);
@@ -1057,7 +1079,9 @@ fn main() -> Result<()> {
             Box::new(glm),
             Box::new(grok),
             Box::new(kimi),
+            Box::new(minimax),
             Box::new(opencode),
+            Box::new(openrouter),
         ];
         let (listener, port) = http::bind(port)?;
         let token = match served::taken_over(&paths::runtime_dir(), port) {

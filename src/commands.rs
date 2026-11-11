@@ -465,7 +465,22 @@ pub fn login(
             }
             open(out)?;
         };
-        pending.finish(Some(&code))
+        let mut answers = serde_json::Map::new();
+        for field in pending.fields() {
+            match field.choices {
+                [] => write!(out, "Paste {}, or press Enter to skip: ", field.label)?,
+                [first, ..] => write!(
+                    out,
+                    "Pick {} ({}), or press Enter for {first}: ",
+                    field.label,
+                    field.choices.join(" or ")
+                )?,
+            }
+            out.flush()?;
+            let line = prompt.lines.recv().unwrap_or_default();
+            answers.insert(field.name.to_owned(), json!(line.trim()));
+        }
+        pending.finish_with(Some(&code), &answers)
     } else {
         writeln!(out, "Waiting for the browser to finish{offer}...")?;
         std::thread::scope(|s| -> Result<_> {

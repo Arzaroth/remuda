@@ -1155,6 +1155,7 @@ impl App {
                 let url = login.url().to_owned();
                 let needs_code = login.needs_code();
                 let asks_for = login.asks_for();
+                let fields = login.fields();
                 let local_only = login.local_only();
                 let user_code = login.user_code().map(str::to_owned);
                 pending.insert(
@@ -1171,7 +1172,7 @@ impl App {
                 drop(pending);
                 let opens_in = self.open.opens_in(&self.login_settings());
                 Ok(
-                    json!({"id": id, "url": url, "needsCode": needs_code, "asksFor": asks_for, "localOnly": local_only, "userCode": user_code, "machine": hostname(), "opensIn": opens_in}),
+                    json!({"id": id, "url": url, "needsCode": needs_code, "asksFor": asks_for, "fields": fields, "localOnly": local_only, "userCode": user_code, "machine": hostname(), "opensIn": opens_in}),
                 )
             }
             ("POST", "/api/login/open") => {
@@ -1200,7 +1201,12 @@ impl App {
                         .context("that sign-in is already finishing")?;
                     (pending.provider, pending.name.clone(), pending.force, login)
                 };
-                let done = login.finish(text("code"));
+                let answers = body
+                    .get("fields")
+                    .and_then(Value::as_object)
+                    .cloned()
+                    .unwrap_or_default();
+                let done = login.finish_with(text("code"), &answers);
                 let claimed = self
                     .pending
                     .lock()

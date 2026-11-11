@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 
 use crate::fsx::{Changed, read_json, update_json};
 use crate::paths;
-use crate::provider::{Format, Identity, Login, PendingLogin, Provider, Upstream};
+use crate::provider::{Field, Format, Identity, Login, PendingLogin, Provider, Upstream};
 use crate::store::Entry;
 
 /// A provider signed into with an API key. A key has no account behind it to
@@ -35,8 +35,51 @@ pub struct ApiKey {
     env: Box<Env>,
     /// Where the key is read when no variable and no slot holds one.
     fallback: Option<Box<Lookup>>,
+    region: Option<Region>,
+    extras: &'static [Extra],
     inference: String,
     routes: Routes,
+}
+
+/// The region a key answers in, stored as `region`: it picks the slot a key
+/// goes in, and a slot says the region of the key it holds.
+struct Region {
+    /// The variable that names it beside the key's own.
+    var: &'static str,
+    /// The default first.
+    choices: &'static [&'static str],
+    of_slot: fn(&str) -> &'static str,
+    /// Where a key of a region goes that none of its slots holds, given the
+    /// live key's slot.
+    slot_for: fn(Option<&str>, &str) -> &'static str,
+}
+
+/// opencode's MiniMax entry for `region` of the live key's kind: the coding
+/// plan's, or the pay-as-you-go API's.
+fn minimax_slot(live: Option<&str>, region: &str) -> &'static str {
+    let plan = live.is_some_and(|slot| slot.ends_with("-coding-plan"));
+    match (region, plan) {
+        ("cn", true) => "minimax-cn-coding-plan",
+        ("cn", false) => "minimax-cn",
+        (_, true) => "minimax-coding-plan",
+        (_, false) => "minimax",
+    }
+}
+
+/// A stored field beside the key that `remuda env` exports into the first of
+/// `vars` and a switch ignores.
+struct Extra {
+    field: &'static str,
+    vars: &'static [&'static str],
+    label: &'static str,
+}
+
+fn minimax_region(slot: &str) -> &'static str {
+    if slot.starts_with("minimax-cn") {
+        "cn"
+    } else {
+        "global"
+    }
 }
 
 /// What each slot holds, in the CLI's order.
@@ -99,7 +142,11 @@ fn gh_token() -> Option<String> {
 }
 
 fn key_of(creds: &Value) -> Option<&str> {
-    creds.get("key")?.as_str().filter(|k| !k.trim().is_empty())
+    key_of_field(creds, "key")
+}
+
+fn key_of_field<'a>(creds: &'a Value, field: &str) -> Option<&'a str> {
+    creds.get(field)?.as_str().filter(|k| !k.trim().is_empty())
 }
 
 fn identity_of(key: &str) -> Identity {
@@ -155,6 +202,8 @@ impl ApiKey {
             db: None,
             env: Box::new(process_env),
             fallback: None,
+            region: None,
+            extras: &[],
             inference: "https://api.z.ai/api".to_owned(),
             routes: glm_routes,
         }
@@ -173,6 +222,8 @@ impl ApiKey {
             db: Some(paths::opencode_db()),
             env: Box::new(process_env),
             fallback: None,
+            region: None,
+            extras: &[],
             inference: "https://opencode.ai/inference/go".to_owned(),
             routes: opencode_routes,
         }
@@ -192,6 +243,66 @@ impl ApiKey {
             db: Some(paths::opencode_db()),
             env: Box::new(process_env),
             fallback: None,
+            region: None,
+            extras: &[],
+            inference: String::new(),
+            routes: no_routes,
+        }
+    }
+
+    /// A MiniMax key, global or China, which opencode files under the
+    /// region's entry, of the pay-as-you-go API or of the coding plan.
+    pub fn minimax() -> Self {
+        ApiKey {
+            id: "minimax",
+            name: "MiniMax",
+            envs: &["MINIMAX_API_KEY"],
+            export: "MINIMAX_API_KEY",
+            key_page: "https://platform.minimax.io/user-center/basic-information/interface-key",
+            asks_for: "the API key",
+            slots: &[
+                "minimax",
+                "minimax-cn",
+                "minimax-coding-plan",
+                "minimax-cn-coding-plan",
+            ],
+            file: Some(paths::opencode_auth()),
+            db: Some(paths::opencode_db()),
+            env: Box::new(process_env),
+            fallback: None,
+            region: Some(Region {
+                var: "MINIMAX_REGION",
+                choices: &["global", "cn"],
+                of_slot: minimax_region,
+                slot_for: minimax_slot,
+            }),
+            extras: &[],
+            inference: String::new(),
+            routes: no_routes,
+        }
+    }
+
+    /// An OpenRouter inference key, read from the environment only, and the
+    /// management key the account balance answers to, when there is one.
+    pub fn openrouter() -> Self {
+        ApiKey {
+            id: "openrouter",
+            name: "OpenRouter",
+            envs: &["OPENROUTER_API_KEY", "OPENROUTER_KEY"],
+            export: "OPENROUTER_API_KEY",
+            key_page: "https://openrouter.ai/settings/keys",
+            asks_for: "the API key",
+            slots: &[],
+            file: None,
+            db: None,
+            env: Box::new(process_env),
+            fallback: None,
+            region: None,
+            extras: &[Extra {
+                field: "management",
+                vars: &["OPENROUTER_MANAGEMENT_KEY", "OPENROUTER_PROVISIONING_KEY"],
+                label: "the management key, which the account balance needs",
+            }],
             inference: String::new(),
             routes: no_routes,
         }
@@ -213,6 +324,8 @@ impl ApiKey {
             db: None,
             env: Box::new(process_env),
             fallback: Some(Box::new(gh_token)),
+            region: None,
+            extras: &[],
             inference: String::new(),
             routes: no_routes,
         }
@@ -240,6 +353,44 @@ impl ApiKey {
     pub fn inferring_at(mut self, base: &str) -> Self {
         self.inference = base.to_owned();
         self
+    }
+
+    fn fields(&self) -> Vec<Field> {
+        let region = self.region.as_ref().map(|r| Field {
+            name: "region",
+            label: "the region",
+            choices: r.choices,
+        });
+        region
+            .into_iter()
+            .chain(self.extras.iter().map(|e| Field {
+                name: e.field,
+                label: e.label,
+                choices: &[],
+            }))
+            .collect()
+    }
+
+    /// The region `creds` say, else the default.
+    fn region_of(&self, creds: &Value) -> Option<&'static str> {
+        let r = self.region.as_ref()?;
+        let said = creds.get("region").and_then(Value::as_str).unwrap_or("");
+        Some(
+            r.choices
+                .iter()
+                .copied()
+                .find(|c| *c == said)
+                .unwrap_or(r.choices[0]),
+        )
+    }
+
+    /// The credential the CLI reads, `key` in `region`.
+    fn creds(&self, key: &str, region: Option<&str>) -> Value {
+        let mut creds = json!({ "key": key });
+        if let Some(region) = region.filter(|_| self.region.is_some()) {
+            creds["region"] = json!(region);
+        }
+        creds
     }
 
     /// The first variable that holds a key, and the key.
@@ -289,9 +440,44 @@ impl ApiKey {
         Ok(read_slot(&self.found()?).map(|(slot, value)| (slot, value.clone())))
     }
 
-    /// The slot a key goes in: the one the CLI reads.
-    fn target(&self, found: &Found) -> &'static str {
-        read_slot(found).map_or(self.slots[0], |(slot, _)| slot)
+    /// The slot a key goes in, and the live key's slot when the switch
+    /// moves it out of there. Without a region it is the slot the CLI reads.
+    /// With one it is the region's slot holding a key, else the region's
+    /// counterpart of the live key's slot, which is emptied when it is
+    /// another region's. Any other key read ahead of it would still be the
+    /// one the CLI uses.
+    fn target(
+        &self,
+        found: &Found,
+        region: Option<&str>,
+    ) -> Result<(&'static str, Option<&'static str>)> {
+        let live = read_slot(found)
+            .filter(|(_, v)| key_of(v).is_some())
+            .map(|(slot, _)| slot);
+        let (slot, emptied) = match (&self.region, region) {
+            (Some(r), Some(want)) => {
+                let held = found
+                    .iter()
+                    .find(|(s, v)| (r.of_slot)(s) == want && v.as_ref().and_then(key_of).is_some())
+                    .map(|(s, _)| *s);
+                (
+                    held.unwrap_or_else(|| (r.slot_for)(live, want)),
+                    live.filter(|l| (r.of_slot)(l) != want),
+                )
+            }
+            _ => (read_slot(found).map_or(self.slots[0], |(s, _)| s), None),
+        };
+        if let Some((other, _)) = found
+            .iter()
+            .take_while(|(s, _)| *s != slot)
+            .find(|(s, v)| Some(*s) != emptied && v.as_ref().and_then(key_of).is_some())
+        {
+            bail!(
+                "{} reads the key in {other} before {slot}, where this login's key goes: remove {other} from opencode first",
+                self.name
+            );
+        }
+        Ok((slot, emptied))
     }
 
     /// Makes `key` the credential opencode uses, as opencode's own switch
@@ -302,6 +488,7 @@ impl ApiKey {
         &self,
         conn: &mut Connection,
         key: &str,
+        region: Option<&str>,
         outgoing: Option<&Value>,
     ) -> Result<()> {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -309,7 +496,27 @@ impl ApiKey {
         if outgoing.is_some_and(|o| key_of(o).map(str::trim) != read_key(&found)) {
             return Err(Changed.into());
         }
-        let integration = self.target(&found);
+        let live = read_key(&found).map(str::to_owned);
+        let (integration, emptied) = self.target(&found, region)?;
+        if let Some(emptied) = emptied {
+            let live = live.clone().unwrap_or_default();
+            let rows: Vec<(String, String)> = tx
+                .prepare("SELECT id, value FROM credential WHERE integration_id = ?1")?
+                .query_map([emptied], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<rusqlite::Result<_>>()?;
+            for (id, value) in rows {
+                let value: Value = serde_json::from_str(&value).unwrap_or(Value::Null);
+                if key_of(&value).map(str::trim) == Some(live.as_str()) {
+                    tx.execute("DELETE FROM credential WHERE id = ?1", [&id])?;
+                }
+            }
+            if let (_, Some(still)) = self.target(&self.found_in_db(&tx)?, region)? {
+                bail!(
+                    "{} holds more keys in {still}, read before {integration}: remove them from opencode first",
+                    self.name
+                );
+            }
+        }
         let current = selected(&tx, integration)?;
         let holder = {
             let mut rows =
@@ -338,7 +545,9 @@ impl ApiKey {
                 )?;
                 tx.execute("UPDATE credential SET active = 1 WHERE id = ?1", [&id])?;
             }
-            (None, Some((id, mut value))) if key_of(&value).is_some() => {
+            (None, Some((id, mut value)))
+                if key_of(&value).is_some() && key_of(&value).map(str::trim) == live.as_deref() =>
+            {
                 value["key"] = json!(key);
                 tx.execute(
                     "UPDATE credential SET value = ?1, time_updated = ?2 WHERE id = ?3",
@@ -416,19 +625,32 @@ impl Provider for ApiKey {
 
     /// The environment wins, as it does for the CLI.
     fn live(&self) -> Result<Option<Value>> {
-        let key = match self.env_key() {
-            Some((_, key)) => Some(key),
-            None => self
-                .stored_login()?
-                .as_ref()
-                .and_then(|(_, login)| key_of(login))
-                .map(|k| k.trim().to_owned()),
-        };
-        let key = key.or_else(|| {
-            let found = self.fallback.as_ref()?()?;
-            Some(found.trim().to_owned()).filter(|k| !k.is_empty())
-        });
-        Ok(key.map(|key| json!({ "key": key })))
+        if let Some((_, key)) = self.env_key() {
+            let region = self.region.as_ref().and_then(|r| {
+                let said = (self.env)(r.var)?;
+                Some(
+                    r.choices
+                        .iter()
+                        .copied()
+                        .find(|c| *c == said.trim())
+                        .unwrap_or(r.choices[0]),
+                )
+            });
+            return Ok(Some(self.creds(&key, region)));
+        }
+        if let Some((slot, login)) = self.stored_login()?
+            && let Some(key) = key_of(&login)
+        {
+            let region = self.region.as_ref().map(|r| (r.of_slot)(slot));
+            return Ok(Some(self.creds(key.trim(), region)));
+        }
+        Ok(self
+            .fallback
+            .as_ref()
+            .and_then(|lookup| lookup())
+            .map(|key| key.trim().to_owned())
+            .filter(|key| !key.is_empty())
+            .map(|key| self.creds(&key, None)))
     }
 
     /// What the store holds beside the key outlives a sync: the CLI's slot
@@ -479,6 +701,17 @@ impl Provider for ApiKey {
             .map(|var| format!("unset {var}"))
             .collect();
         lines.push(format!("export {}={}", self.export, shell_quote(key)));
+        if let (Some(r), Some(region)) = (&self.region, self.region_of(&entry.creds)) {
+            lines.push(format!("export {}={}", r.var, shell_quote(region)));
+        }
+        for extra in self.extras {
+            match key_of_field(&entry.creds, extra.field) {
+                Some(value) => {
+                    lines.push(format!("export {}={}", extra.vars[0], shell_quote(value)))
+                }
+                None => lines.extend(extra.vars.iter().map(|var| format!("unset {var}"))),
+            }
+        }
         Ok(lines.join("\n"))
     }
 
@@ -487,6 +720,7 @@ impl Provider for ApiKey {
     fn install(&self, entry: &Entry, outgoing: Option<&Value>) -> Result<()> {
         let key = key_of(&entry.creds).context("stored credential holds no key")?;
         let qualified = entry.qualified();
+        let region = self.region_of(&entry.creds);
         if let Some((var, _)) = self.env_key() {
             bail!(
                 "{} reads its key from {var}, which remuda cannot change in a running shell: run `eval \"$(remuda env {qualified})\"`",
@@ -494,7 +728,7 @@ impl Provider for ApiKey {
             );
         }
         if let Some(mut conn) = self.database(OpenFlags::SQLITE_OPEN_READ_WRITE)? {
-            return self.install_row(&mut conn, key.trim(), outgoing);
+            return self.install_row(&mut conn, key.trim(), region, outgoing);
         }
         let Some(file) = &self.file else {
             bail!(
@@ -511,7 +745,26 @@ impl Provider for ApiKey {
             if outgoing.is_some_and(|o| key_of(o).map(str::trim) != read_key(&found)) {
                 return Err(Changed.into());
             }
-            let slot = self.target(&found);
+            let (slot, emptied) = self.target(&found, region)?;
+            let held = found
+                .iter()
+                .find(|(s, _)| *s == slot)
+                .and_then(|(_, v)| v.as_ref());
+            let live = read_slot(&found).map(|(s, _)| s);
+            if held.is_some_and(|held| {
+                Some(slot) != live && key_of(held).map(str::trim) != Some(key.trim())
+            }) {
+                bail!(
+                    "{}'s {slot} entry holds a login that is not the live one, which this switch would overwrite: remove it from {} first",
+                    self.name,
+                    file.display()
+                );
+            }
+            if let Some(emptied) = emptied
+                && let Some(entries) = json.as_object_mut()
+            {
+                entries.remove(emptied);
+            }
             match json.get_mut(slot).and_then(Value::as_object_mut) {
                 Some(entry) if entry.get("type").and_then(Value::as_str) == Some("api") => {
                     entry.insert("key".into(), json!(key.trim()));
@@ -530,6 +783,7 @@ impl Provider for ApiKey {
         Ok(Box::new(KeyPending {
             url: self.key_page.to_owned(),
             asks_for: self.asks_for,
+            fields: self.fields(),
         }))
     }
 
@@ -614,6 +868,7 @@ fn credential_id(now_ms: i64) -> Result<String> {
 struct KeyPending {
     url: String,
     asks_for: &'static str,
+    fields: Vec<Field>,
 }
 
 impl PendingLogin for KeyPending {
@@ -629,13 +884,46 @@ impl PendingLogin for KeyPending {
         self.asks_for
     }
 
+    fn fields(&self) -> Vec<Field> {
+        self.fields.clone()
+    }
+
     fn finish(self: Box<Self>, code: Option<&str>) -> Result<Login> {
+        self.finish_with(code, &serde_json::Map::new())
+    }
+
+    fn finish_with(
+        self: Box<Self>,
+        code: Option<&str>,
+        answers: &serde_json::Map<String, Value>,
+    ) -> Result<Login> {
         let key = code
             .map(str::trim)
             .filter(|k| !k.is_empty())
             .context("no key was pasted")?;
+        let mut creds = json!({ "key": key });
+        for field in &self.fields {
+            let answer = answers
+                .get(field.name)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|a| !a.is_empty());
+            let value = match (field.choices, answer) {
+                ([], None) => continue,
+                ([], Some(answer)) => answer,
+                ([first, ..], None) => first,
+                (choices, Some(answer)) => choices
+                    .iter()
+                    .copied()
+                    .find(|c| c.eq_ignore_ascii_case(answer))
+                    .with_context(|| {
+                        format!("{} is {}, not {answer}", field.label, choices.join(" or "))
+                    })?,
+            };
+            creds[field.name] = json!(value);
+        }
         Ok(Login {
-            creds: json!({ "key": key }),
+            creds,
             identity: identity_of(key),
         })
     }
@@ -660,6 +948,7 @@ mod tests {
         let login = Box::new(KeyPending {
             url: String::new(),
             asks_for: "the API key",
+            fields: Vec::new(),
         })
         .finish(Some(key))
         .unwrap();
@@ -693,6 +982,7 @@ mod tests {
         let login = Box::new(KeyPending {
             url: "u".into(),
             asks_for: "the API key",
+            fields: Vec::new(),
         })
         .finish(Some("  sk-1  "))
         .unwrap();
@@ -701,6 +991,7 @@ mod tests {
             Box::new(KeyPending {
                 url: "u".into(),
                 asks_for: "the API key",
+                fields: Vec::new(),
             })
             .finish(Some(" "))
             .is_err()
@@ -1000,7 +1291,7 @@ mod tests {
             1,
         );
         let err = opencode(tmp.path(), None)
-            .install_row(&mut db, "go-perso", Some(&json!({"key": "go-work"})))
+            .install_row(&mut db, "go-perso", None, Some(&json!({"key": "go-work"})))
             .unwrap_err();
         assert!(err.is::<Changed>(), "{err:#}");
         assert_eq!(rows(&db)[0].1["key"], "go-new");
