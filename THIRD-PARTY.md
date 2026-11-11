@@ -10,7 +10,8 @@ material that is not remuda's.
 TokenGauge draws too. selvedge's notice for them:
 
 ```text
-Every provider mark in this directory but kimi.svg and opencode.svg is copied
+Every provider mark in this directory but antigravity.svg, codex.svg, copilot.svg,
+deepseek.svg, kimi.svg, minimax.svg, muse.svg, openrouter.svg and opencode.svg is copied
 from CodexBar (https://github.com/steipete/CodexBar), from
 Sources/CodexBar/Resources/ProviderIcon-*.svg, with a white fill turned into
 currentColor, and used here under the same MIT license:
@@ -40,7 +41,10 @@ currentColor, and used here under the same MIT license:
 
 kimi.svg is Kimi's mark from lobe-icons (https://github.com/lobehub/lobe-icons,
 @lobehub/icons-static-svg 1.97.0, icons/kimi-color.svg), MIT licensed,
-Copyright (c) 2023 LobeHub, under the same terms as above.
+Copyright (c) 2023 LobeHub, under the same terms as above. codex.svg and
+openrouter.svg are the current Codex and OpenRouter marks from the same
+package, 1.102.0 (icons/codex.svg, icons/openrouter.svg), with their title
+dropped.
 
 opencode.svg is redrawn from opencode's own favicon
 (https://opencode.ai/favicon-v3.svg; opencode is MIT licensed,
@@ -48,6 +52,34 @@ https://github.com/sst/opencode), its background tile dropped.
 
 The brand marks remain the property of their respective owners and are used
 here under nominative fair use to identify the corresponding provider.
+
+antigravity.svg, copilot.svg, deepseek.svg, minimax.svg and muse.svg are Omarchy's
+(https://github.com/omacom/omarchy, shell/plugins/agents/assets, MIT licensed),
+with the fill turned into currentColor. The marks themselves belong to Google,
+GitHub, DeepSeek, MiniMax and Meta respectively.
+
+Omarchy is under the MIT license:
+
+    Copyright (c) David Heinemeier Hansson
+
+    Permission is hereby granted, free of charge, to any person obtaining
+    a copy of this software and associated documentation files (the
+    "Software"), to deal in the Software without restriction, including
+    without limitation the rights to use, copy, modify, merge, publish,
+    distribute, sublicense, and/or sell copies of the Software, and to
+    permit persons to whom the Software is furnished to do so, subject to
+    the following conditions:
+
+    The above copyright notice and this permission notice shall be
+    included in all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+    NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+    LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+    OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+    WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
 ## Fonts
