@@ -28,9 +28,25 @@ fn load(snapshot: &Path) -> Option<Value> {
 /// Each window's trail in TokenGauge's history beside its snapshot, by
 /// provider, credential and window: the instance's reset, and `[ms, percent]`
 /// samples, oldest first.
-type Trails = HashMap<(String, Option<String>, String), Trail>;
+type Trails = HashMap<Key, Trail>;
+type Key = (String, Option<String>, String);
 type Trail = (Timestamp, Samples);
 type Samples = Vec<(i64, u64)>;
+
+fn key(t: &Value) -> Option<Key> {
+    let text = |key: &str| t.get(key).and_then(Value::as_str).map(str::to_owned);
+    Some((text("provider")?, text("credential"), text("window")?))
+}
+
+fn samples(t: &Value) -> Option<Samples> {
+    let samples = t.get("samples")?.as_array()?.iter().filter_map(|s| {
+        let [at, used] = s.as_array()?.as_slice() else {
+            return None;
+        };
+        Some((at.as_i64()?, used.as_u64()?.min(100)))
+    });
+    Some(samples.collect())
+}
 
 fn trails(snapshot: &Path, now: Timestamp) -> Trails {
     let Some(history) = crate::value::history_paths(snapshot)
@@ -39,7 +55,6 @@ fn trails(snapshot: &Path, now: Timestamp) -> Trails {
     else {
         return Trails::new();
     };
-    let text = |t: &Value, key: &str| t.get(key).and_then(Value::as_str).map(str::to_owned);
     let trails = history.get("trails").and_then(Value::as_array);
     trails
         .into_iter()
@@ -50,18 +65,7 @@ fn trails(snapshot: &Path, now: Timestamp) -> Trails {
                 .and_then(Value::as_str)
                 .and_then(|at| at.parse::<Timestamp>().ok())
                 .filter(|at| *at > now)?;
-            let samples = t.get("samples")?.as_array()?.iter().filter_map(|s| {
-                let [at, used] = s.as_array()?.as_slice() else {
-                    return None;
-                };
-                Some((at.as_i64()?, used.as_u64()?.min(100)))
-            });
-            let key = (
-                text(t, "provider")?,
-                text(t, "credential"),
-                text(t, "window")?,
-            );
-            Some((key, (resets, samples.collect())))
+            Some((key(t)?, (resets, samples(t)?)))
         })
         .collect()
 }
