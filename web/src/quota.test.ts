@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { HOUR, MIN } from './format';
 import { burn, capacity, knownFrom, logins, pick, project, rateAt, recorded, remaining, shares, usual, type Login, type Point } from './quota';
 import type { Combined, Window } from './types';
@@ -266,6 +266,11 @@ describe('usual', () => {
     expect(rateAt(u.slots)(at(-4, 18))).toBeCloseTo(9 / 24);
   });
 
+  it('takes no hours from a window with no trail, whatever its opening', () => {
+    const l: Login = { ...week('max', 40, []), resetsAt: at(1, 0), past: [] };
+    expect(usual([l], MID)).toBeNull();
+  });
+
   it('has no usual week with under a day on record', () => {
     const l = { ...week('max', 0, []), past: [{ opened: at(-1, 0), samples: mornings(-1, 0) }] };
     expect(usual([l], MID)).toBeNull();
@@ -277,6 +282,23 @@ describe('usual', () => {
     const [share] = shares([l], MID, 3, u);
     expect(share.own).toBeCloseTo(63 / 168);
     expect(share.empty).toBeCloseTo(at(0, 10, 40), -3);
+  });
+});
+
+describe('usual, half an hour off UTC', () => {
+  const zone = process.env.TZ;
+  beforeAll(() => {
+    process.env.TZ = 'Asia/Kolkata';
+  });
+  afterAll(() => {
+    process.env.TZ = zone;
+  });
+
+  it("keeps a morning's hours on the clock's hours", () => {
+    const u = usual([week('max', 0, mornings(-7, 0))], at(0, 0))!;
+    expect(rateAt(u.slots)(at(1, 9, 15))).toBeCloseTo(3);
+    expect(rateAt(u.slots)(at(1, 8, 45))).toBeCloseTo(0);
+    expect(rateAt(u.slots)(at(1, 12, 15))).toBeCloseTo(0);
   });
 });
 
