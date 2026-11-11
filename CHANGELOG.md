@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-11-11
+
 ### Added
 
 - DeepSeek, MiniMax, OpenRouter and Copilot logins, stored as API keys and
