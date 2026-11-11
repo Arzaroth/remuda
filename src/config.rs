@@ -484,6 +484,22 @@ impl Config {
         problems
     }
 
+    pub fn names(&self, provider: &str) -> Vec<String> {
+        let mut names = self.warm.get(provider).cloned().unwrap_or_default();
+        if let Some(auto) = self.auto.get(provider) {
+            names.extend(auto.logins.iter().cloned());
+            names.extend(
+                auto.rules
+                    .iter()
+                    .flat_map(|r| r.order.iter().flatten().cloned()),
+            );
+            names.extend(auto.ceilings.keys().cloned());
+            names.extend(auto.long_ceilings.keys().cloned());
+            names.extend(auto.fallback.iter().cloned());
+        }
+        names
+    }
+
     fn document(&self) -> DocumentMut {
         let mut doc = DocumentMut::new();
         if !self.schedules.is_empty() {

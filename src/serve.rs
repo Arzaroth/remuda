@@ -834,6 +834,17 @@ impl App {
         Some(entries.into_iter().map(|e| e.name).collect())
     }
 
+    fn check_save(&self, config: &config::Config) -> Vec<config::Problem> {
+        let here = config::load(&self.places.config)
+            .map(|l| l.config)
+            .unwrap_or_default();
+        config.check(&|id| {
+            let mut names = self.logins(id)?;
+            names.extend(here.names(id));
+            Some(names)
+        })
+    }
+
     fn login_settings(&self) -> config::Login {
         config::load(&self.places.config)
             .map(|l| l.config.login)
@@ -935,7 +946,7 @@ impl App {
             ("GET", "/api/log") => Ok(json!({ "events": logbook::recent(store, None, LOG_SHOWN) })),
             ("POST", "/api/config/check") => {
                 let problems = match sent_config(&body) {
-                    Ok(config) => config.check(&|id| self.logins(id)),
+                    Ok(config) => self.check_save(&config),
                     Err(e) => vec![config::Problem {
                         at: "config".into(),
                         message: format!("{e:#}"),
@@ -946,7 +957,7 @@ impl App {
             ("POST", "/api/config") => {
                 let config = sent_config(&body)?;
                 let version = text("version").context("version is required")?;
-                let problems = config.check(&|id| self.logins(id));
+                let problems = self.check_save(&config);
                 if !problems.is_empty() {
                     let list: Vec<String> = problems.iter().map(ToString::to_string).collect();
                     bail!("the config was not saved: {}", list.join("; "));
