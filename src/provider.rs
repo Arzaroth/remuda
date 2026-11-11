@@ -187,7 +187,7 @@ pub trait Provider: Send + Sync {
         None
     }
     /// Spends one of the login's banked usage-limit resets.
-    fn redeem_reset(&self, _entry: &Entry) -> Result<String> {
+    fn redeem_reset(&self, _entry: &Entry, _kind: Option<&str>) -> Result<String> {
         bail!("{} has no banked resets", self.name())
     }
     /// `paste` asks for a sign-in the browser can finish from anywhere rather
