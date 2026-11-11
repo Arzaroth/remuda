@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { answers, defaults, heading, type Field } from './signin';
+import { answers, heading, seeded, type Field } from './signin';
 
 const region: Field = { name: 'region', label: 'the region', choices: ['global', 'cn'] };
 const management: Field = {
@@ -10,8 +10,8 @@ const management: Field = {
 
 describe('a sign-in asking for more than the key', () => {
   it('starts every choice on its default and every text empty', () => {
-    expect(defaults([region, management])).toEqual({ region: 'global', management: '' });
-    expect(defaults([])).toEqual({});
+    expect(seeded([region, management], undefined)).toEqual({ region: 'global', management: '' });
+    expect(seeded([], undefined)).toEqual({});
   });
 
   it('sends only the fields it asked for, trimmed, a blank choice on its default', () => {

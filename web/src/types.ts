@@ -12,6 +12,7 @@ export type Credential = {
   expiresAt: number | null;
   refreshTokenExpiresAt: number | null;
   verified: boolean;
+  region?: string | null;
 };
 
 export type Live = {

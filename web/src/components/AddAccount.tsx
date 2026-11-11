@@ -3,7 +3,7 @@ import { api } from '../api';
 import { createConfirm } from '../confirm';
 import { load, store, toast } from '../state';
 import { closeSheet } from '../sheet';
-import { answers, defaults, heading, type Field } from '../signin';
+import { answers, heading, seeded, type Field } from '../signin';
 import { overwrite, taken } from '../windows';
 import { ProviderIcon } from './ProviderIcon';
 
@@ -130,7 +130,7 @@ export function AddAccount(props: { provider?: string; again?: string }) {
     }
     openLogin = begun.id;
     setCode('');
-    setTyped(defaults(begun.fields));
+    setTyped(seeded(begun.fields, again()));
     setLogin(begun);
     if (begun.needsCode) codeInput?.focus();
     else done(begun);

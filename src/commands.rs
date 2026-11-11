@@ -166,6 +166,7 @@ pub fn list_json(store: &Store, lives: &[Live]) -> Result<Value> {
                 "verified": e.verified,
                 "team": p.id() == "claude" && crate::claude::on_team(&e),
                 "seat": seat_shown(p, &e),
+                "region": e.creds.get("region").and_then(Value::as_str),
             }));
         }
     }
