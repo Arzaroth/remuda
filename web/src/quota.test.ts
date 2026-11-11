@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { HOUR, MIN } from './format';
-import { burn, capacity, knownFrom, logins, pick, project, rateAt, recorded, remaining, shares, usual, type Login, type Point } from './quota';
+import { burn, capacity, hourAfter, knownFrom, logins, pick, project, rateAt, recorded, remaining, shares, usual, type Login, type Point } from './quota';
 import type { Combined, Window } from './types';
 
 const NOW = Date.UTC(2026, 10, 4, 12);
@@ -271,6 +271,11 @@ describe('usual', () => {
     expect(usual([l], MID)).toBeNull();
   });
 
+  it('names a login with no hours on record, since its spend is missing', () => {
+    const blind: Login = { ...week('pro', 40, []), past: [] };
+    expect(usual([week('max', 0, mornings(-7, 0)), blind], MID)!.unseen).toEqual(['pro']);
+  });
+
   it('has no usual week with under a day on record', () => {
     const l = { ...week('max', 0, []), past: [{ opened: at(-1, 0), samples: mornings(-1, 0) }] };
     expect(usual([l], MID)).toBeNull();
@@ -298,6 +303,30 @@ describe('usual, half an hour off UTC', () => {
     expect(rateAt(u.slots)(at(1, 9, 15))).toBeCloseTo(3);
     expect(rateAt(u.slots)(at(1, 8, 45))).toBeCloseTo(0);
     expect(rateAt(u.slots)(at(1, 12, 15))).toBeCloseTo(0);
+  });
+});
+
+describe('the hour after, through daylight saving changes', () => {
+  afterAll(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const walk = (from: number, steps: number) => {
+    const out = [from];
+    for (let i = 0; i < steps; i++) out.push(hourAfter(out.at(-1)!));
+    return out;
+  };
+
+  it('moves on through the hour a clock goes back over', () => {
+    vi.stubEnv('TZ', 'America/New_York');
+    const hours = walk(Date.UTC(2026, 10, 1, 4), 4);
+    expect(hours.slice(1).map((t, i) => t - hours[i])).toEqual([HOUR, HOUR, HOUR, HOUR]);
+  });
+
+  it('keeps to the hour after a clock moves by half of one', () => {
+    vi.stubEnv('TZ', 'Australia/Lord_Howe');
+    const hours = walk(Date.UTC(2026, 9, 3, 12), 24);
+    expect(hours.slice(1).every((t, i) => t > hours[i] && new Date(t).getMinutes() === 0)).toBe(true);
   });
 });
 
