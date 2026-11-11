@@ -21,7 +21,7 @@
 <store>/opencode/<name>.json      {"key": ...}
 <store>/<cli>/<name>.meta.json
 <store>/<cli>/.set-aside-<account>-<ms>.json   tokens no login holds: see "Set aside"
-<store>/.received-<ms>.json       a bundle restore received but could not read, or whose tokens it could not keep
+<store>/.received-<ms>.json       a bundle received over a wormhole that restore stopped on with an error, or whose tokens it could neither store nor set aside
 ```
 
 A credential file has the shape of the CLI's own file, so a reader that parses

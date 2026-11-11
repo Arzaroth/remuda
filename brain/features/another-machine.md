@@ -110,17 +110,31 @@ and `.set-aside-*` files.
   TokenGauge refuses a machine already in another fleet unless forced, and
   writes its own files: remuda never touches them.
 
-restore tries to keep a bundle received over a wormhole in the store as
-`.received-<ms>.json`, 0600, and prints the path, only when it cannot
-read it (another format) or stops on an error, or when tokens it carried could
-be neither stored nor set aside, since it then still holds them; a config.toml
-or proxy settings restore cannot write do not keep it. `remuda restore <that
-file>` reads it unsealed and removes it, unless some of those tokens still
-cannot be kept, or says it could not and goes on to the sign-ins. When the
-store cannot hold that file either (unwritable or full), restore warns that
-what was received is lost and its final error names the sending machine's
-store or set-aside file as where those tokens remain. Any other file given to
-`restore FILE` is left as it is.
+A bundle received over a wormhole is written to the store as
+`.received-<ms>.json`, 0600 (`export::keep_received`), in two cases only,
+since it may then hold the only copy of a moved login's tokens:
+
+- restore stops on an error: `export::parse` refuses it (not something
+  `remuda export` sent, or another format) or `export::restore` fails (the
+  store's lock cannot be taken, output cannot be written). restore prints
+  "what was received is kept in PATH; `remuda restore PATH` tries it again",
+  or, when the store cannot hold the file (unwritable or full), "warning: what
+  was received is lost: WHY", then fails with that error unchanged, which
+  names no login and no other place.
+- Tokens it carried could be neither stored nor set aside. restore prints the
+  same line, goes on to the sign-ins, then fails "the tokens carried for
+  LOGINS could be neither stored nor set aside here; " followed by "what was
+  received is kept in PATH" or, when the store could not hold it, "what was
+  received could not be kept, so they are only in the sending machine's store
+  or the set-aside file export printed there".
+
+Nothing else keeps it: a restore that goes through keeps nothing, a config.toml
+or proxy settings it cannot write included, and a wormhole receive that fails
+has received nothing. A file given to `restore FILE` is never copied: when
+tokens are lost the error ends "FILE still holds them". When FILE is a
+`.received-*` file in the store, restore reads it unsealed and removes it once
+it goes through with no tokens lost, or warns that it could not and goes on to
+the sign-ins; otherwise it stays.
 
 Then each listed login not stored here yet, and whose account is not stored
 here under another name (that is printed), is offered in turn ("Sign

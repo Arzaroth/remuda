@@ -45,12 +45,15 @@
   login of a provider it does not know, which stays on the sending machine,
   in its store or, once moved, set aside there. A login, config.toml or
   the proxy's settings that restore cannot write is reported and the rest
-  restored, the sign-ins included. restore tries to keep a bundle received
-  only when it cannot read it, or when tokens it carried could be neither
-  stored nor set aside, and then fails naming those logins and where their
-  tokens are, the sending machine's store or set-aside file when the bundle
-  could not be kept either; a config.toml or proxy settings it cannot write do
-  not keep it. restore signs in the way `remuda
+  restored, the sign-ins included. A bundle received over a wormhole is kept
+  in the store, its path printed, in two cases only: when restore stops on an
+  error (a bundle it cannot read, or a restore that fails, its lock on the
+  store not taken for one), it says where it is kept, or that it is lost, and
+  fails with that error; when tokens it carried could be neither stored nor
+  set aside, it fails after the sign-ins naming those logins and where their
+  tokens are, the kept bundle, or the sending machine's store or set-aside file
+  when it could not be kept. Nothing else keeps it, a config.toml or proxy
+  settings it cannot write included. restore signs in the way `remuda
   login` does, with `--paste` and `--no-paste`.
 
 ### Changed
