@@ -56,6 +56,10 @@ describe('value', () => {
     expect(rate([week(0, { open: true })])).toBeNull();
   });
 
+  it('leaves out a week whose spend no login claims had no price', () => {
+    expect(rate([week(0, { usd: 100, used: 50 }), week(1, { usd: 900, used: 50, unattributedUnpriced: true })])).toBeCloseTo(2);
+  });
+
   it("measures each login's weight against the largest plan's dollars per percent", () => {
     const ps = plans([
       week(1, { login: 'max', usd: 200, used: 100 }),
@@ -68,5 +72,21 @@ describe('value', () => {
     expect(of('pro')!.advertised).toBeCloseTo(0.1);
     expect(of('pro')!.measured).toBeCloseTo(0.125);
     expect(of('lone')).toBeUndefined();
+  });
+
+  it('measures only against the largest plan', () => {
+    const ps = plans([week(1, { login: 'pro', usd: 25, used: 100 }), week(1, { login: 'plus', usd: 10, used: 100 })]);
+    expect(weights(ps, { codex: { max: 20, pro: 2, plus: 1 } }).size).toBe(0);
+  });
+
+  it('sets the measurement on the account it measured, not an older one under the same name', () => {
+    const ps = plans([
+      week(0, { login: 'max', account: 'old', usd: 900, used: 100 }),
+      week(2, { login: 'max', account: 'new', usd: 200, used: 100 }),
+      week(2, { login: 'pro', usd: 25, used: 100 }),
+    ]);
+    const got = weights(ps, { codex: { max: 20, pro: 2 } });
+    expect(got.get(ps.find((p) => p.weeks[0].account === 'new')!)).toEqual({ advertised: 1, measured: 1 });
+    expect(got.has(ps.find((p) => p.weeks[0].account === 'old')!)).toBe(false);
   });
 });
