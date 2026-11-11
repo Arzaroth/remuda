@@ -110,13 +110,16 @@ and `.set-aside-*` files.
   TokenGauge refuses a machine already in another fleet unless forced, and
   writes its own files: remuda never touches them.
 
-A bundle received over a wormhole is kept in the store as
-`.received-<ms>.json`, 0600, and the path printed, only when restore cannot
+restore tries to keep a bundle received over a wormhole in the store as
+`.received-<ms>.json`, 0600, and prints the path, only when it cannot
 read it (another format) or stops on an error, or when tokens it carried could
 be neither stored nor set aside, since it then still holds them; a config.toml
 or proxy settings restore cannot write do not keep it. `remuda restore <that
 file>` reads it unsealed and removes it, unless some of those tokens still
-cannot be kept, or says it could not and goes on to the sign-ins. Any other file given to
+cannot be kept, or says it could not and goes on to the sign-ins. When the
+store cannot hold that file either (unwritable or full), restore warns that
+what was received is lost and its final error names the sending machine's
+store or set-aside file as where those tokens remain. Any other file given to
 `restore FILE` is left as it is.
 
 Then each listed login not stored here yet, and whose account is not stored
