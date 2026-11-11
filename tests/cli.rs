@@ -1343,3 +1343,268 @@ fn help_prints_the_skill_and_each_command() {
     assert!(home.ok(&["help"]).contains("Commands:"));
     assert!(home.fails(&["help", "nope"]).contains("topics: skill"));
 }
+
+#[test]
+fn export_seals_the_logins_and_restore_sets_another_machine_up() {
+    let old = Home::new();
+    old.sign_in("a-perso", "r-perso", "u-perso");
+    old.ok(&["import", "perso"]);
+    old.sign_in("a-work", "r-work", "u-work");
+    old.ok(&["import", "work"]);
+    let pass = old.path("pass");
+    std::fs::write(&pass, "a passphrase\n").unwrap();
+    let sealed = old.path("out.age");
+    let (sealed_arg, pass_arg) = (sealed.to_str().unwrap(), pass.to_str().unwrap());
+
+    let said = old.ok(&[
+        "export",
+        sealed_arg,
+        "--passphrase-file",
+        pass_arg,
+        "--move",
+        "perso",
+    ]);
+    assert!(
+        said.contains("It carries 1 login(s) as they are, 1 to sign in again."),
+        "{said}"
+    );
+    assert!(said.contains("removed claude/perso"), "{said}");
+    let kept = said
+        .split_once("its tokens are set aside in ")
+        .unwrap()
+        .1
+        .split_whitespace()
+        .next()
+        .unwrap();
+    assert_eq!(
+        read(Path::new(kept))["claudeAiOauth"]["refreshToken"],
+        "r-perso"
+    );
+    assert!(!old.ok(&["ls"]).contains("perso"));
+    assert!(
+        !std::fs::read(&sealed)
+            .unwrap()
+            .windows(7)
+            .any(|w| w == b"r-perso")
+    );
+    let err = old.fails(&["export", "--move", "work", sealed_arg]);
+    assert!(err.contains("is the login Claude Code uses"), "{err}");
+    let out = old
+        .command(&["export"])
+        .env("PATH", old.path("nowhere"))
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("neither wyrmyon (wyrm) nor magic-wormhole")
+    );
+
+    let new = Home::new();
+    let said = new.ok(&["restore", sealed_arg, "--passphrase-file", pass_arg]);
+    assert!(said.contains("stored claude/perso"), "{said}");
+    assert!(
+        said.contains("remuda login work -p claude --paste    (u-work@example.com)"),
+        "{said}"
+    );
+    let stored = read(&new.path(".local/share/remuda/credentials/claude/perso.json"));
+    assert_eq!(stored["claudeAiOauth"]["refreshToken"], "r-perso");
+    assert!(new.ok(&["ls"]).contains("perso"));
+
+    std::fs::write(&pass, "another\n").unwrap();
+    let err = new.fails(&["restore", sealed_arg, "--passphrase-file", pass_arg]);
+    assert!(err.contains("wrong passphrase"), "{err}");
+}
+
+#[test]
+fn a_received_bundle_restore_cannot_read_is_kept_to_try_again() {
+    use std::os::unix::fs::PermissionsExt;
+    let new = Home::new();
+    let sent = new.path("sent.json");
+    write(
+        &sent,
+        &json!({"remuda_export": 2, "carried": [], "sign_in": []}),
+    );
+    let bin = new.path("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let client = bin.join("wyrm");
+    std::fs::write(
+        &client,
+        format!("#!/bin/sh\ncp {} \"$5\"\n", sent.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&client, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let out = new
+        .command(&["restore"])
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success());
+    let said = String::from_utf8_lossy(&out.stdout);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("format 2"), "{err} {said}");
+    let kept = said
+        .split_once("what was received is kept in ")
+        .unwrap()
+        .1
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    assert!(
+        kept.starts_with(
+            new.path(".local/share/remuda/credentials/.received-")
+                .to_str()
+                .unwrap()
+        )
+    );
+    let mut bundle = read(Path::new(&kept));
+    bundle["remuda_export"] = json!(1);
+    write(Path::new(&kept), &bundle);
+
+    new.ok(&["restore", &kept]);
+    assert!(!Path::new(&kept).exists());
+}
+
+#[test]
+fn a_kept_bundle_that_cannot_be_removed_leaves_the_sign_ins_listed() {
+    use std::os::unix::fs::PermissionsExt;
+    let new = Home::new();
+    let root = new.path(".local/share/remuda/credentials");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join(".lock"), "").unwrap();
+    let kept = root.join(".received-1.json");
+    write(
+        &kept,
+        &json!({"remuda_export": 1, "carried": [], "sign_in": [{"provider": "claude", "name": "work", "account_id": "u-1", "email": "me@example.com"}]}),
+    );
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let enforced = std::fs::write(root.join("probe"), "").is_err();
+
+    let out = enforced.then(|| new.run(&["restore", kept.to_str().unwrap(), "--no-sign-in"]));
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+    if let Some(out) = out {
+        let said = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success(),
+            "{said} {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(said.contains("warning: could not remove"), "{said}");
+        assert!(
+            said.contains("remuda login work -p claude --paste"),
+            "{said}"
+        );
+    }
+}
+
+#[test]
+fn carried_tokens_that_cannot_be_kept_leave_the_bundle_and_the_rest_restored() {
+    use std::os::unix::fs::PermissionsExt;
+    let new = Home::new();
+    let sent = new.path("sent.json");
+    write(
+        &sent,
+        &json!({
+            "remuda_export": 1,
+            "carried": [
+                {
+                    "provider": "claude",
+                    "name": "perso",
+                    "creds": json!({"claudeAiOauth": login("a-perso", "r-perso")}).to_string(),
+                    "meta": {"accountId": "u-perso", "email": "u-perso@example.com", "capturedAt": 1},
+                },
+                {
+                    "provider": "glm",
+                    "name": "k",
+                    "creds": json!({"key": "sk-1"}).to_string(),
+                    "meta": {"accountId": "key-0000000000000000", "email": "key ending sk-1", "capturedAt": 1},
+                },
+            ],
+            "sign_in": [{"provider": "claude", "name": "work", "account_id": "u-work", "email": "u-work@example.com"}],
+        }),
+    );
+    let bin = new.path("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let client = bin.join("wyrm");
+    std::fs::write(
+        &client,
+        format!("#!/bin/sh\ncp {} \"$5\"\n", sent.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&client, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let root = new.path(".local/share/remuda/credentials");
+    let claude = root.join("claude");
+    std::fs::create_dir_all(&claude).unwrap();
+    std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let enforced = std::fs::write(claude.join("probe"), "").is_err();
+
+    let received = || {
+        new.command(&["restore", "--no-sign-in"])
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .output()
+            .unwrap()
+    };
+    let out = enforced.then(received);
+    let Some(out) = out else {
+        std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o700)).unwrap();
+        return;
+    };
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    let kept = said
+        .split_once("what was received is kept in ")
+        .map(|(_, rest)| rest.split(';').next().unwrap().to_owned())
+        .unwrap_or_default();
+    let again = new.run(&["restore", &kept, "--no-sign-in"]);
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let unkept = received();
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(said.contains("could not store claude/perso"), "{said}");
+    assert!(said.contains("stored glm/k"), "{said}");
+    assert!(
+        said.contains("remuda login work -p claude --paste"),
+        "{said}"
+    );
+    assert!(kept.starts_with(root.join(".received-").to_str().unwrap()));
+    assert!(
+        err.contains(&format!(
+            "the tokens carried for claude/perso could be neither stored nor set aside here; what was received is kept in {kept}"
+        )),
+        "{err}"
+    );
+
+    assert!(!again.status.success());
+    let err = String::from_utf8_lossy(&again.stderr);
+    assert!(err.contains(&format!("; {kept} still holds them")), "{err}");
+    assert!(Path::new(&kept).exists());
+
+    assert!(!unkept.status.success());
+    let said = String::from_utf8_lossy(&unkept.stdout);
+    let err = String::from_utf8_lossy(&unkept.stderr);
+    assert!(
+        said.contains("warning: what was received is lost"),
+        "{said}"
+    );
+    assert!(
+        said.contains("remuda login work -p claude --paste"),
+        "{said}"
+    );
+    assert!(
+        err.contains("what was received could not be kept, so they are only in the sending machine's store or the set-aside file export printed there"),
+        "{err}"
+    );
+    assert!(!err.contains("kept in"), "{err}");
+
+    let said = new.ok(&["restore", &kept, "--no-sign-in"]);
+    assert!(said.contains("stored claude/perso"), "{said}");
+    assert_eq!(
+        read(&claude.join("perso.json"))["claudeAiOauth"]["refreshToken"],
+        "r-perso"
+    );
+    assert!(!Path::new(&kept).exists());
+}

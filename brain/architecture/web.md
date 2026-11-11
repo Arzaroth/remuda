@@ -126,7 +126,7 @@ access to anything, and it ends when they stop.
 | `GET /api/events` | A server-sent event stream: `data: changed` when the page should reload the state |
 | `GET /api/log` | `{events}`: the log's latest 500 events, oldest first ([../features/log.md](../features/log.md)) |
 | `GET /api/config` | `{config, version, problems, path}`: the config as JSON, the version to save against, what auto mode cannot act on |
-| `POST /api/config/check` `{config}` | `{problems}` for a config the page has not saved, a malformed one reported `at: "config"` |
+| `POST /api/config/check` `{config}` | `{problems}` for a config the page has not saved, a malformed one reported `at: "config"`; a login not stored is one only when config.toml does not name it already |
 | `POST /api/config` `{config, version}` | Save it ([config.md](config.md)), refused with any problem or when the file changed since `version` |
 | `POST /api/use` `{name, discard?}` | Switch, then nudge TokenGauge |
 | `POST /api/import` `{provider?, name, force?}` | Store the live login |

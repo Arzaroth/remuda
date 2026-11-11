@@ -27,6 +27,7 @@ shared.
 | How do I leave a CLI with no login, so remuda keeps them all? | [features/switching.md](features/switching.md#signing-out) |
 | How does a new account get in? | [features/sign-in.md](features/sign-in.md) |
 | Which browser and window does a sign-in open in? | [features/sign-in.md](features/sign-in.md#where-it-opens) |
+| How do I give a new machine the same logins, and why are some signed in again? | [features/another-machine.md](features/another-machine.md) |
 | Why would a stored login stop working? | [features/refresh.md](features/refresh.md), [decisions.md](decisions.md) |
 | Where are credentials kept, and in what shape? | [architecture/store.md](architecture/store.md) |
 | Where are remuda's settings, and how does the page edit them? | [architecture/config.md](architecture/config.md) |
@@ -57,6 +58,7 @@ shared.
 | Import, list and remove | [features/store-commands.md](features/store-commands.md) |
 | Switching | [features/switching.md](features/switching.md) |
 | Sign-in | [features/sign-in.md](features/sign-in.md) |
+| Setting up another machine | [features/another-machine.md](features/another-machine.md) |
 | Token refresh | [features/refresh.md](features/refresh.md) |
 | Names and labels | [features/names-and-labels.md](features/names-and-labels.md) |
 | Auto mode | [features/auto-mode.md](features/auto-mode.md) |

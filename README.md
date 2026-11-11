@@ -104,6 +104,8 @@ take `-p <cli>`: `claude` (the default), `codex`, `cursor`, `glm`, `grok`,
 | `remuda import <name> [-p <cli>]` | Store the login the CLI is signed into right now |
 | `remuda login <name> [-p <cli>] [--no-browser] [--browser <id>] [--window private\|profile\|normal] [--paste\|--no-paste]` | Sign another account in through the browser and store it, without touching the CLI. Prints the link first; Enter opens it where `[login]` in config.toml says, unless `--no-browser` is given or there is no display (`DISPLAY` or `WAYLAND_DISPLAY`), when you open it yourself. Claude and Codex call back to this machine; `--paste` lets a browser elsewhere finish, with a code to paste (Claude) or a device code (Codex), the default over SSH or, on Linux, with no display, and `--no-paste` asks for the callback anyway |
 | `remuda use <name>` | Make a stored credential the one its CLI uses |
+| `remuda export [file] [--move <name>] [--without-s3-keys]` | Send this machine's logins and settings to another one, through wyrmyon or magic-wormhole, or sealed into a file under a passphrase |
+| `remuda restore [file] [--force] [--no-sign-in] [--paste\|--no-paste]` | Set this machine up from what `export` sent, then sign in again the logins that cannot be copied |
 | `remuda signout <cli>` | Sign the CLI out, keeping its login in the store, so remuda can refresh and sign in again every login |
 | `remuda run <name> [-- args]` | Start Claude Code or Codex on a stored login for this session only, without switching; `remuda claude <name>` is the same |
 | `remuda pin [name] [--remove <cli>] [--allow]` | Pin a login to this directory in `.remuda.toml`, show the pins in force, or trust a `.remuda.toml` as it is |
@@ -141,6 +143,50 @@ asks for the callback anyway, as when port forwarding brings it back. Grok and
 Kimi show a code to approve and Cursor a confirmation, and remuda waits for the
 provider to say it is done, from any machine's browser. GLM and opencode Go
 open their key page and ask for the key.
+
+## Another machine
+
+`remuda export` on this machine and `remuda restore` on the new one copy the
+logins, `config.toml`, the proxy's settings (without its client keys) and
+TokenGauge's fleet, S3 keys included unless `--without-s3-keys`, so the new
+machine joins the fleet on its own. That needs TokenGauge on both machines,
+with `--sync-export` on this one and `--sync-join` on the new one; when
+TokenGauge or its fleet key is missing here, export says so and goes on
+without the fleet. With wyrmyon or magic-wormhole installed,
+export prints a code and restore asks for it; otherwise `remuda export
+<file>` seals everything into a file in age's format, under a passphrase, and
+`remuda restore <file>` opens it.
+
+API keys and Cursor logins go across as they are. Claude Code, Codex, Grok and
+Kimi logins do not: their refresh tokens are single use, so two machines
+sharing one would sign each other out. restore signs each in again instead,
+the way `remuda login` does (from a browser on any machine over SSH or, on
+Linux, with no display, or with `--paste`), and stores it only if it is the
+same account.
+`--move <name>` carries a login's tokens anyway and drops it here, for a
+machine you are retiring; its tokens are set aside here first, and it stays
+when a refresh changed them while the bundle was on its way. restore keeps
+the logins already here; `--force` replaces them, but never the one a CLI or
+a `remuda run` session uses, nor one it cannot read, and never the proxy's
+client keys (proxy settings it cannot read stay as they are). Tokens restore
+could not store, and those a login here held when `--force` replaced it, go
+to a set-aside file whose path it prints (an API key it keeps out is not set
+aside, since the sending machine still has it; one it replaces is). A
+login, config.toml or the proxy's settings it cannot write is reported and the
+rest restored, the sign-ins included. A bundle received over a wormhole is
+kept in the store for another try, as a `.received-<ms>.json` file whose path
+restore prints, in two cases only. When restore stops on an error (what was
+received is not a bundle it reads, or restoring fails, its lock on the store
+not taken for one), it says where the bundle is kept, or that it is lost when
+the store cannot hold it, then fails with that error. When tokens it carried
+could be neither stored nor set aside, it fails after the sign-ins naming those
+logins and where their tokens are: the kept bundle, or, if the store could not
+hold it, the sending machine's store or set-aside file. Anything else keeps no
+bundle, a config.toml or proxy settings it cannot write included; a file given
+to `restore` stays as it is, and is where such tokens are. A login
+of a provider the new machine's remuda does not know is skipped without being
+set aside there, so keep the set-aside file `--move` printed here until that
+login works over there.
 
 ## A login per session, and per repository
 

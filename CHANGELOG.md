@@ -26,6 +26,36 @@
   store, which stays signed in for the next time.
 - A banked Claude reset says what it resets: `1 Fable reset` with a Reset
   Fable limit button, from TokenGauge's `bankedResets.kinds`.
+- `remuda export` and `remuda restore` set another machine up in one step:
+  the logins, config.toml, the proxy's settings and TokenGauge's fleet with its
+  S3 keys (`--without-s3-keys` leaves them out), through wyrmyon or
+  magic-wormhole, or a file sealed in age's format under a passphrase. API keys
+  and Cursor logins go across as they are; Claude Code, Codex, Grok and Kimi
+  logins are signed in again over there, since their refresh tokens are single
+  use, and `--move` carries one's tokens for a machine being
+  retired. Joining the fleet needs TokenGauge with `--sync-export` on the
+  sending machine and `--sync-join` on the new one; when the sending one
+  cannot export the fleet, export goes on without it, and when the new one
+  cannot join it, restore says so and restores the rest. No
+  refresh token is lost on the way: a moved login is set aside before it is
+  removed, and stays when a refresh changed it meanwhile; `restore --force`
+  keeps the login a CLI or a `remuda run` session uses, one stored here it
+  cannot read, the proxy's client keys, and proxy settings it cannot read, and sets aside the tokens and API keys it replaces and the tokens,
+  not the API keys, it cannot store, except a
+  login of a provider it does not know, which stays on the sending machine,
+  in its store or, once moved, set aside there. A login, config.toml or
+  the proxy's settings that restore cannot write is reported and the rest
+  restored, the sign-ins included. A bundle received over a wormhole is kept
+  in the store, its path printed, in two cases only: when restore stops on an
+  error (a bundle it cannot read, or a restore that fails, its lock on the
+  store not taken for one), it says where it is kept, or that it is lost, and
+  fails with that error; when tokens it carried could be neither stored nor
+  set aside, it fails after the sign-ins naming those logins and where their
+  tokens are, the kept bundle, or the sending machine's store or set-aside file
+  when it could not be kept. Nothing else keeps it, a config.toml or proxy
+  settings it cannot write included. restore signs in the way `remuda
+  login` does, with `--paste` and `--no-paste`; the page saves a config.toml
+  that names a login still to sign in, but not one an edit adds.
 - The Quota card has a row per login: what it has left, its own burn, its
   share of the pool's burn when weighted, and when it runs dry at that pace.
   The card carries the Weighted/Absolute switch the Overview tile has.

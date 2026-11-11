@@ -170,25 +170,67 @@ impl Store {
             .collect())
     }
 
-    /// A crash between the two renames must leave a sidecar whose digest
-    /// does not match, never one that passes for the other half. So the
-    /// credential goes first, except over a sidecar with no digest (written by
-    /// 0.1.0), which would pass for anything: that one is replaced first.
     pub fn save(&self, entry: &Entry) -> Result<()> {
         validate_name(&entry.name)?;
         let mut creds = serde_json::to_string_pretty(&entry.creds)?;
         creds.push('\n');
         let mut meta = entry.meta.clone();
         meta.creds_digest = Some(digest(&creds));
-        let meta_path = self.meta_path(&entry.provider, &entry.name);
-        let creds_path = self.creds_path(&entry.provider, &entry.name);
-        let legacy = read_json(&meta_path)?.is_some_and(|m| m.get("credsDigest").is_none());
+        self.write_pair(
+            &entry.provider,
+            &entry.name,
+            &creds,
+            &serde_json::to_value(&meta)?,
+        )
+    }
+
+    /// A crash between the two renames must leave a sidecar whose digest
+    /// does not match, never one that passes for the other half. So the
+    /// credential goes first, except over a sidecar with no digest (written by
+    /// 0.1.0), which would pass for anything: that one is replaced first.
+    fn write_pair(&self, provider: &str, name: &str, creds: &str, meta: &Value) -> Result<()> {
+        let meta_path = self.meta_path(provider, name);
+        let creds_path = self.creds_path(provider, name);
+        let legacy = read_json(&meta_path)
+            .ok()
+            .flatten()
+            .is_some_and(|m| m.get("credsDigest").is_none());
         if legacy {
-            write_json(&meta_path, &serde_json::to_value(&meta)?)?;
-            return write_private(&creds_path, &creds);
+            write_json(&meta_path, meta)?;
+            return write_private(&creds_path, creds);
         }
-        write_private(&creds_path, &creds)?;
-        write_json(&meta_path, &serde_json::to_value(&meta)?)
+        write_private(&creds_path, creds)?;
+        write_json(&meta_path, meta)
+    }
+
+    /// An entry's credential file as it is, and its sidecar.
+    pub fn files(&self, provider: &str, name: &str) -> Result<Option<(String, Value)>> {
+        validate_name(name)?;
+        let path = self.creds_path(provider, name);
+        let creds = match fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e).with_context(|| format!("failed to read {}", path.display())),
+        };
+        let meta = read_json(&self.meta_path(provider, name))?
+            .with_context(|| format!("{provider}/{name} has no {name}.meta.json"))?;
+        Ok(Some((creds, meta)))
+    }
+
+    /// Stores an entry from the files [`Store::files`] read elsewhere, the
+    /// credential byte for byte, so its digest still holds.
+    pub fn put_files(&self, provider: &str, name: &str, creds: &str, meta: &Value) -> Result<()> {
+        validate_name(name)?;
+        if provider.is_empty() || !provider.chars().all(|c| c.is_ascii_lowercase()) {
+            bail!("{provider:?} is not a provider");
+        }
+        let mut meta = meta.clone();
+        if let Some(fields) = meta.as_object_mut() {
+            fields
+                .entry("credsDigest")
+                .or_insert_with(|| Value::String(digest(creds)));
+        }
+        self.write_pair(provider, name, creds, &meta)
     }
 
     /// Keeps tokens nothing else would hold, in a file `list` does not show.
@@ -394,6 +436,79 @@ mod tests {
 
         let after = store.get("claude", "work").unwrap().unwrap();
         assert_eq!(after.creds["claudeAiOauth"]["accessToken"], "a");
+        assert_eq!(after.meta.account_id, "u-1");
+    }
+
+    fn legacy_work(tmp: &Path, store: &Store) -> Value {
+        store.save(&entry("work", "u-1")).unwrap();
+        let meta_path = tmp.join("claude/work.meta.json");
+        let mut legacy = read_json(&meta_path).unwrap().unwrap();
+        legacy.as_object_mut().unwrap().remove("credsDigest");
+        write_json(&meta_path, &legacy).unwrap();
+        legacy
+    }
+
+    fn blocked(tmp: &Path, file: &str) {
+        let blocker = tmp.join(format!("claude/.{file}.remuda-{}", std::process::id()));
+        std::fs::write(&blocker, "").unwrap();
+    }
+
+    #[test]
+    fn files_put_over_a_sidecar_without_a_digest_replace_it_first() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(tmp.path());
+        let legacy = legacy_work(tmp.path(), &store);
+        blocked(tmp.path(), "work.meta.json");
+
+        let mut meta = legacy.clone();
+        meta["accountId"] = json!("u-2");
+        let creds = "{\"claudeAiOauth\": {\"accessToken\": \"b\"}}\n";
+        assert!(store.put_files("claude", "work", creds, &meta).is_err());
+
+        let after = store.get("claude", "work").unwrap().unwrap();
+        assert_eq!(after.creds["claudeAiOauth"]["accessToken"], "a");
+        assert_eq!(after.meta.account_id, "u-1");
+    }
+
+    #[test]
+    fn files_put_with_a_sidecar_without_a_digest_are_given_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(tmp.path());
+        let legacy = legacy_work(tmp.path(), &store);
+        blocked(tmp.path(), "work.json");
+
+        let mut meta = legacy.clone();
+        meta["accountId"] = json!("u-2");
+        let creds = "{\"claudeAiOauth\": {\"accessToken\": \"b\"}}\n";
+        assert!(store.put_files("claude", "work", creds, &meta).is_err());
+
+        let after = store.get("claude", "work").unwrap().unwrap();
+        assert_eq!(after.meta.account_id, "u-2");
+        assert!(!after.verified);
+
+        store.put_files("claude", "work", creds, &meta).unwrap();
+        let after = store.get("claude", "work").unwrap().unwrap();
+        assert!(after.verified);
+        assert_eq!(
+            after.meta.creds_digest.as_deref(),
+            Some(digest(creds).as_str())
+        );
+    }
+
+    #[test]
+    fn files_put_over_a_sidecar_that_is_not_json_replace_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(tmp.path());
+        std::fs::create_dir_all(tmp.path().join("claude")).unwrap();
+        std::fs::write(tmp.path().join("claude/work.meta.json"), "not json").unwrap();
+        let mut meta = serde_json::to_value(&entry("work", "u-1").meta).unwrap();
+        meta.as_object_mut().unwrap().remove("credsDigest");
+        let creds = "{\"claudeAiOauth\": {\"accessToken\": \"b\"}}\n";
+
+        store.put_files("claude", "work", creds, &meta).unwrap();
+
+        let after = store.get("claude", "work").unwrap().unwrap();
+        assert!(after.verified);
         assert_eq!(after.meta.account_id, "u-1");
     }
 

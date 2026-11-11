@@ -41,8 +41,13 @@ start of the next sync; until then nothing uses it.
 where they found each CLI's login, so the scheduled refresh can tell it is
 looking elsewhere.
 
-**Set aside**: tokens a refresh rotated for an account other than the
-credential's, kept in `.set-aside-<account>-<ms>.json` instead of dropped.
+**Set aside**: tokens no stored login holds, kept in
+`.set-aside-<account>-<ms>.json` instead of dropped: those a refresh rotated
+for an account other than the credential's, a moved login's once `export`
+removes it, those `restore` carried for a provider it knows and that renews
+them but could not store, those a stored login held when `restore --force`
+replaced it (an API key too), and a
+restore sign-in that turned out to be another account.
 
 **Sidecar**: `<name>.meta.json` beside a credential: account id, email, capture
 time, label, and for Claude the `oauthAccount` block.
@@ -53,6 +58,11 @@ seat. Tokens rotate; this does not.
 **Pending login**: a sign-in the browser has been sent to and that has not
 finished (`provider::PendingLogin`). Claude's finishes with a callback or a
 pasted code, Codex's with a callback or a device code.
+
+**Portable login**: one whose tokens work from two machines at once
+(`Provider::portable`): an API key, or Cursor's, whose refresh has not been
+seen to rotate the refresh token. `remuda export` copies those and lists the rest to sign in
+again on the new machine.
 
 **Store**: the directory of credentials, `$REMUDA_STORE` or
 `$XDG_DATA_HOME/remuda/credentials`.

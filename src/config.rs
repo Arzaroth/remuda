@@ -484,6 +484,22 @@ impl Config {
         problems
     }
 
+    pub fn names(&self, provider: &str) -> Vec<String> {
+        let mut names = self.warm.get(provider).cloned().unwrap_or_default();
+        if let Some(auto) = self.auto.get(provider) {
+            names.extend(auto.logins.iter().cloned());
+            names.extend(
+                auto.rules
+                    .iter()
+                    .flat_map(|r| r.order.iter().flatten().cloned()),
+            );
+            names.extend(auto.ceilings.keys().cloned());
+            names.extend(auto.long_ceilings.keys().cloned());
+            names.extend(auto.fallback.iter().cloned());
+        }
+        names
+    }
+
     fn document(&self) -> DocumentMut {
         let mut doc = DocumentMut::new();
         if !self.schedules.is_empty() {
@@ -616,7 +632,7 @@ fn version(text: &str) -> String {
     crate::store::digest(text)
 }
 
-fn read(path: &Path) -> Result<Option<String>> {
+pub fn read(path: &Path) -> Result<Option<String>> {
     match std::fs::read_to_string(path) {
         Ok(text) => Ok(Some(text)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -624,7 +640,7 @@ fn read(path: &Path) -> Result<Option<String>> {
     }
 }
 
-fn parse(path: &Path, text: &str) -> Result<Config> {
+pub fn parse(path: &Path, text: &str) -> Result<Config> {
     toml_edit::de::from_str(text).with_context(|| format!("{} is not valid", path.display()))
 }
 
@@ -1042,6 +1058,24 @@ reserve = { work = "workday" }
         assert_eq!(auto.margin, 0.25);
         assert_eq!(auto.rules[1].reserve["work"], "workday");
         assert_eq!(c.check(&stored), []);
+    }
+
+    #[test]
+    fn names_are_every_login_a_provider_names() {
+        let c = parse(
+            Path::new("config.toml"),
+            "[schedules.day]\n\
+             [auto.claude]\nlogins = [\"a\"]\nfallback = \"b\"\n\
+             ceilings = { c = 50 }\nlong_ceilings = { d = 60 }\n\
+             [[auto.claude.rule]]\nwhen = \"day\"\norder = [[\"e\"], [\"f\"]]\n\
+             [warm]\nclaude = [\"g\"]\ncodex = [\"h\"]\n",
+        )
+        .unwrap();
+        let mut names = c.names("claude");
+        names.sort();
+        assert_eq!(names, ["a", "b", "c", "d", "e", "f", "g"]);
+        assert_eq!(c.names("codex"), ["h"]);
+        assert!(c.names("grok").is_empty());
     }
 
     #[test]

@@ -401,10 +401,13 @@ pub struct Prompt<'a> {
     /// Where `open` opens it; none when opening is not offered.
     pub opens_in: Option<String>,
     /// The lines typed, in order, until the input ends.
-    pub lines: std::sync::mpsc::Receiver<String>,
+    pub lines: &'a std::sync::mpsc::Receiver<String>,
     /// A sign-in a browser on another machine can finish, where the CLI
     /// offers one.
     pub paste: bool,
+    /// The account id and email the login must turn out to be, for a login
+    /// another machine named.
+    pub expect: Option<(&'a str, &'a str)>,
 }
 
 /// Prints the link first, so it can be opened anywhere; Enter opens it here.
@@ -483,6 +486,17 @@ pub fn login(
                 .map_err(|_| anyhow::anyhow!("the sign-in stopped unexpectedly"))
         })?
     }?;
+    if let Some((account, email)) = prompt.expect
+        && done.identity.account_id != account
+    {
+        let kept = store.set_aside(p.id(), &done.identity.account_id, &done.creds)?;
+        bail!(
+            "that is {}, not {email}, the account {}/{name} was; nothing was stored, and its tokens are set aside in {}",
+            done.identity.email,
+            p.id(),
+            kept.display()
+        );
+    }
     let entry = save_login(store, p, name, force, done)?;
     writeln!(out, "{}", stored_message(p, &entry))?;
     Ok(())
@@ -850,7 +864,7 @@ pub fn log(
     Ok(())
 }
 
-fn refuse_in_use(store: &Store, p: &dyn Provider, name: &str) -> Result<()> {
+pub fn refuse_in_use(store: &Store, p: &dyn Provider, name: &str) -> Result<()> {
     if session::in_use(store, p.id(), name) {
         bail!(
             "{}/{name} is in a `remuda run` session; end it first",
@@ -1526,6 +1540,41 @@ mod tests {
     }
 
     #[test]
+    fn a_login_another_machine_named_must_be_the_same_account() {
+        let (server, _) = login_server("u-new");
+        let e = env(&server.url());
+        let (lines, open) = pasting();
+        let prompt = |expect| Prompt {
+            open: &open,
+            opens_in: Some("a test browser".into()),
+            lines: &lines,
+            paste: true,
+            expect,
+        };
+
+        let error = login(
+            &e.store,
+            &e.claude,
+            "work",
+            false,
+            prompt(Some(("u-old", "old@example.com"))),
+            &mut Vec::new(),
+        )
+        .unwrap_err();
+        let error = error.to_string();
+        let (said, kept) = error
+            .split_once(", and its tokens are set aside in ")
+            .unwrap();
+        assert_eq!(
+            said,
+            "that is u-new@example.com, not old@example.com, the account claude/work was; nothing was stored"
+        );
+        assert!(e.store.get("claude", "work").unwrap().is_none());
+        let kept: Value = serde_json::from_str(&std::fs::read_to_string(kept).unwrap()).unwrap();
+        assert!(kept[OAUTH_KEY]["refreshToken"].is_string(), "{kept}");
+    }
+
+    #[test]
     fn login_exchanges_the_pasted_code_and_stores_the_account() {
         let (server, verifiers) = login_server("u-new");
         let e = env(&server.url());
@@ -1547,8 +1596,9 @@ mod tests {
             Prompt {
                 open: &open,
                 opens_in: Some("a test browser".into()),
-                lines,
+                lines: &lines,
                 paste: true,
+                expect: None,
             },
             &mut out,
         )
@@ -1630,8 +1680,9 @@ mod tests {
             Prompt {
                 open: &|_, _| false,
                 opens_in: None,
-                lines,
+                lines: &lines,
                 paste: true,
+                expect: None,
             },
             &mut out,
         )
@@ -1659,8 +1710,9 @@ mod tests {
             Prompt {
                 open: &|_, _| false,
                 opens_in: None,
-                lines,
+                lines: &lines,
                 paste: true,
+                expect: None,
             },
             &mut Vec::new(),
         )
@@ -1684,8 +1736,9 @@ mod tests {
             Prompt {
                 open: &open,
                 opens_in: Some("a test browser".into()),
-                lines,
+                lines: &lines,
                 paste: true,
+                expect: None,
             },
             &mut Vec::new(),
         )
@@ -1703,8 +1756,9 @@ mod tests {
             Prompt {
                 open: &|_, _| unreachable!(),
                 opens_in: None,
-                lines: std::sync::mpsc::channel().1,
+                lines: &std::sync::mpsc::channel().1,
                 paste: true,
+                expect: None,
             },
             &mut Vec::new(),
         )
@@ -1735,8 +1789,9 @@ mod tests {
                 Prompt {
                     open: &open,
                     opens_in: Some("a test browser".into()),
-                    lines,
+                    lines: &lines,
                     paste: true,
+                    expect: None,
                 },
                 &mut Vec::new(),
             )
@@ -1995,8 +2050,9 @@ mod tests {
             Prompt {
                 open: &|_, _| unreachable!(),
                 opens_in: None,
-                lines,
+                lines: &lines,
                 paste: true,
+                expect: None,
             },
             &mut out,
         )
