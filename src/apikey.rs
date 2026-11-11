@@ -1927,4 +1927,61 @@ mod tests {
         assert_eq!(gh_token_from(&failing, wait), None);
         assert_eq!(gh_token_from(&tmp.path().join("missing"), wait), None);
     }
+
+    #[test]
+    fn copilot_puts_its_own_cli_token_ahead_of_gh_token() {
+        let p = ApiKey::copilot()
+            .with(
+                None,
+                vars(&[
+                    ("GH_TOKEN", "ghp_gh"),
+                    ("GITHUB_TOKEN", "ghp_github"),
+                    ("COPILOT_GITHUB_TOKEN", "ghp_copilot"),
+                ]),
+            )
+            .falling_back_to(|| Some("gho_cli".into()));
+        assert_eq!(p.live().unwrap(), Some(json!({"key": "ghp_copilot"})));
+        let p = ApiKey::copilot()
+            .with(
+                None,
+                vars(&[
+                    ("COPILOT_GITHUB_TOKEN", "ghp_copilot"),
+                    ("COPILOT_QUOTA_TOKEN", "ghp_quota"),
+                ]),
+            )
+            .falling_back_to(|| None);
+        assert_eq!(p.live().unwrap(), Some(json!({"key": "ghp_quota"})));
+    }
+
+    #[test]
+    fn signing_an_openrouter_key_in_again_keeps_its_management_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = ApiKey::openrouter().with(None, |_| None);
+        let again = |key: &str, management: &str| {
+            let done = p
+                .begin_login(false)
+                .unwrap()
+                .finish_with(
+                    Some(key),
+                    json!({"management": management}).as_object().unwrap(),
+                )
+                .unwrap();
+            crate::commands::save_login(&store, &p, "o", true, done).unwrap();
+            store.get("openrouter", "o").unwrap().unwrap().creds
+        };
+        assert_eq!(
+            again("or-1", "mg-1"),
+            json!({"key": "or-1", "management": "mg-1"})
+        );
+        assert_eq!(
+            again("or-1", ""),
+            json!({"key": "or-1", "management": "mg-1"})
+        );
+        assert_eq!(
+            again("or-1", "mg-2"),
+            json!({"key": "or-1", "management": "mg-2"})
+        );
+        assert_eq!(again("or-2", ""), json!({"key": "or-2"}));
+    }
 }
