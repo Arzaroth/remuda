@@ -335,7 +335,11 @@ function Pool(props: { id: string; name: string; prefs: Prefs; offset: number; s
           <Fig
             label="Usual week"
             value={week() ? pct(week()!.week) : '-'}
-            note={week() ? `needed, of ${pct(cap())}, from ${days(week()!.days)}` : 'under a day on record'}
+            note={
+              week()
+                ? `needed, of ${pct(cap())}, from ${days(week()!.days)}${week()!.unseen.length ? `, without ${week()!.unseen.join(', ')}` : ''}`
+                : 'under a day on record'
+            }
           />
           <Fig
             label="Pool empty"
@@ -349,8 +353,8 @@ function Pool(props: { id: string; name: string; prefs: Prefs; offset: number; s
           />
           <Fig
             label="Next reset"
-            value={next() ? `+${pct(next()!.gain)}` : 'None'}
-            note={next() ? `${next()!.name}, ${when(next()!.at)}` : 'ahead'}
+            value={next() ? (pace() === null ? next()!.name : `+${pct(next()!.gain)}`) : 'None'}
+            note={next() ? (pace() === null ? when(next()!.at) : `${next()!.name}, ${when(next()!.at)}`) : 'ahead'}
           />
           <Fig
             label="Burn"
@@ -366,7 +370,15 @@ function Pool(props: { id: string; name: string; prefs: Prefs; offset: number; s
                 <th>Left</th>
                 <th>{isUsual() ? 'Usual burn' : 'Burn'}</th>
                 <Show when={c()!.weighted}>
-                  <th title="In units of the largest plan, so the logins add up to the Burn figure">Of the pool</th>
+                  <th
+                    title={
+                      isUsual()
+                        ? "In units of the largest plan: each login's own usual hours, which need not add up to the pool's"
+                        : 'In units of the largest plan, so the logins add up to the Burn figure'
+                    }
+                  >
+                    Of the pool
+                  </th>
                 </Show>
                 <th>{isUsual() ? 'Empty in a usual week' : 'Empty at its pace'}</th>
                 <th>Resets</th>
@@ -422,7 +434,7 @@ function Pool(props: { id: string; name: string; prefs: Prefs; offset: number; s
             ahead={pace() === null ? [] : ahead().points}
             alt={alt()}
             step
-            refills={[...was().refills, ...ahead().refills]}
+            refills={[...was().refills, ...(pace() === null ? [] : ahead().refills)]}
             color={brand(props.id)}
             format={pct}
             label={`${props.name}'s pooled remaining quota, recorded and projected`}

@@ -173,8 +173,15 @@ export function project(ls: Login[], now: number, pace: Rate, until: number): Pr
 const WEEK_HOURS = 168;
 const FULL = 99.5;
 
-const hourOf = (t: number) => new Date(t).setMinutes(0, 0, 0);
-export const hourAfter = (t: number) => hourOf(t) + HOUR;
+const hourOf = (t: number) => {
+  const wall = t - new Date(t).getTimezoneOffset() * MIN;
+  return t - (((wall % HOUR) + HOUR) % HOUR);
+};
+export const hourAfter = (t: number) => {
+  let next = hourOf(t + HOUR);
+  while (hourOf(next) !== next) next = hourOf(next + HOUR);
+  return next;
+};
 const hourFrom = (t: number) => (hourOf(t) === t ? t : hourAfter(t));
 
 const slotOf = (t: number) => {
@@ -194,15 +201,15 @@ function hourly(l: Login): Hourly {
   for (const { opened, samples } of [...l.past, ...current]) {
     if (!samples.length) continue;
     const pts: Point[] = opened !== null && samples[0][0] > opened ? [[opened, 0], ...samples] : samples;
-    for (let k = hourFrom(pts[0][0]); k + HOUR <= pts.at(-1)![0]; k += HOUR) out.seen.add(k);
+    for (let k = hourFrom(pts[0][0]); hourAfter(k) <= pts.at(-1)![0]; k = hourAfter(k)) out.seen.add(k);
     for (let i = 1; i < pts.length; i++) {
       const [a, was] = pts[i - 1];
       const [b, now] = pts[i];
       if (b <= a) continue;
-      if (was >= FULL) for (let k = hourFrom(a); k + HOUR <= b; k += HOUR) out.full.add(k);
+      if (was >= FULL) for (let k = hourFrom(a); hourAfter(k) <= b; k = hourAfter(k)) out.full.add(k);
       if (now <= was) continue;
-      for (let k = hourOf(a); k < b; k += HOUR) {
-        const part = (Math.min(b, k + HOUR) - Math.max(a, k)) / (b - a);
+      for (let k = hourOf(a); k < b; k = hourAfter(k)) {
+        const part = (Math.min(b, hourAfter(k)) - Math.max(a, k)) / (b - a);
         out.rise.set(k, (out.rise.get(k) ?? 0) + (now - was) * part);
       }
     }
@@ -231,7 +238,7 @@ function average(hours: Iterable<number>, before: number, value: (k: number) => 
   return { slots: sum.map((v, i) => (n[i] ? v / n[i] : ofHour(i % 24))), hours: count };
 }
 
-export type Usual = { slots: number[]; days: number; week: number; own: (number[] | null)[] };
+export type Usual = { slots: number[]; days: number; week: number; own: (number[] | null)[]; unseen: string[] };
 
 export function usual(ls: Login[], now: number): Usual | null {
   if (!ls.length) return null;
@@ -249,6 +256,7 @@ export function usual(ls: Login[], now: number): Usual | null {
     days: pool.hours / 24,
     week: pool.slots.reduce((a, v) => a + v, 0),
     own: hs.map((h) => average(h.seen, before, (k) => (h.full.has(k) ? null : (h.rise.get(k) ?? 0)))?.slots ?? null),
+    unseen: ls.filter((_, i) => !hs[i].seen.size).map((l) => l.name),
   };
 }
 
