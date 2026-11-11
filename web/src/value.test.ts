@@ -63,9 +63,10 @@ describe('value', () => {
       week(1, { login: 'lone', provider: 'claude', usd: 25, used: 100 }),
     ]);
     const got = weights(ps, { codex: { max: 20, pro: 2 }, claude: { lone: 5 } });
-    expect(got.get('codex/max')).toEqual({ advertised: 1, measured: 1 });
-    expect(got.get('codex/pro')!.advertised).toBeCloseTo(0.1);
-    expect(got.get('codex/pro')!.measured).toBeCloseTo(0.125);
-    expect(got.has('claude/lone')).toBe(false);
+    const of = (login: string) => got.get(ps.find((p) => p.login === login)!);
+    expect(of('max')).toEqual({ advertised: 1, measured: 1 });
+    expect(of('pro')!.advertised).toBeCloseTo(0.1);
+    expect(of('pro')!.measured).toBeCloseTo(0.125);
+    expect(of('lone')).toBeUndefined();
   });
 });

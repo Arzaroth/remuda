@@ -65,7 +65,7 @@ export function Value(props: { answer: ValueAnswer; provider: string | null; log
                   <Show when={ratio() != null}>
                     <small class="u-sub">Last week: {changeText(ratio()!)}</small>
                   </Show>
-                  <Show when={measured().get(`${p.provider}/${p.login}`)}>
+                  <Show when={measured().get(p)}>
                     {(w) => (
                       <small
                         class="u-sub"
