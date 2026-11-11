@@ -612,6 +612,47 @@ mod tests {
     }
 
     #[test]
+    fn each_window_carries_the_closed_instances_kept_with_their_samples_oldest_first() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("tokengauge-usage.json");
+        let week =
+            json!({"usedPercent": 30, "resetsAt": "2026-11-12T00:00:00Z", "windowMinutes": 10080});
+        std::fs::write(
+            &file,
+            json!({"payloads": [{"provider": "claude", "credential": "work",
+                                 "usage": {"secondary": week}}]})
+            .to_string(),
+        )
+        .unwrap();
+        let closed = |credential: &str, opened: &str, samples: Value| {
+            json!({"provider": "claude", "credential": credential, "window": "secondary",
+                   "windowMinutes": 10080, "openedAt": opened, "resetsAt": "2026-11-05T00:00:00Z",
+                   "used": 90, "seenAt": "2026-11-04T00:00:00Z", "samples": samples})
+        };
+        std::fs::write(
+            tmp.path().join("tokengauge-window-history.json"),
+            json!({"trails": [], "closed": [
+                closed("work", "2026-10-29T00:00:00Z", json!([[3, 40], [4, 90]])),
+                closed("work", "2026-10-22T00:00:00Z", json!([[1, 10], [2, 80]])),
+                closed("work", "2026-10-15T00:00:00Z", json!([])),
+                closed("home", "2026-10-29T00:00:00Z", json!([[5, 5]])),
+            ]})
+            .to_string(),
+        )
+        .unwrap();
+
+        let usage = read_at(&file, "2026-11-06T00:00:00Z".parse().unwrap()).unwrap();
+        let ms = |at: &str| at.parse::<Timestamp>().unwrap().as_millisecond();
+        assert_eq!(
+            usage["providers"]["claude"]["accounts"]["work"]["windows"][0]["past"],
+            json!([
+                {"openedAt": ms("2026-10-22T00:00:00Z"), "samples": [[1, 10], [2, 80]]},
+                {"openedAt": ms("2026-10-29T00:00:00Z"), "samples": [[3, 40], [4, 90]]},
+            ])
+        );
+    }
+
+    #[test]
     fn each_window_carries_its_trail_since_it_opened() {
         let tmp = tempfile::tempdir().unwrap();
         let file = tmp.path().join("tokengauge-usage.json");

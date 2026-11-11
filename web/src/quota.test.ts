@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { HOUR, MIN } from './format';
-import { burn, capacity, knownFrom, logins, pick, project, recorded, remaining, shares, type Login } from './quota';
+import { burn, capacity, knownFrom, logins, pick, project, rateAt, recorded, remaining, shares, usual, type Login, type Point } from './quota';
 import type { Combined, Window } from './types';
 
 const NOW = Date.UTC(2026, 10, 4, 12);
@@ -63,6 +63,12 @@ describe('logins', () => {
       [NOW, 40],
     ]);
     expect(burn(ls, NOW, 1)).toBeCloseTo(0);
+  });
+
+  it('carries the closed instances TokenGauge kept the samples of', () => {
+    const past = [{ openedAt: NOW - 2 * WEEK, samples: [[NOW - WEEK - HOUR, 80]] as [number, number][] }];
+    const ls = logins(combined('Weekly', [['max', { ...win(40, null), past }, 1]]), NOW);
+    expect(ls[0].past).toEqual([{ opened: NOW - 2 * WEEK, samples: [[NOW - WEEK - HOUR, 80]] }]);
   });
 
   it('never backdates a figure that has no trail, such as a window reset since the snapshot', () => {
@@ -193,6 +199,96 @@ describe('project', () => {
     const p = project([login('a', 40, HOUR)], NOW, 0, NOW + WEEK + 2 * HOUR);
     expect(p.refills.map((r) => r.at)).toEqual([NOW + HOUR]);
     expect(p.points.at(-1)).toEqual([NOW + WEEK + 2 * HOUR, 100]);
+  });
+});
+
+const at = (day: number, hour: number, minute = 0) => new Date(2026, 10, 11 + day, hour, minute).getTime();
+const MID = at(0, 0);
+
+function mornings(from: number, to: number, start = 0): Point[] {
+  const out: Point[] = [];
+  let used = start;
+  for (let d = from; d < to; d++) {
+    out.push([at(d, 9), used]);
+    used = Math.min(100, used + 9);
+    out.push([at(d, 12), used]);
+  }
+  return out;
+}
+
+const week = (name: string, used: number, past: Point[], weight = 1): Login => ({
+  name,
+  weight,
+  used,
+  resetsAt: at(7, 0),
+  length: WEEK,
+  samples: [[MID, used]],
+  past: [{ opened: at(-7, 0), samples: past }],
+});
+
+describe('usual', () => {
+  it("learns which hours of the week spend the pool, and what a week of them needs", () => {
+    const u = usual([week('max', 0, mornings(-7, 0))], MID)!;
+    expect(u.days).toBeCloseTo(6.5);
+    expect(u.week).toBeCloseTo(63);
+    expect(rateAt(u.slots)(at(1, 10))).toBeCloseTo(3);
+    expect(rateAt(u.slots)(at(1, 15))).toBeCloseTo(0);
+    expect(rateAt(u.slots)(at(1, 3))).toBeCloseTo(0);
+  });
+
+  it('weighs each login and counts only the hours every login is on record', () => {
+    const big = week('max', 0, mornings(-7, 0));
+    const small = { ...week('pro', 0, mornings(-3, 0)), weight: 0.5, past: [{ opened: at(-3, 0), samples: mornings(-3, 0) }] };
+    const u = usual([big, small], MID)!;
+    expect(u.days).toBeCloseTo(2.5);
+    expect(rateAt(u.slots)(at(1, 10))).toBeCloseTo(4.5);
+  });
+
+  it('leaves out the hours every login sat full, since nothing could be spent in them', () => {
+    const capped = [...mornings(-7, -3), [at(-3, 12), 100], [at(-1, 12), 100]] as Point[];
+    const u = usual([week('max', 0, capped)], MID)!;
+    expect(u.days).toBeCloseTo(4.5);
+  });
+
+  it('starts a week refilled in place where the instance before it was last seen', () => {
+    const l: Login = {
+      ...week('max', 9, []),
+      resetsAt: at(1, 0),
+      samples: [
+        [at(-3, 12), 9],
+        [MID, 9],
+      ],
+      past: [{ opened: at(-7, 0), samples: mornings(-7, -3) }],
+    };
+    const u = usual([l], MID)!;
+    expect(u.days).toBeCloseTo(7);
+    expect(rateAt(u.slots)(at(-5, 3))).toBeCloseTo(0);
+    expect(rateAt(u.slots)(at(-4, 18))).toBeCloseTo(9 / 24);
+  });
+
+  it('has no usual week with under a day on record', () => {
+    const l = { ...week('max', 0, []), past: [{ opened: at(-1, 0), samples: mornings(-1, 0) }] };
+    expect(usual([l], MID)).toBeNull();
+  });
+
+  it('gives each login its own usual burn and when it runs dry in a usual week', () => {
+    const l = week('max', 95, mornings(-7, 0));
+    const u = usual([l], MID)!;
+    const [share] = shares([l], MID, 3, u);
+    expect(share.own).toBeCloseTo(63 / 168);
+    expect(share.empty).toBeCloseTo(at(0, 10, 40), -3);
+  });
+});
+
+describe('project at an hourly pace', () => {
+  it('holds the pool through hours that usually spend nothing', () => {
+    const ls = [week('max', 0, [])];
+    const pace = (t: number) => (new Date(t).getHours() >= 9 && new Date(t).getHours() < 12 ? 3 : 0);
+    const { points } = project(ls, MID, pace, at(1, 0));
+    const value = (t: number) => points.find(([p]) => p === t)?.[1];
+    expect(value(at(0, 9))).toBeCloseTo(100);
+    expect(value(at(0, 12))).toBeCloseTo(91);
+    expect(value(at(0, 23))).toBeCloseTo(91);
   });
 });
 
