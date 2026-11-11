@@ -286,6 +286,9 @@ it is, and the burn.
   pace. It says when the login runs dry at that pace, or that its reset comes
   first or it is not burning, and when it resets. The projection's order
   does not change these: they are each login on its own.
+- A window no login with a weight reports falls back to counting each login
+  once even with the switch on Weighted; the card says "each login once here"
+  beside the switch rather than flipping the CLI's saved choice.
 
 The range is two weeks from three days before today, moved a week at a time.
 The view, the burn's hours, the future usage and each CLI's window are kept in
