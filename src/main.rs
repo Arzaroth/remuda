@@ -478,15 +478,7 @@ fn restore(
     let restored = match restored {
         Ok(restored) => restored,
         Err(e) if received => {
-            match export::keep_received(store, &bytes) {
-                Ok(kept) => writeln!(
-                    out,
-                    "what was received is kept in {}; `remuda restore {}` tries it again",
-                    kept.display(),
-                    kept.display()
-                )?,
-                Err(k) => writeln!(out, "warning: what was received is lost: {k:#}")?,
-            }
+            keep_received(store, &bytes, out)?;
             return Err(e);
         }
         Err(e) => return Err(e),
@@ -500,17 +492,41 @@ fn restore(
             kept.display()
         )?;
     }
-    if restored.sign_in.is_empty() {
+    sign_in_again(store, providers, &config_path, restored.sign_in, again, out)
+}
+
+fn keep_received(store: &Store, bytes: &[u8], out: &mut dyn Write) -> Result<()> {
+    match export::keep_received(store, bytes) {
+        Ok(kept) => writeln!(
+            out,
+            "what was received is kept in {}; `remuda restore {}` tries it again",
+            kept.display(),
+            kept.display()
+        )?,
+        Err(k) => writeln!(out, "warning: what was received is lost: {k:#}")?,
+    }
+    Ok(())
+}
+
+fn sign_in_again(
+    store: &Store,
+    providers: &[&dyn Provider],
+    config_path: &Path,
+    logins: Vec<export::ToSignIn>,
+    again: Again,
+    out: &mut dyn Write,
+) -> Result<()> {
+    if logins.is_empty() {
         return Ok(());
     }
-    let set = config::load(&config_path)
+    let set = config::load(config_path)
         .map(|l| l.config.login)
         .unwrap_or_default();
     let choice = browser::choose(set.browser.as_deref(), set.window);
     let open = |url: &str, profile: &Path| choice.open(url, profile);
     let lines = stdin_lines();
     let mut left = Vec::new();
-    let mut pending = restored.sign_in.into_iter();
+    let mut pending = logins.into_iter();
     for login in pending.by_ref() {
         if again.skip {
             left.push(login);
