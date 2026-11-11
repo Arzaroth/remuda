@@ -288,8 +288,9 @@ it gives back and whose it is, and the burn.
   was needed. An hour of the week never on record takes that hour's average
   over the other days. Its sum is the figure: what a usual week needs of the
   pool, with how many days it was learnt from; under a day on record there is
-  none. Each login's own usual burn comes from the same hours, the ones it sat
-  full left out.
+  none. Each login's own usual burn comes from every hour that login was on
+  record, which can reach further back than the pool's, the ones it sat full
+  left out. A window with no trail adds no hours, whatever its opening.
 - **Pace** picks what the projection spends: Usual week (the default) spends
   each coming hour what that hour of a usual week does, flat through the
   nights and days off; Last 1h, 3h or 6h spend that burn around the clock.
