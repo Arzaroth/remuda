@@ -1690,6 +1690,17 @@ fn key_providers_are_signed_in_listed_and_switched() {
         .collect();
     providers.sort_unstable();
     assert_eq!(providers, ["copilot", "deepseek", "minimax", "openrouter"]);
+    let region = |provider: &str| {
+        listed["credentials"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["provider"] == provider)
+            .unwrap()["region"]
+            .clone()
+    };
+    assert_eq!(region("minimax"), "cn");
+    assert_eq!(region("deepseek"), Value::Null);
 
     assert_eq!(
         home.ok(&["env", "minimax/cn"]),

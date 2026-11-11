@@ -1859,4 +1859,67 @@ mod tests {
         );
         assert_eq!(perso.meta.account_id, identity_of("ghp_perso").account_id);
     }
+
+    #[test]
+    fn the_shells_openrouter_login_carries_its_management_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = ApiKey::openrouter().with(
+            None,
+            vars(&[
+                ("OPENROUTER_API_KEY", "or-1"),
+                ("OPENROUTER_MANAGEMENT_KEY", " mg-1 "),
+            ]),
+        );
+        let live = p.live().unwrap().unwrap();
+        assert_eq!(live, json!({"key": "or-1", "management": "mg-1"}));
+        store
+            .save(&Entry::new(
+                "openrouter",
+                "shell",
+                live,
+                identity_of("or-1"),
+                1,
+            ))
+            .unwrap();
+        assert_eq!(
+            p.env_line(&store.get("openrouter", "shell").unwrap().unwrap())
+                .unwrap(),
+            "export OPENROUTER_API_KEY='or-1'\nexport OPENROUTER_MANAGEMENT_KEY='mg-1'"
+        );
+        let p = ApiKey::openrouter().with(
+            None,
+            vars(&[
+                ("OPENROUTER_KEY", "or-2"),
+                ("OPENROUTER_PROVISIONING_KEY", "pv-2"),
+            ]),
+        );
+        assert_eq!(
+            p.live().unwrap(),
+            Some(json!({"key": "or-2", "management": "pv-2"}))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_github_cli_that_does_not_answer_in_time_has_no_token() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let script = |name: &str, body: &str| {
+            let path = tmp.path().join(name);
+            std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        };
+        let quick = script("quick", "echo gho_1");
+        let slow = script("slow", "exec sleep 5");
+        let failing = script("failing", "echo gho_2; exit 1");
+        let wait = Duration::from_millis(300);
+        assert_eq!(gh_token_from(&quick, wait).as_deref(), Some("gho_1\n"));
+        let started = std::time::Instant::now();
+        assert_eq!(gh_token_from(&slow, wait), None);
+        assert!(started.elapsed() < Duration::from_secs(3));
+        assert_eq!(gh_token_from(&failing, wait), None);
+        assert_eq!(gh_token_from(&tmp.path().join("missing"), wait), None);
+    }
 }

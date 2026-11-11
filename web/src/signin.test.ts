@@ -14,6 +14,15 @@ describe('a sign-in asking for more than the key', () => {
     expect(seeded([], undefined)).toEqual({});
   });
 
+  it('signs a login in again on the region it was stored with, never on a secret', () => {
+    expect(seeded([region, management], { region: 'cn', management: 'mg-1' })).toEqual({
+      region: 'cn',
+      management: '',
+    });
+    expect(seeded([region], { region: 'eu' })).toEqual({ region: 'global' });
+    expect(seeded([region], { region: null })).toEqual({ region: 'global' });
+  });
+
   it('sends only the fields it asked for, trimmed, a blank choice on its default', () => {
     expect(answers([region, management], { region: 'cn', management: ' mg-1 ', other: 'x' })).toEqual({
       region: 'cn',
