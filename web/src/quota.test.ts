@@ -287,6 +287,18 @@ describe('usual', () => {
     expect(usual(ls, NOW)).toBeNull();
   });
 
+  it('counts the current window only up to the snapshot, not the time held since', () => {
+    const day = 24 * HOUR;
+    const ls = logins(
+      combined('Weekly', [['max', win(40, new Date(NOW + day).toISOString(), [[NOW - 3 * day, 30]]), 1]]),
+      NOW,
+      NOW - 3 * day + HOUR,
+    );
+    const u = usual(ls, NOW)!;
+    expect(u.days).toBeGreaterThan(2.9);
+    expect(u.days).toBeLessThan(3.1);
+  });
+
   it('has no usual week with under a day on record', () => {
     const l = { ...week('max', 0, []), past: [{ opened: at(-1, 0), samples: mornings(-1, 0) }] };
     expect(usual([l], MID)).toBeNull();
