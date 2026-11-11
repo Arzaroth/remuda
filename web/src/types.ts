@@ -51,7 +51,7 @@ export type ResetKind = 'session' | 'weekly' | 'full' | 'fable';
 export type Banked = {
   available: number;
   expiresAt: string | null;
-  kinds?: { kind: ResetKind; count: number; expiresAt: string | null; clears?: string[] }[];
+  kinds?: { kind: ResetKind; count: number; expiresAt: string | null; clears?: string[]; idle?: boolean }[];
 };
 
 export type Shown = Usage & { passive?: boolean; missing?: boolean; behind?: boolean };

@@ -200,8 +200,48 @@ fn oauth_account_from_profile(p: &Value) -> Result<Value> {
     Ok(Value::Object(out))
 }
 
-/// The grants the usage endpoint would accept now.
-fn accepted(cedar_ember: &Value) -> Vec<&Value> {
+/// What a banked reset clears, in Claude Code's words and its order of
+/// reading: a grant giving Fable's use back is a Fable reset whatever its
+/// `type` says.
+pub const RESET_KINDS: [&str; 4] = ["session", "weekly", "full", "fable"];
+
+fn grant_kind(grant: &Value) -> &'static str {
+    if grant.get("gives_back_weekly").and_then(Value::as_bool) == Some(true) {
+        return "fable";
+    }
+    if let Some(kind) = grant
+        .get("type")
+        .and_then(Value::as_str)
+        .and_then(|t| RESET_KINDS[..3].iter().find(|k| **k == t))
+    {
+        return kind;
+    }
+    let clears: Vec<&str> = grant
+        .get("clears")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    let session = clears.contains(&"five_hour");
+    let other = clears.iter().any(|c| *c != "five_hour");
+    match (session, other) {
+        (true, false) => "session",
+        (false, true) => "weekly",
+        _ => "full",
+    }
+}
+
+fn kind_name(kind: &str) -> &str {
+    match kind {
+        "session" => "5-hour",
+        "fable" => "Fable",
+        other => other,
+    }
+}
+
+/// The grants the usage endpoint would accept now, of `kind` when one is asked.
+fn accepted<'a>(cedar_ember: &'a Value, kind: Option<&str>) -> Vec<&'a Value> {
     if cedar_ember.get("eligible").and_then(Value::as_bool) != Some(true) {
         return Vec::new();
     }
@@ -217,6 +257,7 @@ fn accepted(cedar_ember: &Value) -> Vec<&Value> {
                 && !flag(g, "paused")
                 && flag(g, "usable_now")
                 && (at_limit || !flag(g, "use_requires_limit"))
+                && kind.is_none_or(|k| grant_kind(g) == k)
         })
         .collect()
 }
@@ -230,10 +271,10 @@ fn nothing_to_clear(grant: &Value) -> bool {
         .is_some_and(|used| !used.is_empty() && used.values().all(|p| p.as_f64() == Some(0.0)))
 }
 
-/// The banked reset to spend: the one the usage endpoint names next, else
-/// any it would accept now, never one with nothing to clear.
-fn usable_grant(cedar_ember: &Value) -> Option<&str> {
-    let usable: Vec<&str> = accepted(cedar_ember)
+/// The banked reset to spend: the one the usage endpoint names next while it
+/// is of `kind`, else any it would accept now, never one with nothing to clear.
+fn usable_grant<'a>(cedar_ember: &'a Value, kind: Option<&str>) -> Option<&'a str> {
+    let usable: Vec<&str> = accepted(cedar_ember, kind)
         .into_iter()
         .filter(|g| !nothing_to_clear(g))
         .filter_map(|g| g.get("id")?.as_str())
@@ -245,7 +286,12 @@ fn usable_grant(cedar_ember: &Value) -> Option<&str> {
 
 /// Spends one of the login's banked usage-limit resets and returns what the
 /// endpoint says came of it.
-fn redeem_reset(api: &Api, access_token: &str, organization: &str) -> Result<String> {
+fn redeem_reset(
+    api: &Api,
+    access_token: &str,
+    organization: &str,
+    kind: Option<&str>,
+) -> Result<String> {
     let usage = api
         .client
         .get(format!("{}/api/oauth/usage?cedar_ember=1", api.api_url))
@@ -260,11 +306,15 @@ fn redeem_reset(api: &Api, access_token: &str, organization: &str) -> Result<Str
     }
     let usage: Value = usage.json().context("malformed usage response")?;
     let cedar_ember = usage.get("cedar_ember").unwrap_or(&Value::Null);
-    let Some(grant) = usable_grant(cedar_ember) else {
-        if accepted(cedar_ember).into_iter().any(nothing_to_clear) {
-            bail!("the banked reset has nothing to clear yet: every limit it resets is at 0%");
+    let Some(grant) = usable_grant(cedar_ember, kind) else {
+        let what = kind.map_or("banked".into(), |k| kind_name(k).to_string());
+        if accepted(cedar_ember, kind)
+            .into_iter()
+            .any(nothing_to_clear)
+        {
+            bail!("the {what} reset has nothing to clear yet: every limit it resets is at 0%");
         }
-        bail!("no banked reset can be used right now");
+        bail!("no {what} reset can be used right now");
     };
     let resp = api
         .client
@@ -643,7 +693,7 @@ impl Provider for Claude {
         refresh(&self.api, oauth)
     }
 
-    fn redeem_reset(&self, entry: &Entry) -> Result<String> {
+    fn redeem_reset(&self, entry: &Entry, kind: Option<&str>) -> Result<String> {
         if self
             .expires_at(&entry.creds)
             .is_some_and(|at| at <= now_ms())
@@ -659,7 +709,7 @@ impl Provider for Claude {
         let organization = account_field(entry, "organizationUuid")
             .filter(|o| !o.is_empty() && o.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
             .context("stored credential names no organization")?;
-        let result = redeem_reset(&self.api, access, organization)?;
+        let result = redeem_reset(&self.api, access, organization, kind)?;
         Ok(format!("{}: banked reset {result}", entry.qualified()))
     }
 
@@ -1078,11 +1128,11 @@ mod tests {
 
     #[test]
     fn only_a_grant_the_endpoint_would_accept_now_is_spent() {
-        assert_eq!(usable_grant(&banked(vec![grant("g")])), Some("g"));
-        assert_eq!(usable_grant(&json!({})), None);
+        assert_eq!(usable_grant(&banked(vec![grant("g")]), None), Some("g"));
+        assert_eq!(usable_grant(&json!({}), None), None);
         let mut ineligible = banked(vec![grant("g")]);
         ineligible["eligible"] = json!(false);
-        assert_eq!(usable_grant(&ineligible), None);
+        assert_eq!(usable_grant(&ineligible, None), None);
         for (key, value) in [
             ("resets_left", json!(0)),
             ("paused", json!(true)),
@@ -1091,22 +1141,52 @@ mod tests {
         ] {
             let mut g = grant("g");
             g[key] = value;
-            assert_eq!(usable_grant(&banked(vec![g])), None, "{key}");
+            assert_eq!(usable_grant(&banked(vec![g]), None), None, "{key}");
         }
         let mut at_limit = grant("g");
         at_limit["use_requires_limit"] = json!(true);
         let mut wall = banked(vec![at_limit]);
         wall["at_limit"] = json!(true);
-        assert_eq!(usable_grant(&wall), Some("g"));
+        assert_eq!(usable_grant(&wall, None), Some("g"));
     }
 
     #[test]
     fn the_grant_the_endpoint_names_next_goes_first_while_it_is_usable() {
         let mut both = banked(vec![grant("a"), grant("b")]);
         both["next_grant_id"] = json!("b");
-        assert_eq!(usable_grant(&both), Some("b"));
+        assert_eq!(usable_grant(&both, None), Some("b"));
         both["next_grant_id"] = json!("retired");
-        assert_eq!(usable_grant(&both), Some("a"));
+        assert_eq!(usable_grant(&both, None), Some("a"));
+    }
+
+    #[test]
+    fn a_grant_is_named_the_way_claude_code_names_it() {
+        let kind = |g: Value| grant_kind(&g);
+        assert_eq!(
+            kind(json!({"type": "full", "gives_back_weekly": true})),
+            "fable"
+        );
+        assert_eq!(kind(json!({"type": "weekly"})), "weekly");
+        assert_eq!(kind(json!({"clears": ["five_hour"]})), "session");
+        assert_eq!(kind(json!({"clears": ["seven_day"]})), "weekly");
+        assert_eq!(
+            kind(json!({"type": "lunar", "clears": ["five_hour", "seven_day"]})),
+            "full"
+        );
+    }
+
+    #[test]
+    fn a_reset_asked_by_kind_takes_the_next_grant_only_while_it_is_of_that_kind() {
+        let mut fable = grant("launch");
+        fable["gives_back_weekly"] = json!(true);
+        let mut weekly = grant("weekly-1");
+        weekly["type"] = json!("weekly");
+        let mut block = banked(vec![fable, weekly]);
+        block["next_grant_id"] = json!("launch");
+        assert_eq!(usable_grant(&block, None), Some("launch"));
+        assert_eq!(usable_grant(&block, Some("fable")), Some("launch"));
+        assert_eq!(usable_grant(&block, Some("weekly")), Some("weekly-1"));
+        assert_eq!(usable_grant(&block, Some("session")), None);
     }
 
     #[test]
@@ -1117,10 +1197,10 @@ mod tests {
         fable["percent_used"] = json!({"seven_day_overage_included": 0});
         let mut block = banked(vec![fable.clone(), grant("other")]);
         block["next_grant_id"] = json!("launch-2610-fable");
-        assert_eq!(usable_grant(&block), Some("other"));
-        assert_eq!(usable_grant(&banked(vec![fable.clone()])), None);
+        assert_eq!(usable_grant(&block, None), Some("other"));
+        assert_eq!(usable_grant(&banked(vec![fable.clone()]), None), None);
         assert!(
-            accepted(&banked(vec![fable.clone()]))
+            accepted(&banked(vec![fable.clone()]), None)
                 .into_iter()
                 .any(nothing_to_clear)
         );
@@ -1131,7 +1211,7 @@ mod tests {
         ] {
             fable["percent_used"] = used.clone();
             assert_eq!(
-                usable_grant(&banked(vec![fable.clone()])),
+                usable_grant(&banked(vec![fable.clone()]), None),
                 Some("launch-2610-fable"),
                 "{used}"
             );
@@ -1146,7 +1226,7 @@ mod tests {
         identity.oauth_account.as_mut().unwrap()["organizationUuid"] = json!("o-work");
         let creds = crate::ops::testing::oauth("a-work", "r-work", -1000);
         let entry = Entry::new("claude", "work", creds, identity, 1);
-        let err = claude.redeem_reset(&entry).unwrap_err();
+        let err = claude.redeem_reset(&entry, None).unwrap_err();
         assert!(err.to_string().contains("expired"), "{err}");
     }
 

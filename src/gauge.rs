@@ -223,7 +223,7 @@ fn banked(resets: Option<&Value>) -> Value {
                     let kind = k
                         .get("kind")?
                         .as_str()
-                        .filter(|k| ["session", "weekly", "full", "fable"].contains(k))?;
+                        .filter(|k| crate::claude::RESET_KINDS.contains(k))?;
                     let count = k.get("count")?.as_u64().filter(|&n| n > 0)?;
                     let clears: Vec<&str> = k
                         .get("clears")
@@ -239,6 +239,9 @@ fn banked(resets: Option<&Value>) -> Value {
                     });
                     if !clears.is_empty() {
                         out["clears"] = json!(clears);
+                    }
+                    if k.get("idle").and_then(Value::as_bool) == Some(true) {
+                        out["idle"] = json!(true);
                     }
                     Some(out)
                 })
@@ -397,7 +400,7 @@ mod tests {
             json!({"payloads": [{"provider": "claude", "credential": "work", "usage": {"bankedResets": {
                 "available": 1, "expiresAt": at,
                 "kinds": [
-                    {"kind": "fable", "count": 1, "expiresAt": at,
+                    {"kind": "fable", "count": 1, "expiresAt": at, "idle": true,
                      "clears": ["five_hour", 7, "seven_day_overage_included"]},
                     {"kind": "lunar", "count": 1},
                     {"kind": "weekly", "count": 0},
@@ -410,7 +413,7 @@ mod tests {
         assert_eq!(
             usage["providers"]["claude"]["accounts"]["work"]["bankedResets"],
             json!({"available": 1, "expiresAt": at,
-                   "kinds": [{"kind": "fable", "count": 1, "expiresAt": at,
+                   "kinds": [{"kind": "fable", "count": 1, "expiresAt": at, "idle": true,
                               "clears": ["five_hour", "seven_day_overage_included"]}]})
         );
     }

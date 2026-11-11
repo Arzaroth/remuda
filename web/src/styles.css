@@ -277,6 +277,8 @@ main { min-width: 0; padding: 34px clamp(20px, 4vw, 52px) 120px; }
 .aside { color: var(--muted); font-size: 13px; }
 .aside + .aside, .windows + .aside { margin-top: 8px; }
 .banked { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; }
+.banked + .banked { margin-top: 6px; }
+.banked-idle { display: block; font-size: 12px; }
 .warm { padding-left: 14px; position: relative; }
 .warm::before { content: ''; position: absolute; left: 0; top: 0.5em; width: 7px; height: 7px; border-radius: 50%; background: var(--good); }
 .warm.bad { color: var(--bad); }

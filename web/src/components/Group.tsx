@@ -1,6 +1,6 @@
 import { createSignal, For, Match, onMount, Show, Switch } from 'solid-js';
 import { createConfirm } from '../confirm';
-import { describeBanked } from '../banked';
+import { bankedRows, type BankedRow } from '../banked';
 import { ago, date, DAY, HOUR, span, until, usedTone } from '../format';
 import { openSheet } from '../sheet';
 import { act, now, store } from '../state';
@@ -172,36 +172,54 @@ function Banked(props: { c: Credential }) {
     const r = shownFor(store.s!, props.c)?.bankedResets;
     return r && !(r.expiresAt && Date.parse(r.expiresAt) <= now()) ? r : null;
   };
-  const confirm = createConfirm();
-  const [spentWith, setSpentWith] = createSignal<string | null>(null);
-  const held = () => spentWith() !== null && spentWith() === JSON.stringify(resets());
-  const spend = () => {
-    if (held() || !confirm.ask(`Spend ${props.c.name}'s?`)) return;
-    setSpentWith(JSON.stringify(resets()));
-    return act('/api/reset', { name: `${props.c.provider}/${props.c.name}` });
+  const [spentWith, setSpentWith] = createSignal<Record<string, string>>({});
+  const state = (row: BankedRow) => JSON.stringify([row.label, row.expiresAt]);
+  const held = (row: BankedRow) => spentWith()[row.kind ?? ''] === state(row);
+  const spend = (row: BankedRow) => {
+    setSpentWith({ ...spentWith(), [row.kind ?? '']: state(row) });
+    return act('/api/reset', { name: `${props.c.provider}/${props.c.name}`, ...(row.kind ? { kind: row.kind } : {}) });
   };
   return (
     <Show when={resets()}>
       {(r) => (
-        <div class="banked">
-          <span class="aside">
-            {describeBanked(r()).label}
-            <Show when={r().expiresAt && !Number.isNaN(Date.parse(r().expiresAt!)) && r().expiresAt}>
-              {(at) => <span title={date(Date.parse(at()))}>, expires {until(Date.parse(at()), now())}</span>}
-            </Show>
-          </span>
+        <For each={bankedRows(r())}>
+          {(row) => <BankedLine c={props.c} row={row} held={held(row)} spend={() => spend(row)} />}
+        </For>
+      )}
+    </Show>
+  );
+}
+
+function BankedLine(props: { c: Credential; row: BankedRow; held: boolean; spend: () => unknown }) {
+  const confirm = createConfirm();
+  const live = () => props.row.expiresAt && !(Date.parse(props.row.expiresAt) <= now()) && props.row.expiresAt;
+  const onClick = () => {
+    if (props.held || props.row.idle || !confirm.ask(`Spend ${props.c.name}'s ${props.row.noun}?`)) return;
+    return props.spend();
+  };
+  return (
+    <div class="banked">
+      <span class="aside">
+        {props.row.label}
+        <Show when={live() && !Number.isNaN(Date.parse(live() as string)) && (live() as string)}>
+          {(at) => <span title={date(Date.parse(at()))}>, expires {until(Date.parse(at()), now())}</span>}
+        </Show>
+        <Show when={props.row.idle}>{(note) => <span class="banked-idle">{note()}</span>}</Show>
+      </span>
+      <Show when={props.row.button}>
+        {(button) => (
           <button
             class="btn"
             data-armed={confirm.text() ? '1' : undefined}
-            title={held() ? 'Waiting for TokenGauge to report what is left' : describeBanked(r()).title}
-            disabled={held()}
-            onClick={spend}
+            title={props.held ? 'Waiting for TokenGauge to report what is left' : props.row.title}
+            disabled={props.held || !!props.row.idle}
+            onClick={onClick}
           >
-            {confirm.text() ?? describeBanked(r()).button}
+            {confirm.text() ?? button()}
           </button>
-        </div>
-      )}
-    </Show>
+        )}
+      </Show>
+    </div>
   );
 }
 

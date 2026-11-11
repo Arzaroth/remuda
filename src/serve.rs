@@ -1059,7 +1059,14 @@ impl App {
                 let entry = store
                     .get(p.id(), &name)?
                     .with_context(|| format!("no credential named {}/{name}", p.id()))?;
-                let message = p.redeem_reset(&entry).inspect_err(|e| {
+                let kind = match body.get("kind") {
+                    None => None,
+                    Some(Value::String(k)) if crate::claude::RESET_KINDS.contains(&k.as_str()) => {
+                        Some(k.as_str())
+                    }
+                    Some(other) => bail!("unknown reset kind {other}"),
+                };
+                let message = p.redeem_reset(&entry, kind).inspect_err(|e| {
                     logbook::note(
                         store,
                         Event::new(Kind::Reset, false, format!("{e:#}"))
@@ -2878,6 +2885,66 @@ mod tests {
         asked.assert();
         spent.assert();
         assert_eq!(nudged(), "{\"cmd\":\"refresh\"}\n");
+    }
+
+    #[test]
+    fn a_reset_asked_by_kind_spends_a_grant_of_that_kind() {
+        let mut server = mockito::Server::new();
+        let e = env(&server.url());
+        stored_in_org(&e, "work");
+        server
+            .mock("GET", "/api/oauth/usage")
+            .match_query(mockito::Matcher::Any)
+            .with_body(
+                json!({"cedar_ember": {"eligible": true, "at_limit": false, "next_grant_id": "launch",
+                    "grants": [
+                        {"id": "launch", "resets_left": 1, "usable_now": true, "type": "full",
+                         "gives_back_weekly": true, "clears": ["seven_day_overage_included"],
+                         "percent_used": {"seven_day_overage_included": 30}},
+                        {"id": "weekly-1", "resets_left": 1, "usable_now": true, "type": "weekly"},
+                    ]}})
+                .to_string(),
+            )
+            .create();
+        let spent = server
+            .mock("POST", "/api/organizations/o-work/reset_rate_limits")
+            .match_body(mockito::Matcher::PartialJson(
+                json!({"program": "cedar_ember", "grant_id": "weekly-1"}),
+            ))
+            .with_body(json!({"result": "applied"}).to_string())
+            .expect(1)
+            .create();
+        let app = app(&e, &server.url());
+
+        let (status, r) = call(
+            &app,
+            "POST",
+            "/api/reset",
+            json!({"name": "work", "kind": "weekly"}),
+        );
+        assert_eq!(status, 200, "{r}");
+        spent.assert();
+
+        for kind in [json!("lunar"), json!(5), Value::Null] {
+            let (status, r) = call(
+                &app,
+                "POST",
+                "/api/reset",
+                json!({"name": "work", "kind": kind}),
+            );
+            assert_ne!(status, 200, "{kind}");
+            assert!(r.to_string().contains("unknown reset kind"), "{kind}: {r}");
+        }
+
+        let (status, r) = call(
+            &app,
+            "POST",
+            "/api/reset",
+            json!({"name": "work", "kind": "session"}),
+        );
+        assert_ne!(status, 200);
+        assert!(r.to_string().contains("no 5-hour reset can be used"), "{r}");
+        spent.assert();
     }
 
     #[test]

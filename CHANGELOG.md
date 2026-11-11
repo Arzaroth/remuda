@@ -24,8 +24,11 @@
   browser remuda knows rather than only the default one, and a private window
   as before, a normal window, or a profile of the login's own, kept under the
   store, which stays signed in for the next time.
-- A banked Claude reset says what it resets: `1 Fable reset` with a Reset
-  Fable limit button, from TokenGauge's `bankedResets.kinds`.
+- A banked Claude reset says what it resets, one row per kind as claude.ai
+  lists them: `1 Fable reset` with a Reset Fable limit button beside `1
+  weekly reset` with its own, from TokenGauge's `bankedResets.kinds`. A reset
+  with nothing to clear yet is greyed out with claude.ai's "There's no Fable
+  usage to reset right now". `POST /api/reset` takes a `kind`.
 - `remuda export` and `remuda restore` set another machine up in one step:
   the logins, config.toml, the proxy's settings and TokenGauge's fleet with its
   S3 keys (`--without-s3-keys` leaves them out), through wyrmyon or
