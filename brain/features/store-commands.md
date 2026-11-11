@@ -52,7 +52,7 @@ Prints the shell lines that select a stored API key, for a shell to `eval`:
 `export VAR='key'`, plus MiniMax's `MINIMAX_REGION`, OpenRouter's
 `OPENROUTER_MANAGEMENT_KEY` (or `unset` of it for a login with none), and an
 `unset` of any variable the CLI reads before the exported one (Copilot's
-`COPILOT_QUOTA_TOKEN` before `GH_TOKEN`). GLM, OpenRouter and Copilot read
+`COPILOT_QUOTA_TOKEN` and `COPILOT_GITHUB_TOKEN` before `GH_TOKEN`). GLM, OpenRouter and Copilot read
 their key from the environment only, and opencode Go's, DeepSeek's and
 MiniMax's variables win over the key opencode stores. Any other provider
 refuses.

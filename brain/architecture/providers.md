@@ -9,7 +9,7 @@ from a CLI. `creds` is always the store's shape for that CLI.
 | `home` | The directory the CLI keeps its login in, as this process resolves it |
 | `access_token`, `refresh_token`, `expires_at`, `refresh_expires_at`, `plan` | Read from `creds` |
 | `live` | The login the CLI is signed into, in store shape, or none |
-| `synced` | The stored credential once `live` is synced into it: `live` by default; a key provider merges it over the stored one, so a field only the store holds (OpenRouter's `management` when the shell sets none) survives |
+| `synced` | The stored credential once `live` is synced into it, or once a sign-in of the same account replaces it (`commands::save_login`): `live` by default; a key provider merges it over the stored one, so a field only the store holds (OpenRouter's `management` when the shell sets none) survives |
 | `foreign_login` | A live login `live` skips because it cannot be stored (an API key), described |
 | `live_identity` | Who the CLI's own files say that login is (`Identity`) |
 | `identify` | Whose tokens these are, per the tokens or the provider, never a file beside them |
@@ -188,7 +188,7 @@ is read from, in order: the first holding a key is the live login.
 | `deepseek` | `DEEPSEEK_API_KEY` | `deepseek` | |
 | `minimax` | `MINIMAX_API_KEY`, with `MINIMAX_REGION` | `minimax`, `minimax-cn`, `minimax-coding-plan`, `minimax-cn-coding-plan` | `region`: `global` or `cn` |
 | `openrouter` | `OPENROUTER_API_KEY`, `OPENROUTER_KEY` | none | `management`, optional |
-| `copilot` | `COPILOT_QUOTA_TOKEN`, `GH_TOKEN` (set), `GITHUB_TOKEN`, then `gh auth token` | none | |
+| `copilot` | `COPILOT_QUOTA_TOKEN`, `COPILOT_GITHUB_TOKEN`, `GH_TOKEN` (set), `GITHUB_TOKEN`, then `gh auth token` | none | |
 
 - A provider with no slots (GLM, OpenRouter, Copilot) is switched by the
   shell alone: `install` refuses and points at `remuda env`. Copilot also

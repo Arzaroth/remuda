@@ -99,7 +99,10 @@ offer Enter, and the link is to be opened by hand.
   `fields`.
 
 Saving takes the store lock and re-checks: a name taken meanwhile, or an
-account already stored under another name, refuses the result.
+account already stored under another name, refuses the result. Replacing a
+login of the same account keeps its label, and its creds go through
+`Provider::synced`, so an OpenRouter key signed in again with no management
+key keeps the stored one.
 
 The page offers the same flow in two calls; see [web-page.md](web-page.md).
 
