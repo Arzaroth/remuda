@@ -77,8 +77,8 @@ struct Cli {
     command: Option<Cmd>,
 }
 
-const PROVIDERS: [&str; 7] = [
-    "claude", "codex", "cursor", "glm", "grok", "kimi", "opencode",
+const PROVIDERS: [&str; 9] = [
+    "claude", "codex", "copilot", "cursor", "deepseek", "glm", "grok", "kimi", "opencode",
 ];
 
 fn browser_ids() -> clap::builder::PossibleValuesParser {
@@ -990,9 +990,13 @@ fn main() -> Result<()> {
     let grok = Grok::from_env()?;
     let kimi = Kimi::from_env()?;
     let cursor = Cursor::from_env()?;
+    let copilot = ApiKey::copilot();
+    let deepseek = ApiKey::deepseek();
     let glm = ApiKey::glm();
     let opencode = ApiKey::opencode();
-    let providers: [&dyn Provider; 7] = [&claude, &codex, &cursor, &glm, &grok, &kimi, &opencode];
+    let providers: [&dyn Provider; 9] = [
+        &claude, &codex, &copilot, &cursor, &deepseek, &glm, &grok, &kimi, &opencode,
+    ];
     if let Cmd::Hook { what } = &command {
         return hook(&store, &claude, what);
     }
@@ -1047,7 +1051,9 @@ fn main() -> Result<()> {
         let providers: Vec<Box<dyn Provider>> = vec![
             Box::new(claude),
             Box::new(codex),
+            Box::new(copilot),
             Box::new(cursor),
+            Box::new(deepseek),
             Box::new(glm),
             Box::new(grok),
             Box::new(kimi),

@@ -33,6 +33,8 @@ pub struct ApiKey {
     /// from the file.
     db: Option<PathBuf>,
     env: Box<Env>,
+    /// Where the key is read when no variable and no slot holds one.
+    fallback: Option<Box<Lookup>>,
     inference: String,
     routes: Routes,
 }
@@ -65,10 +67,35 @@ fn opencode_routes(model: &str) -> &'static [(Format, &'static str)] {
     }
 }
 
+/// The proxy reaches none of this provider's models.
+fn no_routes(_model: &str) -> &'static [(Format, &'static str)] {
+    &[]
+}
+
 type Env = dyn Fn(&str) -> Option<String> + Send + Sync;
+type Lookup = dyn Fn() -> Option<String> + Send + Sync;
 
 fn process_env(name: &str) -> Option<String> {
     std::env::var(name).ok()
+}
+
+/// The token the GitHub CLI is signed in with, which it may keep in the
+/// system keyring rather than in a file.
+fn gh_token() -> Option<String> {
+    #[cfg(debug_assertions)]
+    let gh = std::env::var_os("REMUDA_TEST_GH").unwrap_or_else(|| "gh".into());
+    #[cfg(not(debug_assertions))]
+    let gh = "gh";
+    let out = std::process::Command::new(gh)
+        .args(["auth", "token", "--hostname", "github.com"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8(out.stdout).ok())
+        .flatten()
 }
 
 fn key_of(creds: &Value) -> Option<&str> {
@@ -127,6 +154,7 @@ impl ApiKey {
             file: None,
             db: None,
             env: Box::new(process_env),
+            fallback: None,
             inference: "https://api.z.ai/api".to_owned(),
             routes: glm_routes,
         }
@@ -144,13 +172,54 @@ impl ApiKey {
             file: Some(paths::opencode_auth()),
             db: Some(paths::opencode_db()),
             env: Box::new(process_env),
+            fallback: None,
             inference: "https://opencode.ai/inference/go".to_owned(),
             routes: opencode_routes,
         }
     }
 
+    /// The key DeepSeek's API takes, which opencode keeps beside its others.
+    pub fn deepseek() -> Self {
+        ApiKey {
+            id: "deepseek",
+            name: "DeepSeek",
+            envs: &["DEEPSEEK_API_KEY"],
+            export: "DEEPSEEK_API_KEY",
+            key_page: "https://platform.deepseek.com/api_keys",
+            asks_for: "the API key",
+            slots: &["deepseek"],
+            file: Some(paths::opencode_auth()),
+            db: Some(paths::opencode_db()),
+            env: Box::new(process_env),
+            fallback: None,
+            inference: String::new(),
+            routes: no_routes,
+        }
+    }
+
+    /// A GitHub token, OAuth or personal, that Copilot's quota answers to.
+    /// The GitHub CLI's own login is read but never written: a switch is
+    /// `GH_TOKEN`, which it and the Copilot CLI read first.
+    pub fn copilot() -> Self {
+        ApiKey {
+            id: "copilot",
+            name: "Copilot",
+            envs: &["COPILOT_QUOTA_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"],
+            export: "GH_TOKEN",
+            key_page: "https://github.com/settings/tokens",
+            asks_for: "the GitHub token (`gh auth token` prints yours)",
+            slots: &[],
+            file: None,
+            db: None,
+            env: Box::new(process_env),
+            fallback: Some(Box::new(gh_token)),
+            inference: String::new(),
+            routes: no_routes,
+        }
+    }
+
     /// The database moves with the file: a test's file has its database
-    /// beside it.
+    /// beside it. Nothing outside the test is asked for a key.
     #[cfg(test)]
     pub fn with(
         mut self,
@@ -163,6 +232,7 @@ impl ApiKey {
             .and_then(|_| Some(file.as_ref()?.with_file_name("opencode.db")));
         self.file = file;
         self.env = Box::new(env);
+        self.fallback = None;
         self
     }
 
@@ -354,6 +424,10 @@ impl Provider for ApiKey {
                 .and_then(|(_, login)| key_of(login))
                 .map(|k| k.trim().to_owned()),
         };
+        let key = key.or_else(|| {
+            let found = self.fallback.as_ref()?()?;
+            Some(found.trim().to_owned()).filter(|k| !k.is_empty())
+        });
         Ok(key.map(|key| json!({ "key": key })))
     }
 
@@ -398,7 +472,14 @@ impl Provider for ApiKey {
 
     fn env_line(&self, entry: &Entry) -> Result<String> {
         let key = key_of(&entry.creds).context("stored credential holds no key")?;
-        Ok(format!("export {}={}", self.export, shell_quote(key)))
+        let mut lines: Vec<String> = self
+            .envs
+            .iter()
+            .take_while(|var| **var != self.export)
+            .map(|var| format!("unset {var}"))
+            .collect();
+        lines.push(format!("export {}={}", self.export, shell_quote(key)));
+        Ok(lines.join("\n"))
     }
 
     /// Writes the key into the CLI's file. A key the environment sets wins

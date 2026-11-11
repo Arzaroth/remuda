@@ -97,7 +97,8 @@ impl Home {
             .env("REMUDA_TEST_OPENAI_API", self.api.borrow().url())
             .env("REMUDA_TEST_XAI_API", self.api.borrow().url())
             .env("REMUDA_TEST_KIMI_API", self.api.borrow().url())
-            .env("REMUDA_TEST_CURSOR_API", self.api.borrow().url());
+            .env("REMUDA_TEST_CURSOR_API", self.api.borrow().url())
+            .env("REMUDA_TEST_GH", self.path("bin/gh"));
         // Coverage runs record the binary's own profile through this.
         if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
             cmd.env("LLVM_PROFILE_FILE", profile);
