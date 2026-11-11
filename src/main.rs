@@ -483,10 +483,15 @@ fn restore(
         }
         Err(e) => return Err(e),
     };
+    let mut held = None;
     if !restored.lost.is_empty() {
-        if received {
-            keep_received(store, &bytes, out)?;
-        }
+        held = Some(match (received, file) {
+            (false, Some(file)) => format!("{} still holds them", file.display()),
+            _ => match keep_received(store, &bytes, out)? {
+                Some(kept) => format!("what was received is kept in {}", kept.display()),
+                None => "what was received could not be kept, so they are only in the sending machine's store or the set-aside file export printed there".to_owned(),
+            },
+        });
     } else if let Some(kept) = file.filter(|f| export::was_kept(store, f))
         && let Err(e) = std::fs::remove_file(kept)
     {
@@ -497,26 +502,35 @@ fn restore(
         )?;
     }
     sign_in_again(store, providers, &config_path, restored.sign_in, again, out)?;
-    if !restored.lost.is_empty() {
+    if let Some(held) = held {
         bail!(
-            "the tokens carried for {} could be neither stored nor set aside here; the bundle still holds them",
+            "the tokens carried for {} could be neither stored nor set aside here; {held}",
             restored.lost.join(", ")
         );
     }
     Ok(())
 }
 
-fn keep_received(store: &Store, bytes: &[u8], out: &mut dyn Write) -> Result<()> {
+fn keep_received(
+    store: &Store,
+    bytes: &[u8],
+    out: &mut dyn Write,
+) -> Result<Option<std::path::PathBuf>> {
     match export::keep_received(store, bytes) {
-        Ok(kept) => writeln!(
-            out,
-            "what was received is kept in {}; `remuda restore {}` tries it again",
-            kept.display(),
-            kept.display()
-        )?,
-        Err(k) => writeln!(out, "warning: what was received is lost: {k:#}")?,
+        Ok(kept) => {
+            writeln!(
+                out,
+                "what was received is kept in {}; `remuda restore {}` tries it again",
+                kept.display(),
+                kept.display()
+            )?;
+            Ok(Some(kept))
+        }
+        Err(k) => {
+            writeln!(out, "warning: what was received is lost: {k:#}")?;
+            Ok(None)
+        }
     }
-    Ok(())
 }
 
 fn sign_in_again(
