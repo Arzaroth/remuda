@@ -9,6 +9,7 @@ export type Login = {
   length: number | null;
   samples: [number, number][];
   trailed: boolean;
+  seenUntil: number;
   past: Instance[];
 };
 
@@ -31,6 +32,7 @@ export function logins(c: Combined, now: number, written: number | null = null):
       length: p.window.minutes ? p.window.minutes * MIN : null,
       samples: [...trail, ...(p.window.trail && until < now ? [[until, p.window.usedPercent] as Point] : []), [now, p.window.usedPercent]],
       trailed: trail.length > 0,
+      seenUntil: until,
       past: (p.window.past ?? []).map((i) => ({ opened: i.openedAt, samples: i.samples })),
     };
   });
@@ -199,7 +201,7 @@ function hourly(l: Login): Hourly {
   const out: Hourly = { rise: new Map(), seen: new Set(), full: new Set() };
   const lastSeen = Math.max(-Infinity, ...l.past.map((i) => i.samples.at(-1)?.[0] ?? -Infinity));
   const opened = l.resetsAt !== null && l.length ? Math.max(l.resetsAt - l.length, lastSeen) : null;
-  const current = l.trailed ? [{ opened, samples: l.samples }] : [];
+  const current = l.trailed ? [{ opened, samples: l.samples.filter(([t]) => t <= l.seenUntil) }] : [];
   for (const { opened, samples } of [...l.past, ...current]) {
     if (!samples.length) continue;
     const pts: Point[] = opened !== null && samples[0][0] > opened ? [[opened, 0], ...samples] : samples;

@@ -14,6 +14,7 @@ const login = (name: string, used: number, resetsIn: number | null, samples: [nu
   length: WEEK,
   samples: [...samples, [NOW, used]],
   trailed: samples.length > 0,
+  seenUntil: NOW,
   past: [],
 });
 
@@ -225,6 +226,7 @@ const week = (name: string, used: number, past: Point[], weight = 1): Login => (
   length: WEEK,
   samples: [[MID, used]],
   trailed: false,
+  seenUntil: MID,
   past: [{ opened: at(-7, 0), samples: past }],
 });
 
