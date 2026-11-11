@@ -92,6 +92,9 @@ and `.set-aside-*` files.
   aside, and reported when it cannot be written; when the logins stored here
   cannot be listed, a carried login is skipped and a listed one is not
   offered. Each time the tokens carried are set aside and the rest goes on.
+- Tokens carried that can be neither stored nor set aside (the provider's
+  directory here cannot be written) are reported and the rest goes on, the
+  sign-ins included; restore then fails, naming those logins.
 - `config.toml` is checked (`Config::check`) against the logins stored here plus
   those listed to sign in, since names do not change, and written only when it
   passes; problems, the logins here not being listed, or a config that cannot
@@ -107,11 +110,14 @@ and `.set-aside-*` files.
   TokenGauge refuses a machine already in another fleet unless forced, and
   writes its own files: remuda never touches them.
 
-A bundle received over a wormhole that cannot be restored (another format, or
-tokens carried that cannot be set aside, which stops the restore so the
-bundle still holds them) is kept in the store as `.received-<ms>.json`, 0600,
-and the path printed; `remuda restore <that file>` reads it unsealed and
-removes it once it succeeds, or says it could not and goes on to the sign-ins.
+A bundle received over a wormhole is kept in the store as
+`.received-<ms>.json`, 0600, and the path printed, only when restore cannot
+read it (another format) or stops on an error, or when tokens it carried could
+be neither stored nor set aside, since it then still holds them; a config.toml
+or proxy settings restore cannot write do not keep it. `remuda restore <that
+file>` reads it unsealed and removes it, unless some of those tokens still
+cannot be kept, or says it could not and goes on to the sign-ins. Any other file given to
+`restore FILE` is left as it is.
 
 Then each listed login not stored here yet, and whose account is not stored
 here under another name (that is printed), is offered in turn ("Sign

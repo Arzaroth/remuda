@@ -43,9 +43,12 @@
   cannot read, the proxy's client keys, and proxy settings it cannot read, and sets aside the tokens and API keys it replaces and the tokens,
   not the API keys, it cannot store, except a
   login of a provider it does not know, which stays on the sending machine,
-  in its store or, once moved, set aside there; a bundle received that cannot be restored is kept. A login, config.toml or
+  in its store or, once moved, set aside there. A login, config.toml or
   the proxy's settings that restore cannot write is reported and the rest
-  restored. restore signs in the way `remuda
+  restored, the sign-ins included. A bundle received is kept only when restore
+  cannot read it, or when tokens it carried could be neither stored nor set
+  aside, and restore then fails naming those logins; a config.toml or proxy
+  settings it cannot write do not keep it. restore signs in the way `remuda
   login` does, with `--paste` and `--no-paste`.
 
 ### Changed
