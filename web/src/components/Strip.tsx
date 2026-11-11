@@ -25,7 +25,7 @@ export function Strip() {
 }
 
 const canWeigh = (id: string) => store.s!.shown?.[id]?.weighable ?? false;
-const weighted = (id: string) => canWeigh(id) && modes[id] !== 'absolute';
+export const weighted = (id: string) => canWeigh(id) && modes[id] !== 'absolute';
 
 export const windows = (id: string) => store.s!.shown?.[id]?.[weighted(id) ? 'weighted' : 'absolute'] ?? [];
 

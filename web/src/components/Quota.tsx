@@ -6,7 +6,7 @@ import { remember, remembered } from '../storage';
 import { go } from '../route';
 import { burn, capacity, knownFrom, logins, pick, project, recorded, remaining, shares, type Login, type Point, type Refill } from '../quota';
 import { inUse } from '../windows';
-import { Weighting, windows } from './Strip';
+import { weighted, Weighting, windows } from './Strip';
 import { Chips } from './Usage';
 import { ProviderIcon } from './ProviderIcon';
 
@@ -269,6 +269,11 @@ function Pool(props: { id: string; name: string; prefs: Prefs; offset: number; s
         </h3>
         <div class="pool-tools">
           <Weighting id={props.id} />
+          <Show when={c() && weighted(props.id) && !c()!.weighted}>
+            <small class="u-sub" title="TokenGauge has no plan weights for this window, so its figures count each login once">
+              each login once here
+            </small>
+          </Show>
           <Show when={all().length > 1}>
             <label class="u-select">
               <span class="sr">Window</span>
