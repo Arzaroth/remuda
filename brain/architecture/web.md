@@ -132,7 +132,7 @@ access to anything, and it ends when they stop.
 | `POST /api/import` `{provider?, name, force?}` | Store the live login |
 | `POST /api/label` `{name, text?}` / `rename` `{name, to}` / `remove` `{name}` | As the commands |
 | `POST /api/refresh` `{name?, force?}` | Refresh inactive credentials, then nudge TokenGauge |
-| `POST /api/reset` `{name, kind?}` | Spend one of a Claude login's banked usage-limit resets with its own token, of `kind` (`session`, `weekly`, `full`, `fable`) when given, then nudge TokenGauge |
+| `POST /api/reset` `{name, kind?}` | Spend one of a Claude login's banked usage-limit resets with its own token, of `kind` (`session`, `weekly`, `full`, `fable`) when given, refusing any other value, a non-string included, rather than spending the next grant, then nudge TokenGauge |
 | `POST /api/login` `{provider?, name, force?, paste?}` | Begin a sign-in, opening nothing yet: `{id, url, needsCode, asksFor, localOnly, userCode, machine, opensIn}`, `userCode` being the device code to type at `url` (null when there is none), `machine` being the hostname a callback sign-in's browser must be on; `paste` defaults to `[login] paste` |
 | `POST /api/login/open` `{id}` | Open its link where `[login]` says: `{opened}` |
 | `GET`/`POST /api/login/settings` `{browser?, window?, paste?}` | Read or save `[login]`: `{browsers, browser, window, paste, opensIn}` |

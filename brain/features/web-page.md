@@ -70,13 +70,15 @@ Add a login.
   TokenGauge carried them from an earlier ask than its snapshot, `windows.ts`
   `carriedSince`), a Claude login's banked usage-limit resets and when they
   expire, one row per kind as claude.ai lists them (`1 Fable reset`, `1
-  weekly reset`, `banked.ts` `bankedRows`; one plain row when TokenGauge does
-  not split the count or the split does not add up), each with a button
+  weekly reset`, `banked.ts` `bankedRows`; resets of a kind this page cannot
+  name get one row of their own with no button, and a count TokenGauge does
+  not split, or splits into more than it holds, one plain row), each with a button
   saying what it resets and spending a grant of that kind (Reset Fable limit,
   Reset weekly limits; a Fable reset's tooltip names the 5-hour limit too when
   its `clears` lists `five_hour`, as on a Team Premium seat), greyed out with
   claude.ai's "There's no Fable usage to reset right now" while the kind is
-  `idle`; a button
+  `idle`; spending from one row holds only that row until TokenGauge reports
+  again, and its confirm names the kind; a button
   asks for a second click before it
   spends one and then holds until TokenGauge reports the new count, how long
   its access token and its sign-in (refresh token) have left, its
