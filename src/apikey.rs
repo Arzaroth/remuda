@@ -321,7 +321,12 @@ impl ApiKey {
         ApiKey {
             id: "copilot",
             name: "Copilot",
-            envs: &["COPILOT_QUOTA_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"],
+            envs: &[
+                "COPILOT_QUOTA_TOKEN",
+                "COPILOT_GITHUB_TOKEN",
+                "GH_TOKEN",
+                "GITHUB_TOKEN",
+            ],
             export: "GH_TOKEN",
             key_page: "https://github.com/settings/tokens",
             asks_for: "the GitHub token (`gh auth token` prints yours)",
@@ -1850,7 +1855,7 @@ mod tests {
         let perso = store.get("copilot", "perso").unwrap().unwrap();
         assert_eq!(
             p.env_line(&perso).unwrap(),
-            "unset COPILOT_QUOTA_TOKEN\nexport GH_TOKEN='ghp_perso'"
+            "unset COPILOT_QUOTA_TOKEN\nunset COPILOT_GITHUB_TOKEN\nexport GH_TOKEN='ghp_perso'"
         );
         let err = ops::switch(&store, &p, "perso", false).unwrap_err();
         assert!(

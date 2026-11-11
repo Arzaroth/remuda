@@ -1712,7 +1712,7 @@ fn key_providers_are_signed_in_listed_and_switched() {
     );
     assert_eq!(
         home.ok(&["env", "copilot/c"]),
-        "unset COPILOT_QUOTA_TOKEN\nexport GH_TOKEN='ghp_c1'\n"
+        "unset COPILOT_QUOTA_TOKEN\nunset COPILOT_GITHUB_TOKEN\nexport GH_TOKEN='ghp_c1'\n"
     );
 
     home.ok(&["use", "deepseek/d"]);

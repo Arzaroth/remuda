@@ -591,6 +591,7 @@ pub fn save_login(
     }
     if let Some(old) = replaced.filter(|old| old.meta.account_id == entry.meta.account_id) {
         entry.meta.label = old.meta.label;
+        entry.creds = p.synced(&old.creds, entry.creds);
     }
     ensure_new_account(store, &entry)?;
     store.save(&entry)?;

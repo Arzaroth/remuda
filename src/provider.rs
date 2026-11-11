@@ -149,7 +149,7 @@ pub trait Provider: Send + Sync {
     /// The login the CLI is signed into, or None when it is signed out.
     fn live(&self) -> Result<Option<Value>>;
     /// The stored credential once the live login, read as `live`, is synced
-    /// into it.
+    /// into it, or once a sign-in of the same account replaces it.
     fn synced(&self, _stored: &Value, live: Value) -> Value {
         live
     }
