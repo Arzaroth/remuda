@@ -1059,10 +1059,13 @@ impl App {
                 let entry = store
                     .get(p.id(), &name)?
                     .with_context(|| format!("no credential named {}/{name}", p.id()))?;
-                let kind = text("kind");
-                if let Some(k) = kind.filter(|k| !crate::claude::RESET_KINDS.contains(k)) {
-                    bail!("unknown reset kind {k:?}");
-                }
+                let kind = match body.get("kind") {
+                    None => None,
+                    Some(Value::String(k)) if crate::claude::RESET_KINDS.contains(&k.as_str()) => {
+                        Some(k.as_str())
+                    }
+                    Some(other) => bail!("unknown reset kind {other}"),
+                };
                 let message = p.redeem_reset(&entry, kind).inspect_err(|e| {
                     logbook::note(
                         store,
@@ -2922,14 +2925,26 @@ mod tests {
         assert_eq!(status, 200, "{r}");
         spent.assert();
 
+        for kind in [json!("lunar"), json!(5), Value::Null] {
+            let (status, r) = call(
+                &app,
+                "POST",
+                "/api/reset",
+                json!({"name": "work", "kind": kind}),
+            );
+            assert_ne!(status, 200, "{kind}");
+            assert!(r.to_string().contains("unknown reset kind"), "{kind}: {r}");
+        }
+
         let (status, r) = call(
             &app,
             "POST",
             "/api/reset",
-            json!({"name": "work", "kind": "lunar"}),
+            json!({"name": "work", "kind": "session"}),
         );
         assert_ne!(status, 200);
-        assert!(r.to_string().contains("unknown reset kind"), "{r}");
+        assert!(r.to_string().contains("no 5-hour reset can be used"), "{r}");
+        spent.assert();
     }
 
     #[test]
