@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { HOUR, MIN } from './format';
 import { burn, capacity, knownFrom, logins, pick, project, rateAt, recorded, remaining, shares, usual, type Login, type Point } from './quota';
 import type { Combined, Window } from './types';
@@ -286,12 +286,11 @@ describe('usual', () => {
 });
 
 describe('usual, half an hour off UTC', () => {
-  const zone = process.env.TZ;
   beforeAll(() => {
-    process.env.TZ = 'Asia/Kolkata';
+    vi.stubEnv('TZ', 'Asia/Kolkata');
   });
   afterAll(() => {
-    process.env.TZ = zone;
+    vi.unstubAllEnvs();
   });
 
   it("keeps a morning's hours on the clock's hours", () => {
