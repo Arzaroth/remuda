@@ -3,6 +3,7 @@ import { api } from '../api';
 import { createConfirm } from '../confirm';
 import { load, store, toast } from '../state';
 import { closeSheet } from '../sheet';
+import { answers, heading, seeded, type Field } from '../signin';
 import { overwrite, taken } from '../windows';
 import { ProviderIcon } from './ProviderIcon';
 
@@ -11,6 +12,7 @@ type Login = {
   url: string;
   needsCode: boolean;
   asksFor: string;
+  fields: Field[];
   localOnly: boolean;
   machine: string | null;
   userCode: string | null;
@@ -45,6 +47,7 @@ export function AddAccount(props: { provider?: string; again?: string }) {
     props.again ? store.s!.credentials.find((c) => c.provider === provider() && c.name === props.again) : undefined;
   const [login, setLogin] = createSignal<Login | null>(null);
   const [code, setCode] = createSignal('');
+  const [typed, setTyped] = createSignal<Record<string, string>>({});
   const confirm = createConfirm();
   const [settings, setSettings] = createSignal<Settings | null>(null);
   onMount(() => {
@@ -86,7 +89,7 @@ export function AddAccount(props: { provider?: string; again?: string }) {
 
   const done = async (l: Login, code?: string) => {
     try {
-      const r = await api('/api/login/finish', { id: l.id, code });
+      const r = await api('/api/login/finish', { id: l.id, code, fields: answers(l.fields, typed()) });
       toast(r.message);
       if (openLogin === l.id) {
         setLogin(null);
@@ -127,6 +130,7 @@ export function AddAccount(props: { provider?: string; again?: string }) {
     }
     openLogin = begun.id;
     setCode('');
+    setTyped(seeded(begun.fields, again()));
     setLogin(begun);
     if (begun.needsCode) codeInput?.focus();
     else done(begun);
@@ -270,6 +274,32 @@ export function AddAccount(props: { provider?: string; again?: string }) {
                   </div>
                 }
               >
+                <For each={l().fields}>
+                  {(f) => (
+                    <label class="inline">
+                      <span class="aside">{heading(f)}</span>
+                      <Show
+                        when={f.choices.length}
+                        fallback={
+                          <input
+                            type="password"
+                            autocomplete="off"
+                            placeholder={`Paste ${f.label}, or leave it empty`}
+                            value={typed()[f.name] ?? ''}
+                            onInput={(e) => setTyped({ ...typed(), [f.name]: e.currentTarget.value })}
+                          />
+                        }
+                      >
+                        <select
+                          value={typed()[f.name] ?? f.choices[0]}
+                          onChange={(e) => setTyped({ ...typed(), [f.name]: e.currentTarget.value })}
+                        >
+                          <For each={f.choices}>{(c) => <option value={c}>{c}</option>}</For>
+                        </select>
+                      </Show>
+                    </label>
+                  )}
+                </For>
                 <div class="inline">
                   <input
                     ref={codeInput}

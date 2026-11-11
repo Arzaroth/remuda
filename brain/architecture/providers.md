@@ -5,10 +5,11 @@ from a CLI. `creds` is always the store's shape for that CLI.
 
 | Method | Meaning |
 | --- | --- |
-| `id`, `name` | `claude` / "Claude Code", `codex` / "Codex", `grok`, `kimi`, `cursor`, `glm`, `opencode` |
+| `id`, `name` | `claude` / "Claude Code", `codex` / "Codex", `grok`, `kimi`, `cursor`, and the key providers `glm`, `opencode`, `deepseek`, `minimax`, `openrouter`, `copilot` |
 | `home` | The directory the CLI keeps its login in, as this process resolves it |
 | `access_token`, `refresh_token`, `expires_at`, `refresh_expires_at`, `plan` | Read from `creds` |
 | `live` | The login the CLI is signed into, in store shape, or none |
+| `synced` | The stored credential once `live` is synced into it, or once a sign-in of the same account replaces it (`commands::save_login`): `live` by default; a key provider merges it over the stored one, so a field only the store holds (OpenRouter's `management` when the shell sets none) survives |
 | `foreign_login` | A live login `live` skips because it cannot be stored (an API key), described |
 | `live_identity` | Who the CLI's own files say that login is (`Identity`) |
 | `identify` | Whose tokens these are, per the tokens or the provider, never a file beside them |
@@ -20,7 +21,7 @@ from a CLI. `creds` is always the store's shape for that CLI.
 | `renews` | False for an API key, which `refresh` skips (true by default) |
 | `portable` | Its tokens work from two machines at once, so `export` copies them rather than listing the login to sign in again: `!renews()` by default, true for Cursor |
 | `env_line` | The `export` line `remuda env` prints, for a key read from the environment |
-| `begin_login` | Start a sign-in, returning a `PendingLogin` |
+| `begin_login` | Start a sign-in, returning a `PendingLogin`, whose `fields` are the answers it asks for beside the code (`Field`: a name, a label, and choices whose first is the default, or none for optional text), passed to `finish_with` |
 | `redeem_reset` | Spend one of the login's banked usage-limit resets (Claude only; the others refuse) |
 | `live_file` | The file the live login is read from, whose mtime dates a login changed outside remuda in the attribution ledger; none for a key the environment supplies or opencode 2's database, which every session writes ([../features/switching.md](../features/switching.md#whose-spend-it-is)) |
 | `run_sessions` | How to read the session id a running CLI process is in, for the ledger's `run` lines: Claude Code's `sessions/<pid>.json` (`claude::session_of`); none for the others |
@@ -165,31 +166,63 @@ refresh token into "sign this credential in again".
   `cursor.com/loginDeepControl` with a PKCE challenge and a uuid and polls
   `api2.cursor.sh/auth/poll` until it returns the tokens.
 
-## API keys: GLM and opencode Go
+## API keys
 
-`ApiKey` ([apikey.rs](../../src/apikey.rs)) is both. A credential is
-`{"key": ...}`, filed under `key-` and the first 16 hex digits of the key's
-SHA-256: there is no account to confirm, and the key itself never reaches a
-sidecar. `renews` is false, so `refresh` skips them. Sign-in opens the key
-page and takes the pasted key (`asks_for`: "the API key").
+`ApiKey` ([apikey.rs](../../src/apikey.rs)) is GLM, opencode Go, DeepSeek,
+MiniMax, OpenRouter and Copilot. A credential is `{"key": ...}`, plus the
+fields its sign-in asks for, filed under `key-` and the first 16 hex digits of
+the key's SHA-256: there is no account to confirm, and the key itself never
+reaches a sidecar. `renews` is false, so `refresh` skips them. Sign-in opens
+the key page and takes the pasted key (`asks_for`: "the API key", Copilot's
+"the GitHub token").
 
-- GLM reads `Z_AI_API_KEY` (legacy `ZAI_API_TOKEN`) and nothing else, so
-  `install` refuses and points at `remuda env`.
-- opencode Go reads `OPENCODE_API_KEY` or `OPENCODE_GO_API_KEY`, else
-  opencode's own store, and `install` refuses when either is set, since it
-  would win. Which store
-  depends on the database (`KeyDb`, `paths::opencode_db`: `opencode.db` in
-  `$XDG_DATA_HOME/opencode`, or `OPENCODE_DB`). Once its `migration` table
-  holds `*_import_legacy_credentials`, opencode 2 has copied `auth.json` into
-  table `credential` and reads only that, so remuda does too: the
-  `opencode-go` row opencode selects (`active` first, then newest
-  `time_created`, then `id`), `{"type": "key", "key": ...}`. `install` runs in
-  one immediate transaction, compared on the key it replaces: a row already
-  holding the key is activated, else a key row in use is rekeyed in place, else
-  a new `cred_` row goes in front of a login that is not a key (OAuth), which
-  stays. Before that migration, or with no database, the store is the
-  `opencode-go` entry of `auth.json` in the data directory
-  (`paths::opencode_auth`, wherever `OPENCODE_DB` points), rewritten alone.
+Each reads its `envs` first, in the CLI's order, and `install` refuses while
+one is set, since it would win; `remuda env` exports `export` (and unsets the
+variables read before it). Then `slots`, the entries of opencode's store a key
+is read from, in order: the first holding a key is the live login.
+
+| Provider | Variables (`remuda env` sets) | opencode slots | Stored beside `key` |
+| --- | --- | --- | --- |
+| `glm` | `Z_AI_API_KEY`, `ZAI_API_TOKEN` | none | |
+| `opencode` | `OPENCODE_API_KEY`, `OPENCODE_GO_API_KEY` | `opencode-go` | |
+| `deepseek` | `DEEPSEEK_API_KEY` | `deepseek` | |
+| `minimax` | `MINIMAX_API_KEY`, with `MINIMAX_REGION` | `minimax`, `minimax-cn`, `minimax-coding-plan`, `minimax-cn-coding-plan` | `region`: `global` or `cn` |
+| `openrouter` | `OPENROUTER_API_KEY`, `OPENROUTER_KEY` | none | `management`, optional |
+| `copilot` | `COPILOT_QUOTA_TOKEN`, `COPILOT_GITHUB_TOKEN`, `GH_TOKEN` (set), `GITHUB_TOKEN`, then `gh auth token` | none | |
+
+- A provider with no slots (GLM, OpenRouter, Copilot) is switched by the
+  shell alone: `install` refuses and points at `remuda env`. Copilot also
+  reads the token the GitHub CLI prints (`gh auth token --hostname github.com`,
+  which may keep it in the system keyring, given 3 s as TokenGauge gives it,
+  after which it reads as no token), and never writes it back.
+- OpenRouter's `management` key is the only way to its account balance. The
+  shell's login carries `OPENROUTER_MANAGEMENT_KEY`, else
+  `OPENROUTER_PROVISIONING_KEY`, into the credential; `remuda env` exports it as `OPENROUTER_MANAGEMENT_KEY`, or unsets that and
+  `OPENROUTER_PROVISIONING_KEY` for a login with none.
+- MiniMax's `region` says which host a key answers on. The environment's
+  region is `MINIMAX_REGION` (`cn`, else global); a slot's is its name
+  (`minimax-cn*` is China). `remuda env` exports it beside the key. A switch
+  writes into the region's slot holding a key, else the region's counterpart of
+  the live slot (coding plan or pay-as-you-go, `minimax_slot`); moving across
+  regions empties the live slot, whose key the switch has stored by then. It
+  refuses rather than overwrite a slot holding a login that is not the live
+  one, or leave another key read ahead of the new one.
+- Which opencode store depends on the database (`paths::opencode_db`:
+  `opencode.db` in `$XDG_DATA_HOME/opencode`, or `OPENCODE_DB`). Once its
+  `migration` table holds `*_import_legacy_credentials`, opencode 2 has copied
+  `auth.json` into table `credential` and reads only that, so remuda does too:
+  per slot (an `integration_id`), the row opencode selects (`active` first,
+  then newest `time_created`, then `id`), `{"type": "key", "key": ...}`.
+  `install` runs in one immediate transaction, compared on the live key it
+  replaces: a row already holding the key is activated, else the live key's
+  row is rekeyed in place, else a new `cred_` row goes in front of what the
+  slot held (an OAuth login, another key), which stays; a MiniMax move deletes
+  the live key's rows in the region it leaves. Before that migration, or with
+  no database, the store is `auth.json` in the data directory
+  (`paths::opencode_auth`, wherever `OPENCODE_DB` points), whose slot alone is
+  rewritten.
+- None of DeepSeek, MiniMax, OpenRouter and Copilot is reached through the
+  proxy (`formats` is empty).
 
 ## Sign-in by device code
 

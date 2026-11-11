@@ -97,7 +97,8 @@ impl Home {
             .env("REMUDA_TEST_OPENAI_API", self.api.borrow().url())
             .env("REMUDA_TEST_XAI_API", self.api.borrow().url())
             .env("REMUDA_TEST_KIMI_API", self.api.borrow().url())
-            .env("REMUDA_TEST_CURSOR_API", self.api.borrow().url());
+            .env("REMUDA_TEST_CURSOR_API", self.api.borrow().url())
+            .env("REMUDA_TEST_GH", self.path("bin/gh"));
         // Coverage runs record the binary's own profile through this.
         if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
             cmd.env("LLVM_PROFILE_FILE", profile);
@@ -1607,4 +1608,147 @@ fn carried_tokens_that_cannot_be_kept_leave_the_bundle_and_the_rest_restored() {
         "r-perso"
     );
     assert!(!Path::new(&kept).exists());
+}
+
+/// `remuda login`, typing `input`.
+fn type_into(home: &Home, args: &[&str], input: &str) -> String {
+    use std::io::Write;
+    let mut login = home.command(args);
+    login
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = login.spawn().unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(
+        out.status.success(),
+        "remuda {args:?} failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8(out.stdout).unwrap()
+}
+
+#[test]
+fn key_providers_are_signed_in_listed_and_switched() {
+    let home = Home::new();
+    let store = home.path(".local/share/remuda/credentials");
+    let said = type_into(
+        &home,
+        &["login", "cn", "-p", "minimax", "--no-browser"],
+        "mm-key-1\ncn\n",
+    );
+    assert!(said.contains("Pick the region (global or cn)"), "{said}");
+    type_into(
+        &home,
+        &["login", "o", "-p", "openrouter", "--no-browser"],
+        "or-key-1\nmg-key-1\n",
+    );
+    type_into(
+        &home,
+        &["login", "d", "-p", "deepseek", "--no-browser"],
+        "ds-key-1\n",
+    );
+    type_into(
+        &home,
+        &["login", "c", "-p", "copilot", "--no-browser"],
+        "ghp_c1\n",
+    );
+    assert_eq!(
+        read(&store.join("minimax/cn.json")),
+        json!({"key": "mm-key-1", "region": "cn"})
+    );
+    assert_eq!(
+        read(&store.join("openrouter/o.json")),
+        json!({"key": "or-key-1", "management": "mg-key-1"})
+    );
+    assert_eq!(
+        read(&store.join("deepseek/d.json")),
+        json!({"key": "ds-key-1"})
+    );
+    assert_eq!(
+        read(&store.join("copilot/c.json")),
+        json!({"key": "ghp_c1"})
+    );
+    let meta = read(&store.join("copilot/c.meta.json"));
+    assert!(
+        meta["accountId"].as_str().unwrap().starts_with("key-"),
+        "{meta}"
+    );
+
+    let listed: Value = serde_json::from_str(&home.ok(&["ls", "--json"])).unwrap();
+    let mut providers: Vec<&str> = listed["credentials"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["provider"].as_str().unwrap())
+        .collect();
+    providers.sort_unstable();
+    assert_eq!(providers, ["copilot", "deepseek", "minimax", "openrouter"]);
+    let region = |provider: &str| {
+        listed["credentials"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["provider"] == provider)
+            .unwrap()["region"]
+            .clone()
+    };
+    assert_eq!(region("minimax"), "cn");
+    assert_eq!(region("deepseek"), Value::Null);
+
+    assert_eq!(
+        home.ok(&["env", "minimax/cn"]),
+        "export MINIMAX_API_KEY='mm-key-1'\nexport MINIMAX_REGION='cn'\n"
+    );
+    assert_eq!(
+        home.ok(&["env", "openrouter/o"]),
+        "export OPENROUTER_API_KEY='or-key-1'\nexport OPENROUTER_MANAGEMENT_KEY='mg-key-1'\n"
+    );
+    assert_eq!(
+        home.ok(&["env", "copilot/c"]),
+        "unset COPILOT_QUOTA_TOKEN\nunset COPILOT_GITHUB_TOKEN\nexport GH_TOKEN='ghp_c1'\n"
+    );
+
+    home.ok(&["use", "deepseek/d"]);
+    home.ok(&["use", "minimax/cn"]);
+    let auth = read(&home.path(".local/share/opencode/auth.json"));
+    assert_eq!(auth["deepseek"], json!({"type": "api", "key": "ds-key-1"}));
+    assert_eq!(
+        auth["minimax-cn"],
+        json!({"type": "api", "key": "mm-key-1"})
+    );
+    assert!(
+        home.fails(&["use", "openrouter/o"])
+            .contains("eval \"$(remuda env openrouter/o)\"")
+    );
+    assert!(
+        home.fails(&["use", "copilot/c"])
+            .contains("eval \"$(remuda env copilot/c)\"")
+    );
+}
+
+#[test]
+fn copilot_is_signed_in_as_the_github_cli_is() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = Home::new();
+    let gh = home.path("bin/gh");
+    std::fs::create_dir_all(gh.parent().unwrap()).unwrap();
+    std::fs::write(&gh, "#!/bin/sh\necho gho_from_cli1\n").unwrap();
+    std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(
+        home.ok(&["import", "-p", "copilot", "cli"]),
+        "stored copilot/cli (key ending cli1, -)\n"
+    );
+    let ls = home.ok(&["ls"]);
+    assert!(ls.contains("* cli"), "{ls}");
+    assert_eq!(
+        read(&home.path(".local/share/remuda/credentials/copilot/cli.json")),
+        json!({"key": "gho_from_cli1"})
+    );
 }

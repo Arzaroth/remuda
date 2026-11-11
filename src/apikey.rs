@@ -8,22 +8,8 @@ use sha2::{Digest, Sha256};
 
 use crate::fsx::{Changed, read_json, update_json};
 use crate::paths;
-use crate::provider::{Format, Identity, Login, PendingLogin, Provider, Upstream};
+use crate::provider::{Field, Format, Identity, Login, PendingLogin, Provider, Upstream};
 use crate::store::Entry;
-
-/// Where a CLI that takes an API key finds it, besides its environment: one
-/// entry of a JSON file other entries share.
-pub struct KeyFile {
-    pub path: PathBuf,
-    pub entry: &'static str,
-}
-
-/// opencode 2's `credential` table. Once opencode has imported `auth.json`
-/// into it, opencode reads its logins from here and never from the file.
-pub struct KeyDb {
-    pub path: PathBuf,
-    pub integration: &'static str,
-}
 
 /// A provider signed into with an API key. A key has no account behind it to
 /// confirm, never expires and never refreshes, so it is filed under a digest
@@ -31,16 +17,73 @@ pub struct KeyDb {
 pub struct ApiKey {
     id: &'static str,
     name: &'static str,
-    /// The variables the CLI reads, in its order. The first is the one
-    /// `remuda env` sets.
+    /// The variables the CLI reads, in its order.
     envs: &'static [&'static str],
+    /// The one `remuda env` sets.
+    export: &'static str,
     key_page: &'static str,
-    file: Option<KeyFile>,
-    db: Option<KeyDb>,
+    asks_for: &'static str,
+    /// The entries of `file`, and the integrations of `db`, the CLI reads a
+    /// key from, in its order.
+    slots: &'static [&'static str],
+    /// A JSON file other entries share.
+    file: Option<PathBuf>,
+    /// opencode 2's `credential` table. Once opencode has imported
+    /// `auth.json` into it, opencode reads its logins from here and never
+    /// from the file.
+    db: Option<PathBuf>,
     env: Box<Env>,
+    /// Where the key is read when no variable and no slot holds one.
+    fallback: Option<Box<Lookup>>,
+    region: Option<Region>,
+    extras: &'static [Extra],
     inference: String,
     routes: Routes,
 }
+
+/// The region a key answers in, stored as `region`: it picks the slot a key
+/// goes in, and a slot says the region of the key it holds.
+struct Region {
+    /// The variable that names it beside the key's own.
+    var: &'static str,
+    /// The default first.
+    choices: &'static [&'static str],
+    of_slot: fn(&str) -> &'static str,
+    /// Where a key of a region goes that none of its slots holds, given the
+    /// live key's slot.
+    slot_for: fn(Option<&str>, &str) -> &'static str,
+}
+
+/// opencode's MiniMax entry for `region` of the live key's kind: the coding
+/// plan's, or the pay-as-you-go API's.
+fn minimax_slot(live: Option<&str>, region: &str) -> &'static str {
+    let plan = live.is_some_and(|slot| slot.ends_with("-coding-plan"));
+    match (region, plan) {
+        ("cn", true) => "minimax-cn-coding-plan",
+        ("cn", false) => "minimax-cn",
+        (_, true) => "minimax-coding-plan",
+        (_, false) => "minimax",
+    }
+}
+
+/// A stored field beside the key that `remuda env` exports into the first of
+/// `vars` and a switch ignores.
+struct Extra {
+    field: &'static str,
+    vars: &'static [&'static str],
+    label: &'static str,
+}
+
+fn minimax_region(slot: &str) -> &'static str {
+    if slot.starts_with("minimax-cn") {
+        "cn"
+    } else {
+        "global"
+    }
+}
+
+/// What each slot holds, in the CLI's order.
+type Found = Vec<(&'static str, Option<Value>)>;
 
 /// The paths under `inference` that take each format, for a model.
 type Routes = fn(&str) -> &'static [(Format, &'static str)];
@@ -67,14 +110,49 @@ fn opencode_routes(model: &str) -> &'static [(Format, &'static str)] {
     }
 }
 
+/// The proxy reaches none of this provider's models.
+fn no_routes(_model: &str) -> &'static [(Format, &'static str)] {
+    &[]
+}
+
 type Env = dyn Fn(&str) -> Option<String> + Send + Sync;
+type Lookup = dyn Fn() -> Option<String> + Send + Sync;
 
 fn process_env(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }
 
+/// The token the GitHub CLI is signed in with, which it may keep in the
+/// system keyring rather than in a file.
+fn gh_token() -> Option<String> {
+    #[cfg(debug_assertions)]
+    let gh = std::env::var_os("REMUDA_TEST_GH").unwrap_or_else(|| "gh".into());
+    #[cfg(not(debug_assertions))]
+    let gh = "gh";
+    gh_token_from(std::path::Path::new(&gh), GH_TIMEOUT)
+}
+
+/// TokenGauge's wait for the same command.
+const GH_TIMEOUT: Duration = Duration::from_secs(3);
+
+fn gh_token_from(gh: &std::path::Path, wait: Duration) -> Option<String> {
+    let ran = crate::child::run(
+        "gh",
+        gh,
+        &["auth", "token", "--hostname", "github.com"],
+        wait,
+        64 * 1024,
+    )
+    .ok()?;
+    ran.ok.then(|| String::from_utf8(ran.out).ok()).flatten()
+}
+
 fn key_of(creds: &Value) -> Option<&str> {
-    creds.get("key")?.as_str().filter(|k| !k.trim().is_empty())
+    key_of_field(creds, "key")
+}
+
+fn key_of_field<'a>(creds: &'a Value, field: &str) -> Option<&'a str> {
+    creds.get(field)?.as_str().filter(|k| !k.trim().is_empty())
 }
 
 fn identity_of(key: &str) -> Identity {
@@ -99,16 +177,39 @@ fn identity_of(key: &str) -> Identity {
     }
 }
 
+/// The slot the CLI reads: the first holding a key, else the first holding
+/// anything.
+fn read_slot(found: &Found) -> Option<(&'static str, &Value)> {
+    let held = || found.iter().filter_map(|(s, v)| Some((*s, v.as_ref()?)));
+    held()
+        .find(|(_, v)| key_of(v).is_some())
+        .or_else(|| held().next())
+}
+
+fn read_key(found: &Found) -> Option<&str> {
+    read_slot(found).and_then(|(_, v)| key_of(v)).map(str::trim)
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.trim().replace('\'', r"'\''"))
+}
+
 impl ApiKey {
     pub fn glm() -> Self {
         ApiKey {
             id: "glm",
             name: "GLM",
             envs: &["Z_AI_API_KEY", "ZAI_API_TOKEN"],
+            export: "Z_AI_API_KEY",
             key_page: "https://z.ai/manage-apikey/apikey-list",
+            asks_for: "the API key",
+            slots: &[],
             file: None,
             db: None,
             env: Box::new(process_env),
+            fallback: None,
+            region: None,
+            extras: &[],
             inference: "https://api.z.ai/api".to_owned(),
             routes: glm_routes,
         }
@@ -119,37 +220,152 @@ impl ApiKey {
             id: "opencode",
             name: "opencode Go",
             envs: &["OPENCODE_API_KEY", "OPENCODE_GO_API_KEY"],
+            export: "OPENCODE_API_KEY",
             key_page: "https://opencode.ai/auth",
-            file: Some(KeyFile {
-                path: paths::opencode_auth(),
-                entry: "opencode-go",
-            }),
-            db: Some(KeyDb {
-                path: paths::opencode_db(),
-                integration: "opencode-go",
-            }),
+            asks_for: "the API key",
+            slots: &["opencode-go"],
+            file: Some(paths::opencode_auth()),
+            db: Some(paths::opencode_db()),
             env: Box::new(process_env),
+            fallback: None,
+            region: None,
+            extras: &[],
             inference: "https://opencode.ai/inference/go".to_owned(),
             routes: opencode_routes,
         }
     }
 
+    /// The key DeepSeek's API takes, which opencode keeps beside its others.
+    pub fn deepseek() -> Self {
+        ApiKey {
+            id: "deepseek",
+            name: "DeepSeek",
+            envs: &["DEEPSEEK_API_KEY"],
+            export: "DEEPSEEK_API_KEY",
+            key_page: "https://platform.deepseek.com/api_keys",
+            asks_for: "the API key",
+            slots: &["deepseek"],
+            file: Some(paths::opencode_auth()),
+            db: Some(paths::opencode_db()),
+            env: Box::new(process_env),
+            fallback: None,
+            region: None,
+            extras: &[],
+            inference: String::new(),
+            routes: no_routes,
+        }
+    }
+
+    /// A MiniMax key, global or China, which opencode files under the
+    /// region's entry, of the pay-as-you-go API or of the coding plan.
+    pub fn minimax() -> Self {
+        ApiKey {
+            id: "minimax",
+            name: "MiniMax",
+            envs: &["MINIMAX_API_KEY"],
+            export: "MINIMAX_API_KEY",
+            key_page: "https://platform.minimax.io/user-center/basic-information/interface-key",
+            asks_for: "the API key",
+            slots: &[
+                "minimax",
+                "minimax-cn",
+                "minimax-coding-plan",
+                "minimax-cn-coding-plan",
+            ],
+            file: Some(paths::opencode_auth()),
+            db: Some(paths::opencode_db()),
+            env: Box::new(process_env),
+            fallback: None,
+            region: Some(Region {
+                var: "MINIMAX_REGION",
+                choices: &["global", "cn"],
+                of_slot: minimax_region,
+                slot_for: minimax_slot,
+            }),
+            extras: &[],
+            inference: String::new(),
+            routes: no_routes,
+        }
+    }
+
+    /// An OpenRouter inference key, read from the environment only, and the
+    /// management key the account balance answers to, when there is one.
+    pub fn openrouter() -> Self {
+        ApiKey {
+            id: "openrouter",
+            name: "OpenRouter",
+            envs: &["OPENROUTER_API_KEY", "OPENROUTER_KEY"],
+            export: "OPENROUTER_API_KEY",
+            key_page: "https://openrouter.ai/settings/keys",
+            asks_for: "the API key",
+            slots: &[],
+            file: None,
+            db: None,
+            env: Box::new(process_env),
+            fallback: None,
+            region: None,
+            extras: &[Extra {
+                field: "management",
+                vars: &["OPENROUTER_MANAGEMENT_KEY", "OPENROUTER_PROVISIONING_KEY"],
+                label: "the management key, which the account balance needs",
+            }],
+            inference: String::new(),
+            routes: no_routes,
+        }
+    }
+
+    /// A GitHub token, OAuth or personal, that Copilot's quota answers to.
+    /// The GitHub CLI's own login is read but never written: a switch is
+    /// `GH_TOKEN`, which it and the Copilot CLI read first.
+    pub fn copilot() -> Self {
+        ApiKey {
+            id: "copilot",
+            name: "Copilot",
+            envs: &[
+                "COPILOT_QUOTA_TOKEN",
+                "COPILOT_GITHUB_TOKEN",
+                "GH_TOKEN",
+                "GITHUB_TOKEN",
+            ],
+            export: "GH_TOKEN",
+            key_page: "https://github.com/settings/tokens",
+            asks_for: "the GitHub token (`gh auth token` prints yours)",
+            slots: &[],
+            file: None,
+            db: None,
+            env: Box::new(process_env),
+            fallback: Some(Box::new(gh_token)),
+            region: None,
+            extras: &[],
+            inference: String::new(),
+            routes: no_routes,
+        }
+    }
+
     /// The database moves with the file: a test's file has its database
-    /// beside it.
+    /// beside it. Nothing outside the test is asked for a key.
     #[cfg(test)]
     pub fn with(
         mut self,
-        file: Option<KeyFile>,
+        file: Option<PathBuf>,
         env: impl Fn(&str) -> Option<String> + Send + Sync + 'static,
     ) -> Self {
-        self.db = self.db.take().and_then(|db| {
-            Some(KeyDb {
-                path: file.as_ref()?.path.with_file_name("opencode.db"),
-                integration: db.integration,
-            })
-        });
+        self.db = self
+            .db
+            .take()
+            .and_then(|_| Some(file.as_ref()?.with_file_name("opencode.db")));
         self.file = file;
         self.env = Box::new(env);
+        self.fallback = None;
+        self
+    }
+
+    #[cfg(test)]
+    pub fn falling_back_to(
+        mut self,
+        lookup: impl Fn() -> Option<String> + Send + Sync + 'static,
+    ) -> Self {
+        self.fallback = Some(Box::new(lookup));
         self
     }
 
@@ -157,6 +373,44 @@ impl ApiKey {
     pub fn inferring_at(mut self, base: &str) -> Self {
         self.inference = base.to_owned();
         self
+    }
+
+    fn fields(&self) -> Vec<Field> {
+        let region = self.region.as_ref().map(|r| Field {
+            name: "region",
+            label: "the region",
+            choices: r.choices,
+        });
+        region
+            .into_iter()
+            .chain(self.extras.iter().map(|e| Field {
+                name: e.field,
+                label: e.label,
+                choices: &[],
+            }))
+            .collect()
+    }
+
+    /// The region `creds` say, else the default.
+    fn region_of(&self, creds: &Value) -> Option<&'static str> {
+        let r = self.region.as_ref()?;
+        let said = creds.get("region").and_then(Value::as_str).unwrap_or("");
+        Some(
+            r.choices
+                .iter()
+                .copied()
+                .find(|c| *c == said)
+                .unwrap_or(r.choices[0]),
+        )
+    }
+
+    /// The credential the CLI reads, `key` in `region`.
+    fn creds(&self, key: &str, region: Option<&str>) -> Value {
+        let mut creds = json!({ "key": key });
+        if let Some(region) = region.filter(|_| self.region.is_some()) {
+            creds["region"] = json!(region);
+        }
+        creds
     }
 
     /// The first variable that holds a key, and the key.
@@ -168,31 +422,177 @@ impl ApiKey {
     }
 
     /// opencode's database, when it is where opencode reads its logins.
-    fn database(&self, flags: OpenFlags) -> Result<Option<(&KeyDb, Connection)>> {
+    fn database(&self, flags: OpenFlags) -> Result<Option<Connection>> {
         let Some(db) = &self.db else {
             return Ok(None);
         };
-        Ok(open_db(&db.path, flags)?.map(|conn| (db, conn)))
+        open_db(db, flags)
     }
 
-    /// The CLI's login: from the database once opencode reads it, else from
-    /// the file.
-    fn stored_login(&self) -> Result<Option<Value>> {
-        if let Some((db, conn)) = self.database(OpenFlags::SQLITE_OPEN_READ_ONLY)? {
-            return Ok(selected(&conn, db.integration)?.map(|(_, value)| value));
+    fn found_in_db(&self, conn: &Connection) -> Result<Found> {
+        self.slots
+            .iter()
+            .map(|slot| Ok((*slot, selected(conn, slot)?.map(|(_, value)| value))))
+            .collect()
+    }
+
+    fn found_in_file(&self, json: &Value) -> Found {
+        self.slots
+            .iter()
+            .map(|slot| (*slot, json.get(slot).cloned()))
+            .collect()
+    }
+
+    /// What the CLI's slots hold: from the database once opencode reads it,
+    /// else from the file.
+    fn found(&self) -> Result<Found> {
+        if let Some(conn) = self.database(OpenFlags::SQLITE_OPEN_READ_ONLY)? {
+            return self.found_in_db(&conn);
         }
         let Some(file) = &self.file else {
-            return Ok(None);
+            return Ok(Vec::new());
         };
-        Ok(read_json(&file.path)?.and_then(|mut json| json.get_mut(file.entry).map(Value::take)))
+        Ok(read_json(file)?.map_or_else(Vec::new, |json| self.found_in_file(&json)))
     }
 
-    fn stored_key(&self) -> Result<Option<String>> {
-        Ok(self
-            .stored_login()?
-            .as_ref()
-            .and_then(key_of)
-            .map(|k| k.trim().to_owned()))
+    /// The CLI's login, and the slot it is in.
+    fn stored_login(&self) -> Result<Option<(&'static str, Value)>> {
+        Ok(read_slot(&self.found()?).map(|(slot, value)| (slot, value.clone())))
+    }
+
+    /// The slot a key goes in, and the live key's slot when the switch
+    /// moves it out of there. Without a region it is the slot the CLI reads.
+    /// With one it is the region's slot holding a key, else the region's
+    /// counterpart of the live key's slot, which is emptied when it is
+    /// another region's. Any other key read ahead of it would still be the
+    /// one the CLI uses.
+    fn target(
+        &self,
+        found: &Found,
+        region: Option<&str>,
+    ) -> Result<(&'static str, Option<&'static str>)> {
+        let live = read_slot(found)
+            .filter(|(_, v)| key_of(v).is_some())
+            .map(|(slot, _)| slot);
+        let (slot, emptied) = match (&self.region, region) {
+            (Some(r), Some(want)) => {
+                let held = found
+                    .iter()
+                    .find(|(s, v)| (r.of_slot)(s) == want && v.as_ref().and_then(key_of).is_some())
+                    .map(|(s, _)| *s);
+                (
+                    held.unwrap_or_else(|| (r.slot_for)(live, want)),
+                    live.filter(|l| (r.of_slot)(l) != want),
+                )
+            }
+            _ => (read_slot(found).map_or(self.slots[0], |(s, _)| s), None),
+        };
+        if let Some((other, _)) = found
+            .iter()
+            .take_while(|(s, _)| *s != slot)
+            .find(|(s, v)| Some(*s) != emptied && v.as_ref().and_then(key_of).is_some())
+        {
+            bail!(
+                "{} reads the key in {other} before {slot}, where this login's key goes: remove {other} from opencode first",
+                self.name
+            );
+        }
+        Ok((slot, emptied))
+    }
+
+    /// Makes `key` the credential opencode uses, as opencode's own switch
+    /// would: a row already holding it is activated, the key row in use is
+    /// rekeyed, and otherwise a new row is added in front of a login that is
+    /// not a key, which stays behind it.
+    fn install_row(
+        &self,
+        conn: &mut Connection,
+        key: &str,
+        region: Option<&str>,
+        outgoing: Option<&Value>,
+    ) -> Result<()> {
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let found = self.found_in_db(&tx)?;
+        if outgoing.is_some_and(|o| key_of(o).map(str::trim) != read_key(&found)) {
+            return Err(Changed.into());
+        }
+        let live = read_key(&found).map(str::to_owned);
+        let (integration, emptied) = self.target(&found, region)?;
+        if let Some(emptied) = emptied {
+            let live = live.clone().unwrap_or_default();
+            let rows: Vec<(String, String)> = tx
+                .prepare("SELECT id, value FROM credential WHERE integration_id = ?1")?
+                .query_map([emptied], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<rusqlite::Result<_>>()?;
+            for (id, value) in rows {
+                let value: Value = serde_json::from_str(&value).unwrap_or(Value::Null);
+                if key_of(&value).map(str::trim) == Some(live.as_str()) {
+                    tx.execute("DELETE FROM credential WHERE id = ?1", [&id])?;
+                }
+            }
+            if let (_, Some(still)) = self.target(&self.found_in_db(&tx)?, region)? {
+                bail!(
+                    "{} holds more keys in {still}, read before {integration}: remove them from opencode first",
+                    self.name
+                );
+            }
+        }
+        let current = selected(&tx, integration)?;
+        let holder = {
+            let mut rows =
+                tx.prepare("SELECT id, value FROM credential WHERE integration_id = ?1")?;
+            let rows = rows.query_map([integration], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            let mut holder = None;
+            for row in rows {
+                let (id, value) = row?;
+                let value: Value = serde_json::from_str(&value).unwrap_or(Value::Null);
+                if key_of(&value).map(str::trim) == Some(key) {
+                    holder = Some(id);
+                    break;
+                }
+            }
+            holder
+        };
+        let now = jiff::Timestamp::now().as_millisecond();
+        match (holder, current) {
+            (Some(id), current) if current.as_ref().is_some_and(|(c, _)| *c == id) => {}
+            (Some(id), _) => {
+                tx.execute(
+                    "UPDATE credential SET active = 0 WHERE integration_id = ?1",
+                    [integration],
+                )?;
+                tx.execute("UPDATE credential SET active = 1 WHERE id = ?1", [&id])?;
+            }
+            (None, Some((id, mut value)))
+                if key_of(&value).is_some() && key_of(&value).map(str::trim) == live.as_deref() =>
+            {
+                value["key"] = json!(key);
+                tx.execute(
+                    "UPDATE credential SET value = ?1, time_updated = ?2 WHERE id = ?3",
+                    rusqlite::params![value.to_string(), now, id],
+                )?;
+            }
+            (None, _) => {
+                tx.execute(
+                    "UPDATE credential SET active = 0 WHERE integration_id = ?1",
+                    [integration],
+                )?;
+                tx.execute(
+                    "INSERT INTO credential (id, integration_id, label, value, active, time_created, time_updated) \
+                     VALUES (?1, ?2, 'API key', ?3, 1, ?4, ?4)",
+                    rusqlite::params![
+                        credential_id(now)?,
+                        integration,
+                        json!({"type": "key", "key": key}).to_string(),
+                        now
+                    ],
+                )?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
     }
 }
 
@@ -208,7 +608,7 @@ impl Provider for ApiKey {
     fn home(&self) -> PathBuf {
         self.file
             .as_ref()
-            .and_then(|f| f.path.parent().map(PathBuf::from))
+            .and_then(|f| f.parent().map(PathBuf::from))
             .unwrap_or_default()
     }
 
@@ -220,7 +620,7 @@ impl Provider for ApiKey {
         {
             return None;
         }
-        self.file.as_ref().map(|f| f.path.clone())
+        self.file.clone()
     }
 
     fn access_token<'a>(&self, creds: &'a Value) -> Option<&'a str> {
@@ -245,11 +645,52 @@ impl Provider for ApiKey {
 
     /// The environment wins, as it does for the CLI.
     fn live(&self) -> Result<Option<Value>> {
-        let key = match self.env_key() {
-            Some((_, key)) => Some(key),
-            None => self.stored_key()?,
-        };
-        Ok(key.map(|key| json!({ "key": key })))
+        if let Some((_, key)) = self.env_key() {
+            let region = self.region.as_ref().map(|r| {
+                let said = (self.env)(r.var).unwrap_or_default();
+                r.choices
+                    .iter()
+                    .copied()
+                    .find(|c| *c == said.trim())
+                    .unwrap_or(r.choices[0])
+            });
+            let mut creds = self.creds(&key, region);
+            for extra in self.extras {
+                let value = extra.vars.iter().find_map(|var| {
+                    Some((self.env)(var)?.trim().to_owned()).filter(|v| !v.is_empty())
+                });
+                if let Some(value) = value {
+                    creds[extra.field] = json!(value);
+                }
+            }
+            return Ok(Some(creds));
+        }
+        if let Some((slot, login)) = self.stored_login()?
+            && let Some(key) = key_of(&login)
+        {
+            let region = self.region.as_ref().map(|r| (r.of_slot)(slot));
+            return Ok(Some(self.creds(key.trim(), region)));
+        }
+        Ok(self
+            .fallback
+            .as_ref()
+            .and_then(|lookup| lookup())
+            .map(|key| key.trim().to_owned())
+            .filter(|key| !key.is_empty())
+            .map(|key| self.creds(&key, None)))
+    }
+
+    /// What the store holds beside the key outlives a sync: the CLI's slot
+    /// carries only the key.
+    fn synced(&self, stored: &Value, live: Value) -> Value {
+        match (stored.as_object(), live) {
+            (Some(stored), Value::Object(live)) => {
+                let mut merged = stored.clone();
+                merged.extend(live);
+                Value::Object(merged)
+            }
+            (_, live) => live,
+        }
     }
 
     /// A login in the key's slot that is not a key, which a switch would
@@ -260,6 +701,7 @@ impl Provider for ApiKey {
         }
         Ok(self
             .stored_login()?
+            .map(|(_, login)| login)
             .filter(|e| key_of(e).is_none())
             .map(|e| match e.get("type").and_then(Value::as_str) {
                 Some(kind) => format!("a login of type {kind}"),
@@ -279,11 +721,25 @@ impl Provider for ApiKey {
 
     fn env_line(&self, entry: &Entry) -> Result<String> {
         let key = key_of(&entry.creds).context("stored credential holds no key")?;
-        Ok(format!(
-            "export {}='{}'",
-            self.envs[0],
-            key.trim().replace('\'', r"'\''")
-        ))
+        let mut lines: Vec<String> = self
+            .envs
+            .iter()
+            .take_while(|var| **var != self.export)
+            .map(|var| format!("unset {var}"))
+            .collect();
+        lines.push(format!("export {}={}", self.export, shell_quote(key)));
+        if let (Some(r), Some(region)) = (&self.region, self.region_of(&entry.creds)) {
+            lines.push(format!("export {}={}", r.var, shell_quote(region)));
+        }
+        for extra in self.extras {
+            match key_of_field(&entry.creds, extra.field) {
+                Some(value) => {
+                    lines.push(format!("export {}={}", extra.vars[0], shell_quote(value)))
+                }
+                None => lines.extend(extra.vars.iter().map(|var| format!("unset {var}"))),
+            }
+        }
+        Ok(lines.join("\n"))
     }
 
     /// Writes the key into the CLI's file. A key the environment sets wins
@@ -291,35 +747,56 @@ impl Provider for ApiKey {
     fn install(&self, entry: &Entry, outgoing: Option<&Value>) -> Result<()> {
         let key = key_of(&entry.creds).context("stored credential holds no key")?;
         let qualified = entry.qualified();
+        let region = self.region_of(&entry.creds);
         if let Some((var, _)) = self.env_key() {
             bail!(
                 "{} reads its key from {var}, which remuda cannot change in a running shell: run `eval \"$(remuda env {qualified})\"`",
                 self.name
             );
         }
-        if let Some((db, mut conn)) = self.database(OpenFlags::SQLITE_OPEN_READ_WRITE)? {
-            return install_row(&mut conn, db.integration, key.trim(), outgoing);
+        if let Some(mut conn) = self.database(OpenFlags::SQLITE_OPEN_READ_WRITE)? {
+            return self.install_row(&mut conn, key.trim(), region, outgoing);
         }
         let Some(file) = &self.file else {
             bail!(
                 "{} reads its key from {}: run `eval \"$(remuda env {qualified})\"`",
                 self.name,
-                self.envs[0]
+                self.export
             );
         };
-        update_json(&file.path, |json| {
+        update_json(file, |json| {
             if !json.is_object() {
                 *json = json!({});
             }
-            let current = json.get(file.entry).and_then(key_of).map(str::trim);
-            if outgoing.is_some_and(|o| key_of(o).map(str::trim) != current) {
+            let found = self.found_in_file(json);
+            if outgoing.is_some_and(|o| key_of(o).map(str::trim) != read_key(&found)) {
                 return Err(Changed.into());
             }
-            match json.get_mut(file.entry).and_then(Value::as_object_mut) {
-                Some(slot) if slot.get("type").and_then(Value::as_str) == Some("api") => {
-                    slot.insert("key".into(), json!(key.trim()));
+            let (slot, emptied) = self.target(&found, region)?;
+            let held = found
+                .iter()
+                .find(|(s, _)| *s == slot)
+                .and_then(|(_, v)| v.as_ref());
+            let live = read_slot(&found).map(|(s, _)| s);
+            if held.is_some_and(|held| {
+                Some(slot) != live && key_of(held).map(str::trim) != Some(key.trim())
+            }) {
+                bail!(
+                    "{}'s {slot} entry holds a login that is not the live one, which this switch would overwrite: remove it from {} first",
+                    self.name,
+                    file.display()
+                );
+            }
+            if let Some(emptied) = emptied
+                && let Some(entries) = json.as_object_mut()
+            {
+                entries.remove(emptied);
+            }
+            match json.get_mut(slot).and_then(Value::as_object_mut) {
+                Some(entry) if entry.get("type").and_then(Value::as_str) == Some("api") => {
+                    entry.insert("key".into(), json!(key.trim()));
                 }
-                _ => json[file.entry] = json!({ "type": "api", "key": key.trim() }),
+                _ => json[slot] = json!({ "type": "api", "key": key.trim() }),
             }
             Ok(())
         })
@@ -332,6 +809,8 @@ impl Provider for ApiKey {
     fn begin_login(&self, _paste: bool) -> Result<Box<dyn PendingLogin>> {
         Ok(Box::new(KeyPending {
             url: self.key_page.to_owned(),
+            asks_for: self.asks_for,
+            fields: self.fields(),
         }))
     }
 
@@ -397,76 +876,6 @@ fn selected(conn: &Connection, integration: &str) -> Result<Option<(String, Valu
     Ok(row.map(|(id, value)| (id, serde_json::from_str(&value).unwrap_or(Value::Null))))
 }
 
-/// Makes `key` the credential opencode uses, as opencode's own switch would:
-/// a row already holding it is activated, the key row in use is rekeyed, and
-/// otherwise a new row is added in front of a login that is not a key, which
-/// stays behind it.
-fn install_row(
-    conn: &mut Connection,
-    integration: &str,
-    key: &str,
-    outgoing: Option<&Value>,
-) -> Result<()> {
-    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let current = selected(&tx, integration)?;
-    let current_key = current.as_ref().and_then(|(_, v)| key_of(v)).map(str::trim);
-    if outgoing.is_some_and(|o| key_of(o).map(str::trim) != current_key) {
-        return Err(Changed.into());
-    }
-    let holder = {
-        let mut rows = tx.prepare("SELECT id, value FROM credential WHERE integration_id = ?1")?;
-        let rows = rows.query_map([integration], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?;
-        let mut holder = None;
-        for row in rows {
-            let (id, value) = row?;
-            let value: Value = serde_json::from_str(&value).unwrap_or(Value::Null);
-            if key_of(&value).map(str::trim) == Some(key) {
-                holder = Some(id);
-                break;
-            }
-        }
-        holder
-    };
-    let now = jiff::Timestamp::now().as_millisecond();
-    match (holder, current) {
-        (Some(id), current) if current.as_ref().is_some_and(|(c, _)| *c == id) => {}
-        (Some(id), _) => {
-            tx.execute(
-                "UPDATE credential SET active = 0 WHERE integration_id = ?1",
-                [integration],
-            )?;
-            tx.execute("UPDATE credential SET active = 1 WHERE id = ?1", [&id])?;
-        }
-        (None, Some((id, mut value))) if key_of(&value).is_some() => {
-            value["key"] = json!(key);
-            tx.execute(
-                "UPDATE credential SET value = ?1, time_updated = ?2 WHERE id = ?3",
-                rusqlite::params![value.to_string(), now, id],
-            )?;
-        }
-        (None, _) => {
-            tx.execute(
-                "UPDATE credential SET active = 0 WHERE integration_id = ?1",
-                [integration],
-            )?;
-            tx.execute(
-                "INSERT INTO credential (id, integration_id, label, value, active, time_created, time_updated) \
-                 VALUES (?1, ?2, 'API key', ?3, 1, ?4, ?4)",
-                rusqlite::params![
-                    credential_id(now)?,
-                    integration,
-                    json!({"type": "key", "key": key}).to_string(),
-                    now
-                ],
-            )?;
-        }
-    }
-    tx.commit()?;
-    Ok(())
-}
-
 /// An id shaped like opencode's own: `cred_`, the time in hex, then base62.
 fn credential_id(now_ms: i64) -> Result<String> {
     const BASE62: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
@@ -485,6 +894,8 @@ fn credential_id(now_ms: i64) -> Result<String> {
 /// A sign-in that is a key pasted from the provider's key page.
 struct KeyPending {
     url: String,
+    asks_for: &'static str,
+    fields: Vec<Field>,
 }
 
 impl PendingLogin for KeyPending {
@@ -497,16 +908,49 @@ impl PendingLogin for KeyPending {
     }
 
     fn asks_for(&self) -> &'static str {
-        "the API key"
+        self.asks_for
+    }
+
+    fn fields(&self) -> Vec<Field> {
+        self.fields.clone()
     }
 
     fn finish(self: Box<Self>, code: Option<&str>) -> Result<Login> {
+        self.finish_with(code, &serde_json::Map::new())
+    }
+
+    fn finish_with(
+        self: Box<Self>,
+        code: Option<&str>,
+        answers: &serde_json::Map<String, Value>,
+    ) -> Result<Login> {
         let key = code
             .map(str::trim)
             .filter(|k| !k.is_empty())
             .context("no key was pasted")?;
+        let mut creds = json!({ "key": key });
+        for field in &self.fields {
+            let answer = answers
+                .get(field.name)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|a| !a.is_empty());
+            let value = match (field.choices, answer) {
+                ([], None) => continue,
+                ([], Some(answer)) => answer,
+                ([first, ..], None) => first,
+                (choices, Some(answer)) => choices
+                    .iter()
+                    .copied()
+                    .find(|c| c.eq_ignore_ascii_case(answer))
+                    .with_context(|| {
+                        format!("{} is {}, not {answer}", field.label, choices.join(" or "))
+                    })?,
+            };
+            creds[field.name] = json!(value);
+        }
         Ok(Login {
-            creds: json!({ "key": key }),
+            creds,
             identity: identity_of(key),
         })
     }
@@ -520,23 +964,21 @@ mod tests {
     use crate::store::Store;
 
     fn opencode(dir: &std::path::Path, env: Option<&'static str>) -> ApiKey {
-        ApiKey::opencode().with(
-            Some(KeyFile {
-                path: dir.join("auth.json"),
-                entry: "opencode-go",
-            }),
-            move |name| {
-                (name == "OPENCODE_API_KEY")
-                    .then(|| env.map(str::to_owned))
-                    .flatten()
-            },
-        )
+        ApiKey::opencode().with(Some(dir.join("auth.json")), move |name| {
+            (name == "OPENCODE_API_KEY")
+                .then(|| env.map(str::to_owned))
+                .flatten()
+        })
     }
 
     fn save(store: &Store, p: &ApiKey, name: &str, key: &str) {
-        let login = Box::new(KeyPending { url: String::new() })
-            .finish(Some(key))
-            .unwrap();
+        let login = Box::new(KeyPending {
+            url: String::new(),
+            asks_for: "the API key",
+            fields: Vec::new(),
+        })
+        .finish(Some(key))
+        .unwrap();
         store
             .save(&Entry::new(p.id(), name, login.creds, login.identity, 1))
             .unwrap();
@@ -564,14 +1006,22 @@ mod tests {
 
     #[test]
     fn a_pasted_key_is_the_login() {
-        let login = Box::new(KeyPending { url: "u".into() })
-            .finish(Some("  sk-1  "))
-            .unwrap();
+        let login = Box::new(KeyPending {
+            url: "u".into(),
+            asks_for: "the API key",
+            fields: Vec::new(),
+        })
+        .finish(Some("  sk-1  "))
+        .unwrap();
         assert_eq!(login.creds, json!({"key": "sk-1"}));
         assert!(
-            Box::new(KeyPending { url: "u".into() })
-                .finish(Some(" "))
-                .is_err()
+            Box::new(KeyPending {
+                url: "u".into(),
+                asks_for: "the API key",
+                fields: Vec::new(),
+            })
+            .finish(Some(" "))
+            .is_err()
         );
     }
 
@@ -667,17 +1117,11 @@ mod tests {
     #[test]
     fn an_empty_variable_is_no_key() {
         let tmp = tempfile::tempdir().unwrap();
-        let p = ApiKey::opencode().with(
-            Some(KeyFile {
-                path: tmp.path().join("auth.json"),
-                entry: "opencode-go",
-            }),
-            |name| match name {
-                "OPENCODE_API_KEY" => Some(" ".into()),
-                "OPENCODE_GO_API_KEY" => Some("k1".into()),
-                _ => None,
-            },
-        );
+        let p = ApiKey::opencode().with(Some(tmp.path().join("auth.json")), |name| match name {
+            "OPENCODE_API_KEY" => Some(" ".into()),
+            "OPENCODE_GO_API_KEY" => Some("k1".into()),
+            _ => None,
+        });
         assert_eq!(p.live().unwrap(), Some(json!({"key": "k1"})));
     }
 
@@ -703,10 +1147,21 @@ mod tests {
     }
 
     fn row(conn: &Connection, id: &str, value: Value, active: Option<bool>, created: i64) {
+        row_in(conn, "opencode-go", id, value, active, created);
+    }
+
+    fn row_in(
+        conn: &Connection,
+        integration: &str,
+        id: &str,
+        value: Value,
+        active: Option<bool>,
+        created: i64,
+    ) {
         conn.execute(
             "INSERT INTO credential (id, integration_id, label, value, active, time_created, time_updated) \
-             VALUES (?1, 'opencode-go', 'API key', ?2, ?3, ?4, ?4)",
-            rusqlite::params![id, value.to_string(), active, created],
+             VALUES (?1, ?2, 'API key', ?3, ?4, ?5, ?5)",
+            rusqlite::params![id, integration, value.to_string(), active, created],
         )
         .unwrap();
     }
@@ -873,13 +1328,9 @@ mod tests {
             Some(true),
             1,
         );
-        let err = install_row(
-            &mut db,
-            "opencode-go",
-            "go-perso",
-            Some(&json!({"key": "go-work"})),
-        )
-        .unwrap_err();
+        let err = opencode(tmp.path(), None)
+            .install_row(&mut db, "go-perso", None, Some(&json!({"key": "go-work"})))
+            .unwrap_err();
         assert!(err.is::<Changed>(), "{err:#}");
         assert_eq!(rows(&db)[0].1["key"], "go-new");
     }
@@ -939,10 +1390,7 @@ mod tests {
         let hidden = tmp.path().join("hidden");
         std::fs::create_dir(&hidden).unwrap();
         let mut p = opencode(tmp.path(), None);
-        p.db = Some(KeyDb {
-            path: hidden.join("opencode.db"),
-            integration: "opencode-go",
-        });
+        p.db = Some(hidden.join("opencode.db"));
         std::fs::set_permissions(&hidden, std::fs::Permissions::from_mode(0o000)).unwrap();
         let enforced = std::fs::metadata(hidden.join("opencode.db"))
             .is_err_and(|e| e.kind() == std::io::ErrorKind::PermissionDenied);
@@ -969,5 +1417,571 @@ mod tests {
         assert_eq!(p.live().unwrap(), None);
         assert!(!p.renews());
         assert!(!p.signs_out());
+    }
+
+    /// A login signed in through `p`'s own sign-in, answering its fields.
+    fn sign_in(store: &Store, p: &ApiKey, name: &str, key: &str, answers: Value) {
+        let login = p
+            .begin_login(false)
+            .unwrap()
+            .finish_with(Some(key), answers.as_object().unwrap())
+            .unwrap();
+        store
+            .save(&Entry::new(p.id(), name, login.creds, login.identity, 1))
+            .unwrap();
+    }
+
+    fn vars(pairs: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {
+        move |name| {
+            pairs
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, v)| (*v).to_owned())
+        }
+    }
+
+    #[test]
+    fn a_key_is_named_as_tokengauge_names_it() {
+        let hex: String = Sha256::digest(b"sk-or-v1-abc")
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(
+            identity_of(" sk-or-v1-abc ").account_id,
+            format!("key-{}", &hex[..16])
+        );
+    }
+
+    #[test]
+    fn deepseek_is_switched_in_opencodes_deepseek_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = ApiKey::deepseek().with(Some(tmp.path().join("auth.json")), |_| None);
+        write_json(
+            &tmp.path().join("auth.json"),
+            &json!({
+                "deepseek": {"type": "api", "key": "ds-work"},
+                "opencode-go": {"type": "api", "key": "go-1"},
+            }),
+        )
+        .unwrap();
+        save(&store, &p, "work", "ds-work");
+        save(&store, &p, "perso", "ds-perso");
+        assert_eq!(p.live().unwrap(), Some(json!({"key": "ds-work"})));
+        ops::switch(&store, &p, "perso", false).unwrap();
+        let file = read_json(&tmp.path().join("auth.json")).unwrap().unwrap();
+        assert_eq!(file["deepseek"], json!({"type": "api", "key": "ds-perso"}));
+        assert_eq!(file["opencode-go"], json!({"type": "api", "key": "go-1"}));
+    }
+
+    #[test]
+    fn deepseek_in_the_environment_is_switched_by_the_shell() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = ApiKey::deepseek().with(
+            Some(tmp.path().join("auth.json")),
+            vars(&[("DEEPSEEK_API_KEY", "ds-work")]),
+        );
+        save(&store, &p, "work", "ds-work");
+        save(&store, &p, "perso", "ds-perso");
+        let err = ops::switch(&store, &p, "perso", false).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("eval \"$(remuda env deepseek/perso)\""),
+            "{err:#}"
+        );
+        let perso = store.get("deepseek", "perso").unwrap().unwrap();
+        assert_eq!(
+            p.env_line(&perso).unwrap(),
+            "export DEEPSEEK_API_KEY='ds-perso'"
+        );
+        assert!(!tmp.path().join("auth.json").exists());
+    }
+
+    #[test]
+    fn deepseek_is_switched_in_opencode_2s_database() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = ApiKey::deepseek().with(Some(tmp.path().join("auth.json")), |_| None);
+        let db = database(tmp.path(), true);
+        row_in(
+            &db,
+            "deepseek",
+            "cred_d",
+            json!({"type": "key", "key": "ds-work"}),
+            Some(true),
+            1,
+        );
+        row(
+            &db,
+            "cred_g",
+            json!({"type": "key", "key": "go-1"}),
+            Some(true),
+            2,
+        );
+        save(&store, &p, "work", "ds-work");
+        save(&store, &p, "perso", "ds-perso");
+        ops::switch(&store, &p, "perso", false).unwrap();
+        let after = rows(&db);
+        assert_eq!(after[0].1, json!({"type": "key", "key": "ds-perso"}));
+        assert_eq!(after[1].1, json!({"type": "key", "key": "go-1"}));
+    }
+
+    fn minimax(dir: &std::path::Path, env: &'static [(&'static str, &'static str)]) -> ApiKey {
+        ApiKey::minimax().with(Some(dir.join("auth.json")), vars(env))
+    }
+
+    #[test]
+    fn a_minimax_sign_in_stores_its_region() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = minimax(tmp.path(), &[]);
+        let fields = p.begin_login(false).unwrap().fields();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].name, "region");
+        assert_eq!(fields[0].choices, ["global", "cn"]);
+        sign_in(&store, &p, "cn", "mm-cn", json!({"region": "CN"}));
+        sign_in(&store, &p, "global", "mm-global", json!({}));
+        assert_eq!(
+            store.get("minimax", "cn").unwrap().unwrap().creds,
+            json!({"key": "mm-cn", "region": "cn"})
+        );
+        assert_eq!(
+            store.get("minimax", "global").unwrap().unwrap().creds,
+            json!({"key": "mm-global", "region": "global"})
+        );
+        let err = p
+            .begin_login(false)
+            .unwrap()
+            .finish_with(Some("k"), json!({"region": "eu"}).as_object().unwrap())
+            .err()
+            .unwrap();
+        assert!(err.to_string().contains("global or cn"), "{err}");
+    }
+
+    #[test]
+    fn minimax_reads_the_region_off_the_entry_or_the_environment() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_json(
+            &tmp.path().join("auth.json"),
+            &json!({"minimax-cn-coding-plan": {"type": "api", "key": "mm-cn"}}),
+        )
+        .unwrap();
+        assert_eq!(
+            minimax(tmp.path(), &[]).live().unwrap(),
+            Some(json!({"key": "mm-cn", "region": "cn"}))
+        );
+        assert_eq!(
+            minimax(
+                tmp.path(),
+                &[("MINIMAX_API_KEY", "mm-env"), ("MINIMAX_REGION", "cn")]
+            )
+            .live()
+            .unwrap(),
+            Some(json!({"key": "mm-env", "region": "cn"}))
+        );
+        assert_eq!(
+            minimax(tmp.path(), &[("MINIMAX_API_KEY", "mm-env")])
+                .live()
+                .unwrap(),
+            Some(json!({"key": "mm-env", "region": "global"}))
+        );
+    }
+
+    #[test]
+    fn the_shells_minimax_region_is_global_unless_it_says_cn() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = minimax(tmp.path(), &[("MINIMAX_API_KEY", "mm-cn")]);
+        sign_in(&store, &p, "cn", "mm-cn", json!({"region": "cn"}));
+        assert_eq!(
+            ops::sync_live(&store, &p).unwrap(),
+            LiveState::Stored {
+                name: "cn".into(),
+                synced: true
+            }
+        );
+        assert_eq!(
+            store.get("minimax", "cn").unwrap().unwrap().creds,
+            json!({"key": "mm-cn", "region": "global"})
+        );
+        let p = minimax(
+            tmp.path(),
+            &[("MINIMAX_API_KEY", "mm-cn"), ("MINIMAX_REGION", "cn")],
+        );
+        ops::sync_live(&store, &p).unwrap();
+        assert_eq!(
+            store.get("minimax", "cn").unwrap().unwrap().creds,
+            json!({"key": "mm-cn", "region": "cn"})
+        );
+    }
+
+    #[test]
+    fn minimax_is_switched_in_its_regions_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = minimax(tmp.path(), &[]);
+        write_json(
+            &tmp.path().join("auth.json"),
+            &json!({"minimax-coding-plan": {"type": "api", "key": "mm-g1"}}),
+        )
+        .unwrap();
+        sign_in(&store, &p, "g1", "mm-g1", json!({"region": "global"}));
+        sign_in(&store, &p, "g2", "mm-g2", json!({"region": "global"}));
+        sign_in(&store, &p, "cn", "mm-cn", json!({"region": "cn"}));
+        let file = || read_json(&tmp.path().join("auth.json")).unwrap().unwrap();
+
+        ops::switch(&store, &p, "g2", false).unwrap();
+        assert_eq!(
+            file(),
+            json!({"minimax-coding-plan": {"type": "api", "key": "mm-g2"}})
+        );
+
+        ops::switch(&store, &p, "cn", false).unwrap();
+        assert_eq!(
+            file(),
+            json!({"minimax-cn-coding-plan": {"type": "api", "key": "mm-cn"}})
+        );
+        assert_eq!(
+            p.live().unwrap(),
+            Some(json!({"key": "mm-cn", "region": "cn"}))
+        );
+
+        ops::switch(&store, &p, "g1", false).unwrap();
+        assert_eq!(
+            file(),
+            json!({"minimax-coding-plan": {"type": "api", "key": "mm-g1"}})
+        );
+        assert_eq!(
+            p.live().unwrap(),
+            Some(json!({"key": "mm-g1", "region": "global"}))
+        );
+    }
+
+    #[test]
+    fn a_minimax_key_that_is_not_the_live_one_is_never_overwritten() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = minimax(tmp.path(), &[]);
+        let before = json!({
+            "minimax": {"type": "api", "key": "mm-g1"},
+            "minimax-cn": {"type": "api", "key": "mm-other"},
+        });
+        write_json(&tmp.path().join("auth.json"), &before).unwrap();
+        sign_in(&store, &p, "g1", "mm-g1", json!({"region": "global"}));
+        sign_in(&store, &p, "cn2", "mm-cn2", json!({"region": "cn"}));
+        let err = ops::switch(&store, &p, "cn2", false).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("minimax-cn entry holds a login"),
+            "{err:#}"
+        );
+        assert_eq!(
+            read_json(&tmp.path().join("auth.json")).unwrap(),
+            Some(before)
+        );
+    }
+
+    #[test]
+    fn a_minimax_key_read_ahead_of_the_live_one_refuses_the_switch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = minimax(tmp.path(), &[]);
+        let before = json!({
+            "minimax": {"type": "api", "key": "mm-g1"},
+            "minimax-coding-plan": {"type": "api", "key": "mm-g-other"},
+            "minimax-cn-coding-plan": {"type": "api", "key": "mm-cn"},
+        });
+        write_json(&tmp.path().join("auth.json"), &before).unwrap();
+        sign_in(&store, &p, "g1", "mm-g1", json!({"region": "global"}));
+        sign_in(&store, &p, "cn", "mm-cn", json!({"region": "cn"}));
+        let err = ops::switch(&store, &p, "cn", false).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("remove minimax-coding-plan from opencode"),
+            "{err:#}"
+        );
+        assert_eq!(
+            read_json(&tmp.path().join("auth.json")).unwrap(),
+            Some(before)
+        );
+    }
+
+    #[test]
+    fn minimax_moves_regions_in_opencode_2s_database() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = minimax(tmp.path(), &[]);
+        let db = database(tmp.path(), true);
+        row_in(
+            &db,
+            "minimax-cn",
+            "cred_c",
+            json!({"type": "key", "key": "mm-cn"}),
+            Some(true),
+            1,
+        );
+        row_in(
+            &db,
+            "minimax-coding-plan",
+            "cred_g",
+            json!({"type": "key", "key": "mm-old"}),
+            Some(true),
+            2,
+        );
+        sign_in(&store, &p, "cn", "mm-cn", json!({"region": "cn"}));
+        sign_in(&store, &p, "g", "mm-g", json!({"region": "global"}));
+        ops::switch(&store, &p, "g", false).unwrap();
+        let after = rows(&db);
+        assert_eq!(after.len(), 2, "{after:?}");
+        assert_eq!(
+            after[0],
+            (
+                "cred_g".to_owned(),
+                json!({"type": "key", "key": "mm-old"}),
+                Some(false)
+            )
+        );
+        assert_eq!(after[1].1, json!({"type": "key", "key": "mm-g"}));
+        assert_eq!(
+            p.live().unwrap(),
+            Some(json!({"key": "mm-g", "region": "global"}))
+        );
+
+        let before = rows(&db);
+        let err = ops::switch(&store, &p, "cn", false).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("remove them from opencode"),
+            "{err:#}"
+        );
+        assert_eq!(rows(&db), before);
+    }
+
+    #[test]
+    fn minimax_puts_its_region_in_the_environment() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = minimax(tmp.path(), &[]);
+        sign_in(&store, &p, "cn", "mm-cn", json!({"region": "cn"}));
+        assert_eq!(
+            p.env_line(&store.get("minimax", "cn").unwrap().unwrap())
+                .unwrap(),
+            "export MINIMAX_API_KEY='mm-cn'\nexport MINIMAX_REGION='cn'"
+        );
+    }
+
+    #[test]
+    fn openrouter_is_switched_by_the_shell_with_its_management_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = ApiKey::openrouter().with(None, |_| None);
+        let fields = p.begin_login(false).unwrap().fields();
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].name, "management");
+        assert!(fields[0].choices.is_empty());
+        sign_in(&store, &p, "full", "or-1", json!({"management": " mg-1 "}));
+        sign_in(&store, &p, "bare", "or-2", json!({"management": ""}));
+        let full = store.get("openrouter", "full").unwrap().unwrap();
+        let bare = store.get("openrouter", "bare").unwrap().unwrap();
+        assert_eq!(full.creds, json!({"key": "or-1", "management": "mg-1"}));
+        assert_eq!(bare.creds, json!({"key": "or-2"}));
+        assert_eq!(full.meta.account_id, identity_of("or-1").account_id);
+        assert_eq!(
+            p.env_line(&full).unwrap(),
+            "export OPENROUTER_API_KEY='or-1'\nexport OPENROUTER_MANAGEMENT_KEY='mg-1'"
+        );
+        assert_eq!(
+            p.env_line(&bare).unwrap(),
+            "export OPENROUTER_API_KEY='or-2'\nunset OPENROUTER_MANAGEMENT_KEY\nunset OPENROUTER_PROVISIONING_KEY"
+        );
+        let err = p.install(&full, None).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("eval \"$(remuda env openrouter/full)\""),
+            "{err}"
+        );
+        assert_eq!(p.live().unwrap(), None);
+    }
+
+    #[test]
+    fn openrouter_keeps_the_management_key_when_the_shell_has_the_inference_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = ApiKey::openrouter().with(None, vars(&[("OPENROUTER_KEY", "or-1")]));
+        sign_in(&store, &p, "full", "or-1", json!({"management": "mg-1"}));
+        assert_eq!(p.live().unwrap(), Some(json!({"key": "or-1"})));
+        ops::sync_live(&store, &p).unwrap();
+        assert_eq!(
+            store.get("openrouter", "full").unwrap().unwrap().creds,
+            json!({"key": "or-1", "management": "mg-1"})
+        );
+    }
+
+    #[test]
+    fn copilot_reads_the_environment_then_the_github_cli() {
+        let p = ApiKey::copilot()
+            .with(None, |_| None)
+            .falling_back_to(|| Some("gho_cli\n".into()));
+        assert_eq!(p.live().unwrap(), Some(json!({"key": "gho_cli"})));
+        let p = ApiKey::copilot()
+            .with(
+                None,
+                vars(&[
+                    ("GITHUB_TOKEN", "ghp_late"),
+                    ("COPILOT_QUOTA_TOKEN", "ghp_first"),
+                ]),
+            )
+            .falling_back_to(|| Some("gho_cli".into()));
+        assert_eq!(p.live().unwrap(), Some(json!({"key": "ghp_first"})));
+        let p = ApiKey::copilot()
+            .with(None, |_| None)
+            .falling_back_to(|| Some(" ".into()));
+        assert_eq!(p.live().unwrap(), None);
+    }
+
+    #[test]
+    fn copilot_is_switched_by_gh_token() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = ApiKey::copilot()
+            .with(None, |_| None)
+            .falling_back_to(|| Some("gho_work".into()));
+        save(&store, &p, "work", "gho_work");
+        save(&store, &p, "perso", "ghp_perso");
+        assert_eq!(
+            ops::sync_live(&store, &p).unwrap(),
+            LiveState::Stored {
+                name: "work".into(),
+                synced: true
+            }
+        );
+        let perso = store.get("copilot", "perso").unwrap().unwrap();
+        assert_eq!(
+            p.env_line(&perso).unwrap(),
+            "unset COPILOT_QUOTA_TOKEN\nunset COPILOT_GITHUB_TOKEN\nexport GH_TOKEN='ghp_perso'"
+        );
+        let err = ops::switch(&store, &p, "perso", false).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("reads its key from GH_TOKEN"),
+            "{err:#}"
+        );
+        assert_eq!(perso.meta.account_id, identity_of("ghp_perso").account_id);
+    }
+
+    #[test]
+    fn the_shells_openrouter_login_carries_its_management_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = ApiKey::openrouter().with(
+            None,
+            vars(&[
+                ("OPENROUTER_API_KEY", "or-1"),
+                ("OPENROUTER_MANAGEMENT_KEY", " mg-1 "),
+            ]),
+        );
+        let live = p.live().unwrap().unwrap();
+        assert_eq!(live, json!({"key": "or-1", "management": "mg-1"}));
+        store
+            .save(&Entry::new(
+                "openrouter",
+                "shell",
+                live,
+                identity_of("or-1"),
+                1,
+            ))
+            .unwrap();
+        assert_eq!(
+            p.env_line(&store.get("openrouter", "shell").unwrap().unwrap())
+                .unwrap(),
+            "export OPENROUTER_API_KEY='or-1'\nexport OPENROUTER_MANAGEMENT_KEY='mg-1'"
+        );
+        let p = ApiKey::openrouter().with(
+            None,
+            vars(&[
+                ("OPENROUTER_KEY", "or-2"),
+                ("OPENROUTER_PROVISIONING_KEY", "pv-2"),
+            ]),
+        );
+        assert_eq!(
+            p.live().unwrap(),
+            Some(json!({"key": "or-2", "management": "pv-2"}))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_github_cli_that_does_not_answer_in_time_has_no_token() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let script = |name: &str, body: &str| {
+            let path = tmp.path().join(name);
+            std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        };
+        let quick = script("quick", "echo gho_1");
+        let slow = script("slow", "exec sleep 5");
+        let failing = script("failing", "echo gho_2; exit 1");
+        let wait = Duration::from_millis(300);
+        assert_eq!(gh_token_from(&quick, wait).as_deref(), Some("gho_1\n"));
+        let started = std::time::Instant::now();
+        assert_eq!(gh_token_from(&slow, wait), None);
+        assert!(started.elapsed() < Duration::from_secs(3));
+        assert_eq!(gh_token_from(&failing, wait), None);
+        assert_eq!(gh_token_from(&tmp.path().join("missing"), wait), None);
+    }
+
+    #[test]
+    fn copilot_puts_its_own_cli_token_ahead_of_gh_token() {
+        let p = ApiKey::copilot()
+            .with(
+                None,
+                vars(&[
+                    ("GH_TOKEN", "ghp_gh"),
+                    ("GITHUB_TOKEN", "ghp_github"),
+                    ("COPILOT_GITHUB_TOKEN", "ghp_copilot"),
+                ]),
+            )
+            .falling_back_to(|| Some("gho_cli".into()));
+        assert_eq!(p.live().unwrap(), Some(json!({"key": "ghp_copilot"})));
+        let p = ApiKey::copilot()
+            .with(
+                None,
+                vars(&[
+                    ("COPILOT_GITHUB_TOKEN", "ghp_copilot"),
+                    ("COPILOT_QUOTA_TOKEN", "ghp_quota"),
+                ]),
+            )
+            .falling_back_to(|| None);
+        assert_eq!(p.live().unwrap(), Some(json!({"key": "ghp_quota"})));
+    }
+
+    #[test]
+    fn signing_an_openrouter_key_in_again_keeps_its_management_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let p = ApiKey::openrouter().with(None, |_| None);
+        let again = |key: &str, management: &str| {
+            let done = p
+                .begin_login(false)
+                .unwrap()
+                .finish_with(
+                    Some(key),
+                    json!({"management": management}).as_object().unwrap(),
+                )
+                .unwrap();
+            crate::commands::save_login(&store, &p, "o", true, done).unwrap();
+            store.get("openrouter", "o").unwrap().unwrap().creds
+        };
+        assert_eq!(
+            again("or-1", "mg-1"),
+            json!({"key": "or-1", "management": "mg-1"})
+        );
+        assert_eq!(
+            again("or-1", ""),
+            json!({"key": "or-1", "management": "mg-1"})
+        );
+        assert_eq!(
+            again("or-1", "mg-2"),
+            json!({"key": "or-1", "management": "mg-2"})
+        );
+        assert_eq!(again("or-2", ""), json!({"key": "or-2"}));
     }
 }

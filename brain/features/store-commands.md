@@ -39,7 +39,8 @@ at all it prints the store path.
 `--json` prints `{store, credentials: [...], live: [...]}`. Each credential has
 `provider`, `name`, `label`, `email`, `accountId`, `plan`, `active`,
 `expiresAt`, `refreshTokenExpiresAt`, `verified`, `team` and `seat`
-([team-seats.md](team-seats.md)); each live entry has `provider` and a
+([team-seats.md](team-seats.md)), and `region` for a MiniMax key (null for
+the rest); each live entry has `provider` and a
 `state`: `signed_out`, `stored` (with `name` and `confirmed`), `unstored` (with
 `email`), `foreign` (with `what`, e.g. "an API key") or `unreadable` (with
 `error`). A CLI whose files cannot be read is reported and the others are still
@@ -47,9 +48,14 @@ listed. The page reads the same JSON.
 
 ## `remuda env <name>`
 
-Prints `export VAR='key'` for a stored API key, for a shell to `eval`: GLM
-reads its key from the environment only, and opencode's variable wins over the
-key it stores. Any other provider refuses.
+Prints the shell lines that select a stored API key, for a shell to `eval`:
+`export VAR='key'`, plus MiniMax's `MINIMAX_REGION`, OpenRouter's
+`OPENROUTER_MANAGEMENT_KEY` (or `unset` of it for a login with none), and an
+`unset` of any variable the CLI reads before the exported one (Copilot's
+`COPILOT_QUOTA_TOKEN` and `COPILOT_GITHUB_TOKEN` before `GH_TOKEN`). GLM, OpenRouter and Copilot read
+their key from the environment only, and opencode Go's, DeepSeek's and
+MiniMax's variables win over the key opencode stores. Any other provider
+refuses.
 
 ## `remuda rm <name>`
 

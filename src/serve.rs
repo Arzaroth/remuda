@@ -1155,6 +1155,7 @@ impl App {
                 let url = login.url().to_owned();
                 let needs_code = login.needs_code();
                 let asks_for = login.asks_for();
+                let fields = login.fields();
                 let local_only = login.local_only();
                 let user_code = login.user_code().map(str::to_owned);
                 pending.insert(
@@ -1171,7 +1172,7 @@ impl App {
                 drop(pending);
                 let opens_in = self.open.opens_in(&self.login_settings());
                 Ok(
-                    json!({"id": id, "url": url, "needsCode": needs_code, "asksFor": asks_for, "localOnly": local_only, "userCode": user_code, "machine": hostname(), "opensIn": opens_in}),
+                    json!({"id": id, "url": url, "needsCode": needs_code, "asksFor": asks_for, "fields": fields, "localOnly": local_only, "userCode": user_code, "machine": hostname(), "opensIn": opens_in}),
                 )
             }
             ("POST", "/api/login/open") => {
@@ -1200,7 +1201,12 @@ impl App {
                         .context("that sign-in is already finishing")?;
                     (pending.provider, pending.name.clone(), pending.force, login)
                 };
-                let done = login.finish(text("code"));
+                let answers = body
+                    .get("fields")
+                    .and_then(Value::as_object)
+                    .cloned()
+                    .unwrap_or_default();
+                let done = login.finish_with(text("code"), &answers);
                 let claimed = self
                     .pending
                     .lock()
@@ -3316,6 +3322,63 @@ mod tests {
         let (status, r) = waiting.join().unwrap();
         assert_eq!(status, 400);
         assert_eq!(r["error"], "the sign-in was cancelled");
+    }
+
+    #[test]
+    fn a_key_sign_in_asks_its_fields_and_stores_the_answers() {
+        let e = env(&OFFLINE);
+        let providers: Vec<Box<dyn Provider>> = vec![
+            Box::new(crate::apikey::ApiKey::minimax().with(None, |_| None)),
+            Box::new(crate::apikey::ApiKey::deepseek().with(None, |_| None)),
+        ];
+        let app = App::new(
+            Store::open(e.store.root()),
+            places(&e),
+            providers,
+            TOKEN.into(),
+            PORT,
+            Box::new(Nowhere),
+        );
+        let (_, begun) = call(
+            &app,
+            "POST",
+            "/api/login",
+            json!({"provider": "minimax", "name": "cn"}),
+        );
+        assert_eq!(begun["needsCode"], true);
+        assert_eq!(
+            begun["fields"],
+            json!([{"name": "region", "label": "the region", "choices": ["global", "cn"]}])
+        );
+        let (status, _) = call(
+            &app,
+            "POST",
+            "/api/login/finish",
+            json!({"id": begun["id"], "code": "mm-1", "fields": {"region": "cn"}}),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(
+            e.store.get("minimax", "cn").unwrap().unwrap().creds,
+            json!({"key": "mm-1", "region": "cn"})
+        );
+
+        let (_, begun) = call(
+            &app,
+            "POST",
+            "/api/login",
+            json!({"provider": "deepseek", "name": "work"}),
+        );
+        assert_eq!(begun["fields"], json!([]));
+        call(
+            &app,
+            "POST",
+            "/api/login/finish",
+            json!({"id": begun["id"], "code": "ds-1"}),
+        );
+        assert_eq!(
+            e.store.get("deepseek", "work").unwrap().unwrap().creds,
+            json!({"key": "ds-1"})
+        );
     }
 
     #[test]

@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Added
+
+- DeepSeek, MiniMax, OpenRouter and Copilot logins, stored as API keys and
+  named by a digest of the key, as TokenGauge names them. DeepSeek and MiniMax
+  switch opencode's own entries (in `opencode.db` once opencode 2 has imported
+  `auth.json`); OpenRouter and Copilot, which read their key from the
+  environment, switch with `eval "$(remuda env <cli>/<name>)"`. Copilot takes
+  a GitHub token, and recognises the one `gh auth token` prints as the live
+  login.
+- A MiniMax login keeps its region, global or China, asked at sign-in; a
+  switch writes the region's opencode entry and `remuda env` exports
+  `MINIMAX_REGION` with the key.
+- An OpenRouter login can keep a management key beside its API key, asked at
+  sign-in and optional; `remuda env` exports it as `OPENROUTER_MANAGEMENT_KEY`,
+  which TokenGauge needs for the account balance.
+- The page's Add a login asks for those fields beside the key.
+- The page draws Copilot's, DeepSeek's and MiniMax's marks, from selvedge
+  0.15.0.
+
 ### Changed
 
 - Quota projects a usual week by default: each coming hour spends what that

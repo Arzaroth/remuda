@@ -48,6 +48,16 @@ pub struct Login {
     pub identity: Identity,
 }
 
+/// An answer a sign-in asks for beside the code, stored under `name`: one of
+/// `choices`, the first by default, or free text that may be left out when
+/// there are none.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct Field {
+    pub name: &'static str,
+    pub label: &'static str,
+    pub choices: &'static [&'static str],
+}
+
 /// How `remuda run` starts a CLI on a login of its own: the command, the
 /// variable that moves its files, and what of them a session does not share.
 pub struct RunSpec {
@@ -75,6 +85,18 @@ pub trait PendingLogin: Send {
     /// What `finish` takes, when `needs_code`.
     fn asks_for(&self) -> &'static str {
         "the code the page shows"
+    }
+    /// What `finish_with` takes beside the code.
+    fn fields(&self) -> Vec<Field> {
+        Vec::new()
+    }
+    /// `finish`, with the answers to `fields` by name.
+    fn finish_with(
+        self: Box<Self>,
+        code: Option<&str>,
+        _answers: &serde_json::Map<String, Value>,
+    ) -> Result<Login> {
+        self.finish(code)
     }
     /// Stops a `finish` that is still waiting, from another thread.
     fn canceller(&self) -> Box<dyn Fn() + Send + Sync> {
@@ -126,6 +148,11 @@ pub trait Provider: Send + Sync {
     fn plan(&self, creds: &Value) -> String;
     /// The login the CLI is signed into, or None when it is signed out.
     fn live(&self) -> Result<Option<Value>>;
+    /// The stored credential once the live login, read as `live`, is synced
+    /// into it, or once a sign-in of the same account replaces it.
+    fn synced(&self, _stored: &Value, live: Value) -> Value {
+        live
+    }
     /// A login the CLI holds that `live` does not return because it cannot be
     /// stored, described for the user.
     fn foreign_login(&self) -> Result<Option<String>> {

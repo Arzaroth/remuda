@@ -6,15 +6,23 @@ leaves this file and a doc for it lands in `brain/features/`.
 
 ## More providers, at parity with TokenGauge
 
-remuda keeps every provider TokenGauge reads but OpenRouter, whose key is a
-management key as often as an inference one. What is left:
+remuda keeps every provider TokenGauge reads but Muse and Antigravity.
+DeepSeek, MiniMax, OpenRouter and Copilot are API keys
+([brain/architecture/providers.md](brain/architecture/providers.md#api-keys));
+OpenRouter's stored credential is the inference key, with the management key
+beside it as an optional field. What is left:
 
+- Muse: a Meta sign-in through OAuth with dynamic client registration, so
+  there is no fixed client id to sign in with, and the shape of the file the
+  CLI keeps its login in is not known yet.
+- Antigravity: a Google OAuth login the IDE keeps in the system keyring, with
+  no file or documented way to write a login back, so a switch has nowhere to
+  go.
 - `remuda run` for Grok, Kimi and Cursor through each CLI's override variable
   (`GROK_HOME`, `KIMI_CODE_HOME`, `CURSOR_CONFIG_DIR`), so `remuda run
   grok/work` works as it does for Claude Code and Codex
   ([brain/features/run.md](brain/features/run.md)), and an API key handed to
   its CLI in the environment.
-- OpenRouter, once it is settled which of its two keys a stored credential is.
 
 ## Hub and satellites
 

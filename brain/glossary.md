@@ -59,6 +59,19 @@ seat. Tokens rotate; this does not.
 finished (`provider::PendingLogin`). Claude's finishes with a callback or a
 pasted code, Codex's with a callback or a device code.
 
+**Sign-in field**: an answer a pending login asks for beside its code
+(`provider::Field`), stored in the credential under its name: MiniMax's
+`region`, OpenRouter's `management` key. A choice defaults to its first value;
+free text may be left out. Avoid: option, extra, parameter.
+
+**Slot**: an entry of opencode's store (an `auth.json` key, a `credential`
+row's `integration_id`) a key provider reads its key from, in the CLI's order;
+the first holding a key is the live login (`ApiKey::slots`). Avoid: entry
+(ambiguous with the JSON), integration (opencode's word for one).
+
+**Region**: which MiniMax host a key answers on, `global` or `cn`, named by
+`MINIMAX_REGION` or by the slot holding the key. Avoid: zone, locale.
+
 **Portable login**: one whose tokens work from two machines at once
 (`Provider::portable`): an API key, or Cursor's, whose refresh has not been
 seen to rotate the refresh token. `remuda export` copies those and lists the rest to sign in
