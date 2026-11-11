@@ -13,6 +13,7 @@ const login = (name: string, used: number, resetsIn: number | null, samples: [nu
   resetsAt: resetsIn === null ? null : NOW + resetsIn,
   length: WEEK,
   samples: [...samples, [NOW, used]],
+  trailed: samples.length > 0,
   past: [],
 });
 
@@ -223,6 +224,7 @@ const week = (name: string, used: number, past: Point[], weight = 1): Login => (
   resetsAt: at(7, 0),
   length: WEEK,
   samples: [[MID, used]],
+  trailed: false,
   past: [{ opened: at(-7, 0), samples: past }],
 });
 
@@ -258,6 +260,7 @@ describe('usual', () => {
         [at(-3, 12), 9],
         [MID, 9],
       ],
+      trailed: true,
       past: [{ opened: at(-7, 0), samples: mornings(-7, -3) }],
     };
     const u = usual([l], MID)!;
