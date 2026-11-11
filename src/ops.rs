@@ -236,9 +236,12 @@ fn sync_live_files(store: &Store, p: &dyn Provider, live: Option<Value>) -> Resu
             entry.qualified(),
             p.name()
         );
-    } else if entry.creds != creds {
-        entry.creds = creds;
-        changed = true;
+    } else {
+        let creds = p.synced(&entry.creds, creds);
+        if entry.creds != creds {
+            entry.creds = creds;
+            changed = true;
+        }
     }
     if let Some(id) = identity.filter(|id| id.account_id == entry.meta.account_id) {
         if id.oauth_account.is_some() && entry.meta.oauth_account != id.oauth_account {

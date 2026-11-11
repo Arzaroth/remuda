@@ -11,36 +11,34 @@ use crate::paths;
 use crate::provider::{Format, Identity, Login, PendingLogin, Provider, Upstream};
 use crate::store::Entry;
 
-/// Where a CLI that takes an API key finds it, besides its environment: one
-/// entry of a JSON file other entries share.
-pub struct KeyFile {
-    pub path: PathBuf,
-    pub entry: &'static str,
-}
-
-/// opencode 2's `credential` table. Once opencode has imported `auth.json`
-/// into it, opencode reads its logins from here and never from the file.
-pub struct KeyDb {
-    pub path: PathBuf,
-    pub integration: &'static str,
-}
-
 /// A provider signed into with an API key. A key has no account behind it to
 /// confirm, never expires and never refreshes, so it is filed under a digest
 /// of itself: two copies of one key are one credential, and two keys are two.
 pub struct ApiKey {
     id: &'static str,
     name: &'static str,
-    /// The variables the CLI reads, in its order. The first is the one
-    /// `remuda env` sets.
+    /// The variables the CLI reads, in its order.
     envs: &'static [&'static str],
+    /// The one `remuda env` sets.
+    export: &'static str,
     key_page: &'static str,
-    file: Option<KeyFile>,
-    db: Option<KeyDb>,
+    asks_for: &'static str,
+    /// The entries of `file`, and the integrations of `db`, the CLI reads a
+    /// key from, in its order.
+    slots: &'static [&'static str],
+    /// A JSON file other entries share.
+    file: Option<PathBuf>,
+    /// opencode 2's `credential` table. Once opencode has imported
+    /// `auth.json` into it, opencode reads its logins from here and never
+    /// from the file.
+    db: Option<PathBuf>,
     env: Box<Env>,
     inference: String,
     routes: Routes,
 }
+
+/// What each slot holds, in the CLI's order.
+type Found = Vec<(&'static str, Option<Value>)>;
 
 /// The paths under `inference` that take each format, for a model.
 type Routes = fn(&str) -> &'static [(Format, &'static str)];
@@ -99,13 +97,33 @@ fn identity_of(key: &str) -> Identity {
     }
 }
 
+/// The slot the CLI reads: the first holding a key, else the first holding
+/// anything.
+fn read_slot(found: &Found) -> Option<(&'static str, &Value)> {
+    let held = || found.iter().filter_map(|(s, v)| Some((*s, v.as_ref()?)));
+    held()
+        .find(|(_, v)| key_of(v).is_some())
+        .or_else(|| held().next())
+}
+
+fn read_key(found: &Found) -> Option<&str> {
+    read_slot(found).and_then(|(_, v)| key_of(v)).map(str::trim)
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.trim().replace('\'', r"'\''"))
+}
+
 impl ApiKey {
     pub fn glm() -> Self {
         ApiKey {
             id: "glm",
             name: "GLM",
             envs: &["Z_AI_API_KEY", "ZAI_API_TOKEN"],
+            export: "Z_AI_API_KEY",
             key_page: "https://z.ai/manage-apikey/apikey-list",
+            asks_for: "the API key",
+            slots: &[],
             file: None,
             db: None,
             env: Box::new(process_env),
@@ -119,15 +137,12 @@ impl ApiKey {
             id: "opencode",
             name: "opencode Go",
             envs: &["OPENCODE_API_KEY", "OPENCODE_GO_API_KEY"],
+            export: "OPENCODE_API_KEY",
             key_page: "https://opencode.ai/auth",
-            file: Some(KeyFile {
-                path: paths::opencode_auth(),
-                entry: "opencode-go",
-            }),
-            db: Some(KeyDb {
-                path: paths::opencode_db(),
-                integration: "opencode-go",
-            }),
+            asks_for: "the API key",
+            slots: &["opencode-go"],
+            file: Some(paths::opencode_auth()),
+            db: Some(paths::opencode_db()),
             env: Box::new(process_env),
             inference: "https://opencode.ai/inference/go".to_owned(),
             routes: opencode_routes,
@@ -139,15 +154,13 @@ impl ApiKey {
     #[cfg(test)]
     pub fn with(
         mut self,
-        file: Option<KeyFile>,
+        file: Option<PathBuf>,
         env: impl Fn(&str) -> Option<String> + Send + Sync + 'static,
     ) -> Self {
-        self.db = self.db.take().and_then(|db| {
-            Some(KeyDb {
-                path: file.as_ref()?.path.with_file_name("opencode.db"),
-                integration: db.integration,
-            })
-        });
+        self.db = self
+            .db
+            .take()
+            .and_then(|_| Some(file.as_ref()?.with_file_name("opencode.db")));
         self.file = file;
         self.env = Box::new(env);
         self
@@ -168,31 +181,119 @@ impl ApiKey {
     }
 
     /// opencode's database, when it is where opencode reads its logins.
-    fn database(&self, flags: OpenFlags) -> Result<Option<(&KeyDb, Connection)>> {
+    fn database(&self, flags: OpenFlags) -> Result<Option<Connection>> {
         let Some(db) = &self.db else {
             return Ok(None);
         };
-        Ok(open_db(&db.path, flags)?.map(|conn| (db, conn)))
+        open_db(db, flags)
     }
 
-    /// The CLI's login: from the database once opencode reads it, else from
-    /// the file.
-    fn stored_login(&self) -> Result<Option<Value>> {
-        if let Some((db, conn)) = self.database(OpenFlags::SQLITE_OPEN_READ_ONLY)? {
-            return Ok(selected(&conn, db.integration)?.map(|(_, value)| value));
+    fn found_in_db(&self, conn: &Connection) -> Result<Found> {
+        self.slots
+            .iter()
+            .map(|slot| Ok((*slot, selected(conn, slot)?.map(|(_, value)| value))))
+            .collect()
+    }
+
+    fn found_in_file(&self, json: &Value) -> Found {
+        self.slots
+            .iter()
+            .map(|slot| (*slot, json.get(slot).cloned()))
+            .collect()
+    }
+
+    /// What the CLI's slots hold: from the database once opencode reads it,
+    /// else from the file.
+    fn found(&self) -> Result<Found> {
+        if let Some(conn) = self.database(OpenFlags::SQLITE_OPEN_READ_ONLY)? {
+            return self.found_in_db(&conn);
         }
         let Some(file) = &self.file else {
-            return Ok(None);
+            return Ok(Vec::new());
         };
-        Ok(read_json(&file.path)?.and_then(|mut json| json.get_mut(file.entry).map(Value::take)))
+        Ok(read_json(file)?.map_or_else(Vec::new, |json| self.found_in_file(&json)))
     }
 
-    fn stored_key(&self) -> Result<Option<String>> {
-        Ok(self
-            .stored_login()?
-            .as_ref()
-            .and_then(key_of)
-            .map(|k| k.trim().to_owned()))
+    /// The CLI's login, and the slot it is in.
+    fn stored_login(&self) -> Result<Option<(&'static str, Value)>> {
+        Ok(read_slot(&self.found()?).map(|(slot, value)| (slot, value.clone())))
+    }
+
+    /// The slot a key goes in: the one the CLI reads.
+    fn target(&self, found: &Found) -> &'static str {
+        read_slot(found).map_or(self.slots[0], |(slot, _)| slot)
+    }
+
+    /// Makes `key` the credential opencode uses, as opencode's own switch
+    /// would: a row already holding it is activated, the key row in use is
+    /// rekeyed, and otherwise a new row is added in front of a login that is
+    /// not a key, which stays behind it.
+    fn install_row(
+        &self,
+        conn: &mut Connection,
+        key: &str,
+        outgoing: Option<&Value>,
+    ) -> Result<()> {
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let found = self.found_in_db(&tx)?;
+        if outgoing.is_some_and(|o| key_of(o).map(str::trim) != read_key(&found)) {
+            return Err(Changed.into());
+        }
+        let integration = self.target(&found);
+        let current = selected(&tx, integration)?;
+        let holder = {
+            let mut rows =
+                tx.prepare("SELECT id, value FROM credential WHERE integration_id = ?1")?;
+            let rows = rows.query_map([integration], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            let mut holder = None;
+            for row in rows {
+                let (id, value) = row?;
+                let value: Value = serde_json::from_str(&value).unwrap_or(Value::Null);
+                if key_of(&value).map(str::trim) == Some(key) {
+                    holder = Some(id);
+                    break;
+                }
+            }
+            holder
+        };
+        let now = jiff::Timestamp::now().as_millisecond();
+        match (holder, current) {
+            (Some(id), current) if current.as_ref().is_some_and(|(c, _)| *c == id) => {}
+            (Some(id), _) => {
+                tx.execute(
+                    "UPDATE credential SET active = 0 WHERE integration_id = ?1",
+                    [integration],
+                )?;
+                tx.execute("UPDATE credential SET active = 1 WHERE id = ?1", [&id])?;
+            }
+            (None, Some((id, mut value))) if key_of(&value).is_some() => {
+                value["key"] = json!(key);
+                tx.execute(
+                    "UPDATE credential SET value = ?1, time_updated = ?2 WHERE id = ?3",
+                    rusqlite::params![value.to_string(), now, id],
+                )?;
+            }
+            (None, _) => {
+                tx.execute(
+                    "UPDATE credential SET active = 0 WHERE integration_id = ?1",
+                    [integration],
+                )?;
+                tx.execute(
+                    "INSERT INTO credential (id, integration_id, label, value, active, time_created, time_updated) \
+                     VALUES (?1, ?2, 'API key', ?3, 1, ?4, ?4)",
+                    rusqlite::params![
+                        credential_id(now)?,
+                        integration,
+                        json!({"type": "key", "key": key}).to_string(),
+                        now
+                    ],
+                )?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
     }
 }
 
@@ -208,7 +309,7 @@ impl Provider for ApiKey {
     fn home(&self) -> PathBuf {
         self.file
             .as_ref()
-            .and_then(|f| f.path.parent().map(PathBuf::from))
+            .and_then(|f| f.parent().map(PathBuf::from))
             .unwrap_or_default()
     }
 
@@ -220,7 +321,7 @@ impl Provider for ApiKey {
         {
             return None;
         }
-        self.file.as_ref().map(|f| f.path.clone())
+        self.file.clone()
     }
 
     fn access_token<'a>(&self, creds: &'a Value) -> Option<&'a str> {
@@ -247,9 +348,26 @@ impl Provider for ApiKey {
     fn live(&self) -> Result<Option<Value>> {
         let key = match self.env_key() {
             Some((_, key)) => Some(key),
-            None => self.stored_key()?,
+            None => self
+                .stored_login()?
+                .as_ref()
+                .and_then(|(_, login)| key_of(login))
+                .map(|k| k.trim().to_owned()),
         };
         Ok(key.map(|key| json!({ "key": key })))
+    }
+
+    /// What the store holds beside the key outlives a sync: the CLI's slot
+    /// carries only the key.
+    fn synced(&self, stored: &Value, live: Value) -> Value {
+        match (stored.as_object(), live) {
+            (Some(stored), Value::Object(live)) => {
+                let mut merged = stored.clone();
+                merged.extend(live);
+                Value::Object(merged)
+            }
+            (_, live) => live,
+        }
     }
 
     /// A login in the key's slot that is not a key, which a switch would
@@ -260,6 +378,7 @@ impl Provider for ApiKey {
         }
         Ok(self
             .stored_login()?
+            .map(|(_, login)| login)
             .filter(|e| key_of(e).is_none())
             .map(|e| match e.get("type").and_then(Value::as_str) {
                 Some(kind) => format!("a login of type {kind}"),
@@ -279,11 +398,7 @@ impl Provider for ApiKey {
 
     fn env_line(&self, entry: &Entry) -> Result<String> {
         let key = key_of(&entry.creds).context("stored credential holds no key")?;
-        Ok(format!(
-            "export {}='{}'",
-            self.envs[0],
-            key.trim().replace('\'', r"'\''")
-        ))
+        Ok(format!("export {}={}", self.export, shell_quote(key)))
     }
 
     /// Writes the key into the CLI's file. A key the environment sets wins
@@ -297,29 +412,30 @@ impl Provider for ApiKey {
                 self.name
             );
         }
-        if let Some((db, mut conn)) = self.database(OpenFlags::SQLITE_OPEN_READ_WRITE)? {
-            return install_row(&mut conn, db.integration, key.trim(), outgoing);
+        if let Some(mut conn) = self.database(OpenFlags::SQLITE_OPEN_READ_WRITE)? {
+            return self.install_row(&mut conn, key.trim(), outgoing);
         }
         let Some(file) = &self.file else {
             bail!(
                 "{} reads its key from {}: run `eval \"$(remuda env {qualified})\"`",
                 self.name,
-                self.envs[0]
+                self.export
             );
         };
-        update_json(&file.path, |json| {
+        update_json(file, |json| {
             if !json.is_object() {
                 *json = json!({});
             }
-            let current = json.get(file.entry).and_then(key_of).map(str::trim);
-            if outgoing.is_some_and(|o| key_of(o).map(str::trim) != current) {
+            let found = self.found_in_file(json);
+            if outgoing.is_some_and(|o| key_of(o).map(str::trim) != read_key(&found)) {
                 return Err(Changed.into());
             }
-            match json.get_mut(file.entry).and_then(Value::as_object_mut) {
-                Some(slot) if slot.get("type").and_then(Value::as_str) == Some("api") => {
-                    slot.insert("key".into(), json!(key.trim()));
+            let slot = self.target(&found);
+            match json.get_mut(slot).and_then(Value::as_object_mut) {
+                Some(entry) if entry.get("type").and_then(Value::as_str) == Some("api") => {
+                    entry.insert("key".into(), json!(key.trim()));
                 }
-                _ => json[file.entry] = json!({ "type": "api", "key": key.trim() }),
+                _ => json[slot] = json!({ "type": "api", "key": key.trim() }),
             }
             Ok(())
         })
@@ -332,6 +448,7 @@ impl Provider for ApiKey {
     fn begin_login(&self, _paste: bool) -> Result<Box<dyn PendingLogin>> {
         Ok(Box::new(KeyPending {
             url: self.key_page.to_owned(),
+            asks_for: self.asks_for,
         }))
     }
 
@@ -397,76 +514,6 @@ fn selected(conn: &Connection, integration: &str) -> Result<Option<(String, Valu
     Ok(row.map(|(id, value)| (id, serde_json::from_str(&value).unwrap_or(Value::Null))))
 }
 
-/// Makes `key` the credential opencode uses, as opencode's own switch would:
-/// a row already holding it is activated, the key row in use is rekeyed, and
-/// otherwise a new row is added in front of a login that is not a key, which
-/// stays behind it.
-fn install_row(
-    conn: &mut Connection,
-    integration: &str,
-    key: &str,
-    outgoing: Option<&Value>,
-) -> Result<()> {
-    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let current = selected(&tx, integration)?;
-    let current_key = current.as_ref().and_then(|(_, v)| key_of(v)).map(str::trim);
-    if outgoing.is_some_and(|o| key_of(o).map(str::trim) != current_key) {
-        return Err(Changed.into());
-    }
-    let holder = {
-        let mut rows = tx.prepare("SELECT id, value FROM credential WHERE integration_id = ?1")?;
-        let rows = rows.query_map([integration], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?;
-        let mut holder = None;
-        for row in rows {
-            let (id, value) = row?;
-            let value: Value = serde_json::from_str(&value).unwrap_or(Value::Null);
-            if key_of(&value).map(str::trim) == Some(key) {
-                holder = Some(id);
-                break;
-            }
-        }
-        holder
-    };
-    let now = jiff::Timestamp::now().as_millisecond();
-    match (holder, current) {
-        (Some(id), current) if current.as_ref().is_some_and(|(c, _)| *c == id) => {}
-        (Some(id), _) => {
-            tx.execute(
-                "UPDATE credential SET active = 0 WHERE integration_id = ?1",
-                [integration],
-            )?;
-            tx.execute("UPDATE credential SET active = 1 WHERE id = ?1", [&id])?;
-        }
-        (None, Some((id, mut value))) if key_of(&value).is_some() => {
-            value["key"] = json!(key);
-            tx.execute(
-                "UPDATE credential SET value = ?1, time_updated = ?2 WHERE id = ?3",
-                rusqlite::params![value.to_string(), now, id],
-            )?;
-        }
-        (None, _) => {
-            tx.execute(
-                "UPDATE credential SET active = 0 WHERE integration_id = ?1",
-                [integration],
-            )?;
-            tx.execute(
-                "INSERT INTO credential (id, integration_id, label, value, active, time_created, time_updated) \
-                 VALUES (?1, ?2, 'API key', ?3, 1, ?4, ?4)",
-                rusqlite::params![
-                    credential_id(now)?,
-                    integration,
-                    json!({"type": "key", "key": key}).to_string(),
-                    now
-                ],
-            )?;
-        }
-    }
-    tx.commit()?;
-    Ok(())
-}
-
 /// An id shaped like opencode's own: `cred_`, the time in hex, then base62.
 fn credential_id(now_ms: i64) -> Result<String> {
     const BASE62: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
@@ -485,6 +532,7 @@ fn credential_id(now_ms: i64) -> Result<String> {
 /// A sign-in that is a key pasted from the provider's key page.
 struct KeyPending {
     url: String,
+    asks_for: &'static str,
 }
 
 impl PendingLogin for KeyPending {
@@ -497,7 +545,7 @@ impl PendingLogin for KeyPending {
     }
 
     fn asks_for(&self) -> &'static str {
-        "the API key"
+        self.asks_for
     }
 
     fn finish(self: Box<Self>, code: Option<&str>) -> Result<Login> {
@@ -520,23 +568,20 @@ mod tests {
     use crate::store::Store;
 
     fn opencode(dir: &std::path::Path, env: Option<&'static str>) -> ApiKey {
-        ApiKey::opencode().with(
-            Some(KeyFile {
-                path: dir.join("auth.json"),
-                entry: "opencode-go",
-            }),
-            move |name| {
-                (name == "OPENCODE_API_KEY")
-                    .then(|| env.map(str::to_owned))
-                    .flatten()
-            },
-        )
+        ApiKey::opencode().with(Some(dir.join("auth.json")), move |name| {
+            (name == "OPENCODE_API_KEY")
+                .then(|| env.map(str::to_owned))
+                .flatten()
+        })
     }
 
     fn save(store: &Store, p: &ApiKey, name: &str, key: &str) {
-        let login = Box::new(KeyPending { url: String::new() })
-            .finish(Some(key))
-            .unwrap();
+        let login = Box::new(KeyPending {
+            url: String::new(),
+            asks_for: "the API key",
+        })
+        .finish(Some(key))
+        .unwrap();
         store
             .save(&Entry::new(p.id(), name, login.creds, login.identity, 1))
             .unwrap();
@@ -564,14 +609,20 @@ mod tests {
 
     #[test]
     fn a_pasted_key_is_the_login() {
-        let login = Box::new(KeyPending { url: "u".into() })
-            .finish(Some("  sk-1  "))
-            .unwrap();
+        let login = Box::new(KeyPending {
+            url: "u".into(),
+            asks_for: "the API key",
+        })
+        .finish(Some("  sk-1  "))
+        .unwrap();
         assert_eq!(login.creds, json!({"key": "sk-1"}));
         assert!(
-            Box::new(KeyPending { url: "u".into() })
-                .finish(Some(" "))
-                .is_err()
+            Box::new(KeyPending {
+                url: "u".into(),
+                asks_for: "the API key",
+            })
+            .finish(Some(" "))
+            .is_err()
         );
     }
 
@@ -667,17 +718,11 @@ mod tests {
     #[test]
     fn an_empty_variable_is_no_key() {
         let tmp = tempfile::tempdir().unwrap();
-        let p = ApiKey::opencode().with(
-            Some(KeyFile {
-                path: tmp.path().join("auth.json"),
-                entry: "opencode-go",
-            }),
-            |name| match name {
-                "OPENCODE_API_KEY" => Some(" ".into()),
-                "OPENCODE_GO_API_KEY" => Some("k1".into()),
-                _ => None,
-            },
-        );
+        let p = ApiKey::opencode().with(Some(tmp.path().join("auth.json")), |name| match name {
+            "OPENCODE_API_KEY" => Some(" ".into()),
+            "OPENCODE_GO_API_KEY" => Some("k1".into()),
+            _ => None,
+        });
         assert_eq!(p.live().unwrap(), Some(json!({"key": "k1"})));
     }
 
@@ -873,13 +918,9 @@ mod tests {
             Some(true),
             1,
         );
-        let err = install_row(
-            &mut db,
-            "opencode-go",
-            "go-perso",
-            Some(&json!({"key": "go-work"})),
-        )
-        .unwrap_err();
+        let err = opencode(tmp.path(), None)
+            .install_row(&mut db, "go-perso", Some(&json!({"key": "go-work"})))
+            .unwrap_err();
         assert!(err.is::<Changed>(), "{err:#}");
         assert_eq!(rows(&db)[0].1["key"], "go-new");
     }
@@ -939,10 +980,7 @@ mod tests {
         let hidden = tmp.path().join("hidden");
         std::fs::create_dir(&hidden).unwrap();
         let mut p = opencode(tmp.path(), None);
-        p.db = Some(KeyDb {
-            path: hidden.join("opencode.db"),
-            integration: "opencode-go",
-        });
+        p.db = Some(hidden.join("opencode.db"));
         std::fs::set_permissions(&hidden, std::fs::Permissions::from_mode(0o000)).unwrap();
         let enforced = std::fs::metadata(hidden.join("opencode.db"))
             .is_err_and(|e| e.kind() == std::io::ErrorKind::PermissionDenied);
