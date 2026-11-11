@@ -250,7 +250,15 @@ Three tabs, each filtered by a CLI and a login, the first two by a range (7,
   with unpriced use of its login or from before the usage record starts is
   marked, and a week of a login neither the store nor the attribution ledger
   names has no figure. An unreadable window history says so rather than
-  showing no weeks. Use the export cannot see (the web, the desktop apps, a
+  showing no weeks. A CLI with two logins or more priced this way also gets
+  each one's plan weight measured beside the advertised one (`weights`): its
+  dollars per percent over its last four whole closed weeks with use, under
+  1% of spend no login claims and none of it unpriced, against the largest
+  plan's, in units of the largest plan as the Quota card counts them. With the
+  largest plan unmeasured, or a login with no spend on record, nothing is
+  measured, and a name that held two accounts shows it on the newer one's
+  card only. A ×0.63 plan measured at ×0.71 gives more per percent than its
+  weight says. Use the export cannot see (the web, the desktop apps, a
   machine without TokenGauge) makes a week look worth less than it was, and
   the tab says so.
 

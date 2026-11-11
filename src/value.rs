@@ -50,6 +50,9 @@ pub struct Week {
     pub partial: bool,
     /// Some of the login's usage in the week had no price, so `usd` is short.
     pub unpriced: bool,
+    /// Some usage no record attributes to a login had no price, so
+    /// `unattributed_usd` is short.
+    pub unattributed_unpriced: bool,
 }
 
 /// One weekly window instance as the history file has it.
@@ -209,7 +212,8 @@ pub fn weeks(
             next.map_or(s.resets, |n| n.min(s.resets))
         };
         let digest = s.digest.as_ref();
-        let (mut usd, mut unattributed, mut unpriced) = (0.0, 0.0, false);
+        let (mut usd, mut unattributed, mut unpriced, mut nobody_unpriced) =
+            (0.0, 0.0, false, false);
         for (row, day) in export.rows.iter().zip(&days) {
             let Some((start, end)) = *day else {
                 continue;
@@ -222,6 +226,7 @@ pub fn weeks(
                 continue;
             }
             let Some(cost) = row.usd else {
+                nobody_unpriced |= row.tokens.total() > 0 && row.login.is_none();
                 unpriced |=
                     row.tokens.total() > 0 && row.login.as_ref() == digest && digest.is_some();
                 continue;
@@ -248,6 +253,7 @@ pub fn weeks(
             unattributed_usd: unattributed,
             partial: covers_from.is_none_or(|from| from > s.opened),
             unpriced,
+            unattributed_unpriced: nobody_unpriced,
         });
     }
     out.sort_by_key(|w| std::cmp::Reverse(w.opened_at));
@@ -506,6 +512,34 @@ mod tests {
             MON + 30 * DAY,
         );
         assert!(unpriced[0].unpriced);
+    }
+
+    #[test]
+    fn a_week_with_unpriced_use_no_login_claims_says_so() {
+        let history = json!({"closed": [closed("work", "primary", WEEK_MINUTES, MON, 40)]});
+        let mut rows = export(
+            &[
+                ("2026-10-06", Some("d-work"), 1.0),
+                ("2026-10-07", None, 1.0),
+            ],
+            None,
+        );
+        let at = |rows: &_| {
+            weeks(
+                &history,
+                rows,
+                &digests(),
+                &known(),
+                &TimeZone::UTC,
+                MON + 30 * DAY,
+            )
+        };
+        assert!(!at(&rows)[0].unattributed_unpriced);
+        rows.rows[1].usd = None;
+        rows.rows[1].tokens.output = 5;
+        let got = at(&rows);
+        assert!(got[0].unattributed_unpriced);
+        assert!(!got[0].unpriced);
     }
 
     #[test]

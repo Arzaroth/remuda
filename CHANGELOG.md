@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- Usage's Value tab shows each login's plan weight as measured beside the one
+  advertised ("Weight ×0.63 advertised, ×0.71 measured"): its dollars per
+  percent over its last four whole weeks against the largest plan's, so a
+  multiplier that does not hold shows.
+
 ## [0.40.0] - 2026-11-11
 
 ### Added

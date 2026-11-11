@@ -13,6 +13,7 @@ export type Week = {
   unattributedUsd: number;
   partial: boolean;
   unpriced: boolean;
+  unattributedUnpriced?: boolean;
 };
 
 export type ValueAnswer = { weeks?: Week[]; logins?: Record<string, Login>; unavailable?: string };
@@ -48,4 +49,31 @@ export function changeText(ratio: number): string {
   if (ratio >= 1.05) return `${ratio.toFixed(1)}x the weeks before`;
   if (ratio <= 0.95) return `${Math.round((1 - ratio) * 100)}% under the weeks before`;
   return 'about the same as the weeks before';
+}
+
+export function rate(weeks: Week[], last = 4): number | null {
+  const closed = weeks
+    .filter((w) => !w.open && !w.partial && !w.unpriced && w.used > 0 && !w.unattributedUnpriced && w.unattributedUsd <= w.usd / 100)
+    .slice(-last);
+  const used = closed.reduce((a, w) => a + w.used, 0);
+  return used > 0 ? closed.reduce((a, w) => a + w.usd, 0) / used : null;
+}
+
+export type Weight = { advertised: number; measured: number };
+
+export function weights(ps: Plan[], advertised: Record<string, Record<string, number>>): Map<Plan, Weight> {
+  const out = new Map<Plan, Weight>();
+  for (const [provider, given] of Object.entries(advertised)) {
+    const top = Math.max(0, ...Object.values(given));
+    if (top <= 0) continue;
+    const seen = new Set<string>();
+    const rated = ps
+      .filter((p) => p.provider === provider && !seen.has(p.login) && seen.add(p.login))
+      .map((p) => ({ plan: p, weight: given[p.login], rate: rate(p.weeks) }))
+      .filter((r): r is { plan: Plan; weight: number; rate: number } => r.weight > 0 && r.rate !== null && r.rate > 0);
+    const ref = rated.find((r) => r.weight === top);
+    if (rated.length < 2 || !ref) continue;
+    for (const r of rated) out.set(r.plan, { advertised: r.weight / top, measured: r.rate / ref.rate });
+  }
+  return out;
 }

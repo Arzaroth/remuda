@@ -1,7 +1,8 @@
 import { createMemo, For, Show } from 'solid-js';
 import { brand } from '../brand';
 import { money } from '../spend';
-import { change, changeText, plans, type ValueAnswer, type Week } from '../value';
+import { store } from '../state';
+import { change, changeText, plans, weights, type ValueAnswer, type Week } from '../value';
 import { LineChart } from './Charts';
 import { ProviderIcon } from './ProviderIcon';
 
@@ -9,6 +10,7 @@ const iso = (ms: number) => {
   const d = new Date(ms);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
+const factor = (w: number) => `×${w >= 0.995 && w <= 1.005 ? 1 : w.toFixed(2)}`;
 const day = (ms: number) => new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
 function flags(w: Week): string {
@@ -26,6 +28,15 @@ export function Value(props: { answer: ValueAnswer; provider: string | null; log
       (p) => (!props.provider || p.provider === props.provider) && (!props.login || p.login === props.login),
     ),
   );
+  const advertised = createMemo(() => {
+    const out: Record<string, Record<string, number>> = {};
+    for (const [id, shown] of Object.entries(store.s?.shown ?? {})) {
+      const parts = shown.weighted.filter((c) => c.weighted).flatMap((c) => c.parts);
+      if (parts.length) out[id] = Object.fromEntries(parts.map((p) => [p.name, p.weight]));
+    }
+    return out;
+  });
+  const measured = createMemo(() => weights(plans(props.answer.weeks ?? []), advertised()));
   return (
     <>
       <p class="page-sub">
@@ -53,6 +64,16 @@ export function Value(props: { answer: ValueAnswer; provider: string | null; log
                   <span>{p.login}</span>
                   <Show when={ratio() != null}>
                     <small class="u-sub">Last week: {changeText(ratio()!)}</small>
+                  </Show>
+                  <Show when={measured().get(p)}>
+                    {(w) => (
+                      <small
+                        class="u-sub"
+                        title="The plan weight TokenGauge gives this login, and the one its dollars per percent over its last four whole weeks say, against the largest plan's"
+                      >
+                        Weight {factor(w().advertised)} advertised, {factor(w().measured)} measured
+                      </small>
+                    )}
                   </Show>
                 </h3>
                 <Show when={charted().length > 1}>
