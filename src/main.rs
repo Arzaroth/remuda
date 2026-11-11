@@ -483,7 +483,11 @@ fn restore(
         }
         Err(e) => return Err(e),
     };
-    if let Some(kept) = file.filter(|f| export::was_kept(store, f))
+    if !restored.lost.is_empty() {
+        if received {
+            keep_received(store, &bytes, out)?;
+        }
+    } else if let Some(kept) = file.filter(|f| export::was_kept(store, f))
         && let Err(e) = std::fs::remove_file(kept)
     {
         writeln!(
@@ -492,7 +496,14 @@ fn restore(
             kept.display()
         )?;
     }
-    sign_in_again(store, providers, &config_path, restored.sign_in, again, out)
+    sign_in_again(store, providers, &config_path, restored.sign_in, again, out)?;
+    if !restored.lost.is_empty() {
+        bail!(
+            "the tokens carried for {} could be neither stored nor set aside here; the bundle still holds them",
+            restored.lost.join(", ")
+        );
+    }
+    Ok(())
 }
 
 fn keep_received(store: &Store, bytes: &[u8], out: &mut dyn Write) -> Result<()> {

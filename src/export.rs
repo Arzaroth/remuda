@@ -291,6 +291,7 @@ pub fn parse(bytes: &[u8]) -> Result<Bundle> {
 #[derive(Default)]
 pub struct Restored {
     pub sign_in: Vec<ToSignIn>,
+    pub lost: Vec<String>,
 }
 
 pub struct Places<'a> {
@@ -310,6 +311,7 @@ pub fn restore(
     out: &mut dyn Write,
 ) -> Result<Restored> {
     let known = |id: &str| providers.iter().find(|p| p.id() == id).copied();
+    let mut lost = Vec::new();
     {
         let _lock = store.lock()?;
         let mut lives: BTreeMap<&str, std::result::Result<LiveState, String>> = BTreeMap::new();
@@ -335,14 +337,14 @@ pub fn restore(
                 Ok(read) => read,
                 Err(e) => {
                     writeln!(out, "kept {at}: the one stored here cannot be read: {e:#}")?;
-                    set_aside_carried(store, p, carried, out)?;
+                    set_aside_carried(store, p, carried, &mut lost, out)?;
                     continue;
                 }
             };
             if !force && let Some((creds, _)) = &here {
                 writeln!(out, "kept {at}, already stored here (--force replaces it)")?;
                 if *creds != carried.creds {
-                    set_aside_carried(store, p, carried, out)?;
+                    set_aside_carried(store, p, carried, &mut lost, out)?;
                 }
                 continue;
             }
@@ -352,7 +354,7 @@ pub fn restore(
             {
                 writeln!(out, "kept {at}: {why}")?;
                 if *creds != carried.creds {
-                    set_aside_carried(store, p, carried, out)?;
+                    set_aside_carried(store, p, carried, &mut lost, out)?;
                 }
                 continue;
             }
@@ -364,7 +366,7 @@ pub fn restore(
                         out,
                         "skipped {at}: the logins stored here cannot be listed: {e:#}"
                     )?;
-                    set_aside_carried(store, p, carried, out)?;
+                    set_aside_carried(store, p, carried, &mut lost, out)?;
                     continue;
                 }
             };
@@ -383,7 +385,7 @@ pub fn restore(
                     .flatten()
                     .is_none_or(|(creds, _)| creds != carried.creds)
                 {
-                    set_aside_carried(store, p, carried, out)?;
+                    set_aside_carried(store, p, carried, &mut lost, out)?;
                 }
                 continue;
             }
@@ -401,7 +403,7 @@ pub fn restore(
                             out,
                             "kept {at}: what it holds here could not be set aside: {e:#}"
                         )?;
-                        set_aside_carried(store, p, carried, out)?;
+                        set_aside_carried(store, p, carried, &mut lost, out)?;
                         continue;
                     }
                 }
@@ -410,7 +412,7 @@ pub fn restore(
                 Ok(()) => writeln!(out, "stored {at}")?,
                 Err(e) => {
                     writeln!(out, "could not store {at}: {e:#}")?;
-                    set_aside_carried(store, p, carried, out)?;
+                    set_aside_carried(store, p, carried, &mut lost, out)?;
                 }
             }
         }
@@ -496,7 +498,10 @@ pub fn restore(
         }
         left.push(login);
     }
-    Ok(Restored { sign_in: left })
+    Ok(Restored {
+        sign_in: left,
+        lost,
+    })
 }
 
 /// Why `--force` may not replace the stored `name`: the checks a switch and a
@@ -529,6 +534,7 @@ fn set_aside_carried(
     store: &Store,
     p: &dyn Provider,
     carried: &Carried,
+    lost: &mut Vec<String>,
     out: &mut dyn Write,
 ) -> Result<()> {
     if !p.renews() {
@@ -541,12 +547,17 @@ fn set_aside_carried(
         .get("accountId")
         .and_then(Value::as_str)
         .unwrap_or(&carried.name);
-    let kept = store.set_aside(p.id(), account, &creds)?;
-    writeln!(
-        out,
-        "  the tokens it carried are set aside in {}",
-        kept.display()
-    )?;
+    match store.set_aside(p.id(), account, &creds) {
+        Ok(kept) => writeln!(
+            out,
+            "  the tokens it carried are set aside in {}",
+            kept.display()
+        )?,
+        Err(e) => {
+            writeln!(out, "  the tokens it carried cannot be set aside: {e:#}")?;
+            lost.push(format!("{}/{}", carried.provider, carried.name));
+        }
+    }
     Ok(())
 }
 
