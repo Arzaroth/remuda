@@ -20,8 +20,16 @@ fn arch() -> &'static str {
     }
 }
 
+fn os() -> &'static str {
+    match std::env::consts::OS {
+        "linux" => "linux",
+        "macos" => "macos",
+        other => panic!("no release for {other}"),
+    }
+}
+
 fn archive_name() -> String {
-    format!("remuda-{VERSION}-linux-{}.tar.gz", arch())
+    format!("remuda-{VERSION}-{}-{}.tar.gz", os(), arch())
 }
 
 fn write_exe(path: &Path, body: &str) {
