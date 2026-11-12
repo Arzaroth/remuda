@@ -126,7 +126,10 @@ export function removed(p: Plan, logins: Record<string, Login> | undefined): boo
 export function kept(w: Week, f: Filters, now: number): boolean {
   if (f.months > 0) {
     const since = new Date(now);
+    const day = since.getDate();
+    since.setDate(1);
     since.setMonth(since.getMonth() - f.months);
+    since.setDate(Math.min(day, new Date(since.getFullYear(), since.getMonth() + 1, 0).getDate()));
     if (w.endsAt <= since.getTime()) return false;
   }
   if (w.used < f.minUsed) return false;
@@ -156,9 +159,10 @@ export function arrange(
       return { plan, weeks, hidden: plan.weeks.length - weeks.length };
     });
   const shown = all.filter((s) => s.weeks.length);
+  if (f.order === 'recent') shown.sort((a, b) => b.weeks[b.weeks.length - 1].openedAt - a.weeks[a.weeks.length - 1].openedAt);
   if (f.order === 'name') shown.sort((a, b) => a.plan.login.localeCompare(b.plan.login) || a.plan.provider.localeCompare(b.plan.provider));
   if (f.order === 'value') {
-    const per = new Map(shown.map((s) => [s, rate(s.weeks)]));
+    const per = new Map(shown.map((s) => [s, rate(s.weeks, s.weeks.length)]));
     shown.sort((a, b) => (per.get(b) ?? -1) - (per.get(a) ?? -1));
   }
   return { shown, empty: all.filter((s) => !s.weeks.length).map((s) => s.plan), gone };
