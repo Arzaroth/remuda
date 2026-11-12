@@ -580,17 +580,55 @@ pub fn figures(
     Ok(out)
 }
 
-/// How many processes under `proc` (a `/proc`) run one of `names`: by
-/// name, by a release binary named after its target (`codex-x86_64-...`), or
-/// as a script under node, bun or deno. `me` is left out, and so is a
-/// `remuda run` session's: its environment names, in the variable `apart`
-/// gives, a directory under a store's `.runs`, beside remuda's marker.
-pub fn running(
-    proc: &std::path::Path,
-    names: &[&str],
-    me: u32,
-    apart: Option<&str>,
-) -> std::io::Result<usize> {
+/// A process as `running` matches it: its name, its arguments and
+/// environment as NUL-separated bytes, the environment read only when asked.
+pub struct Process {
+    pub pid: u32,
+    pub comm: Vec<u8>,
+    pub cmdline: Vec<u8>,
+    environ: Environ,
+}
+
+enum Environ {
+    At(std::path::PathBuf),
+}
+
+impl Process {
+    fn environ(&self) -> Vec<u8> {
+        match &self.environ {
+            Environ::At(path) => std::fs::read(path).unwrap_or_default(),
+        }
+    }
+}
+
+/// The processes under `proc`, a `/proc`.
+pub fn in_proc(proc: &std::path::Path) -> std::io::Result<Vec<Process>> {
+    let mut seen = Vec::new();
+    for entry in std::fs::read_dir(proc)? {
+        let entry = entry?;
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|n| n.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        seen.push(Process {
+            pid,
+            comm: std::fs::read(entry.path().join("comm")).unwrap_or_default(),
+            cmdline: std::fs::read(entry.path().join("cmdline")).unwrap_or_default(),
+            environ: Environ::At(entry.path().join("environ")),
+        });
+    }
+    Ok(seen)
+}
+
+/// How many of `seen` run one of `names`: by name, by a release binary
+/// named after its target (`codex-x86_64-...`), or as a script under node,
+/// bun or deno. `me` is left out, and so is a `remuda run` session's: its
+/// environment names, in the variable `apart` gives, a directory under a
+/// store's `.runs`, beside remuda's marker.
+pub fn running(seen: &[Process], names: &[&str], me: u32, apart: Option<&str>) -> usize {
     let is = |base: &[u8]| {
         names.iter().any(|n| {
             let n = n.as_bytes();
@@ -607,30 +645,25 @@ pub fn running(
             .to_vec()
     };
     let mut count = 0;
-    for entry in std::fs::read_dir(proc)? {
-        let entry = entry?;
-        let Some(pid) = entry
-            .file_name()
-            .to_str()
-            .and_then(|n| n.parse::<u32>().ok())
-        else {
-            continue;
-        };
-        if pid == me {
+    for process in seen {
+        if process.pid == me {
             continue;
         }
-        let comm = std::fs::read(entry.path().join("comm")).unwrap_or_default();
-        let cmdline = std::fs::read(entry.path().join("cmdline")).unwrap_or_default();
-        let args: Vec<Vec<u8>> = cmdline.split(|b| *b == 0).take(2).map(base).collect();
+        let args: Vec<Vec<u8>> = process
+            .cmdline
+            .split(|b| *b == 0)
+            .take(2)
+            .map(base)
+            .collect();
         let script = args
             .first()
             .is_some_and(|a| matches!(a.as_slice(), b"node" | b"bun" | b"deno"))
             && args.get(1).is_some_and(|a| is(a));
-        if !(is(comm.trim_ascii_end()) || args.first().is_some_and(|a| is(a)) || script) {
+        if !(is(process.comm.trim_ascii_end()) || args.first().is_some_and(|a| is(a)) || script) {
             continue;
         }
         let own = apart.is_some_and(|var| {
-            let environ = std::fs::read(entry.path().join("environ")).unwrap_or_default();
+            let environ = process.environ();
             let value = |name: &str| {
                 environ
                     .split(|b| *b == 0)
@@ -644,7 +677,7 @@ pub fn running(
             count += 1;
         }
     }
-    Ok(count)
+    count
 }
 
 /// Why a switch has to wait for the CLI's sessions to end, if it does
@@ -655,12 +688,8 @@ pub fn sessions_open(p: &dyn Provider) -> Option<String> {
         return None;
     }
     let apart = p.run_spec().map(|s| s.var);
-    match running(
-        std::path::Path::new("/proc"),
-        names,
-        std::process::id(),
-        apart,
-    ) {
+    let seen = in_proc(std::path::Path::new("/proc"));
+    match seen.map(|seen| running(&seen, names, std::process::id(), apart)) {
         Ok(0) => None,
         Ok(_) => Some(format!("waiting for every {} session to end", p.name())),
         Err(e) => Some(format!("cannot see whether {} runs: {e}", p.name())),
@@ -1302,7 +1331,7 @@ reserve = { work = "workday" }
         process(proc, 10, "zsh", &["-zsh"]);
         process(proc, 11, "vim", &["vim", "codex"]);
         process(proc, 12, "codexx", &["/usr/bin/codexx"]);
-        assert_eq!(running(proc, &["codex"], 1, None).unwrap(), 0);
+        assert_eq!(running(&in_proc(proc).unwrap(), &["codex"], 1, None), 0);
 
         process(proc, 20, "codex", &["codex", "exec"]);
         process(
@@ -1317,13 +1346,13 @@ reserve = { work = "workday" }
             "node",
             &["/usr/bin/node", "/usr/lib/node_modules/codex.js"],
         );
-        assert_eq!(running(proc, &["codex"], 1, None).unwrap(), 3);
+        assert_eq!(running(&in_proc(proc).unwrap(), &["codex"], 1, None), 3);
         assert_eq!(
-            running(proc, &["codex"], 20, None).unwrap(),
+            running(&in_proc(proc).unwrap(), &["codex"], 20, None),
             2,
             "itself is left out"
         );
-        assert!(running(&proc.join("gone"), &["codex"], 1, None).is_err());
+        assert!(in_proc(&proc.join("gone")).is_err());
         std::fs::write(
             proc.join("20").join("environ"),
             b"HOME=/h\0REMUDA_OUTER_CODEX_HOME=\0CODEX_HOME=/s/.runs/codex/w/home\0",
@@ -1335,7 +1364,7 @@ reserve = { work = "workday" }
         )
         .unwrap();
         assert_eq!(
-            running(proc, &["codex"], 1, Some("CODEX_HOME")).unwrap(),
+            running(&in_proc(proc).unwrap(), &["codex"], 1, Some("CODEX_HOME")),
             2,
             "a run session's codex is on its own files, one that only kept the marker is not"
         );
