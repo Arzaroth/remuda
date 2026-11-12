@@ -354,7 +354,7 @@ mod tests {
         e.stored("work", "u-work", HOUR);
         let home = e.tmp.path().join("run-home");
         let me = crate::pidstart::start_time(std::process::id()).unwrap();
-        running(&home, "s-old", me + 1);
+        running(&home, "s-old", me + 1_000_000);
 
         drop(watch(&e, &home).unwrap());
 
