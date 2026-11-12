@@ -1139,7 +1139,8 @@ fn fake_claude(home: &Home) -> String {
          for _ in 1 2 3 4 5 6 7 8 9 10; do ls \"$CLAUDE_CONFIG_DIR/..\" | grep -q '^cli-' && break; sleep 0.2; done\n\
          ls \"$CLAUDE_CONFIG_DIR/..\" > \"$HOME/seen-place\"\n\
          cp \"$CLAUDE_CONFIG_DIR/.credentials.json\" \"$HOME/seen-creds\"\n\
-         sed -i 's/\"r-work\"/\"r-rotated\"/; s/\"a-work\"/\"a-rotated\"/' \"$CLAUDE_CONFIG_DIR/.credentials.json\"\n\
+         sed -i.bak 's/\"r-work\"/\"r-rotated\"/; s/\"a-work\"/\"a-rotated\"/' \"$CLAUDE_CONFIG_DIR/.credentials.json\"\n\
+         rm -f \"$CLAUDE_CONFIG_DIR/.credentials.json.bak\"\n\
          exit 7\n",
     )
     .unwrap();
