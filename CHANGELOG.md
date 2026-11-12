@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-11-12
+
 ### Added
 
 - Usage's Value tab has filters behind a Filters button: a period, a floor
