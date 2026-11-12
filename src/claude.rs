@@ -11,6 +11,7 @@ use crate::oauth;
 use crate::paths;
 use crate::pkce;
 use crate::provider::{Copied, Format, Identity, Login, PendingLogin, Provider, RunSpec, Upstream};
+use crate::securestorage::SecureStorage;
 use crate::store::Entry;
 
 const MIRRORS: &str = "2.1.322";
@@ -473,7 +474,7 @@ fn session_of(home: &std::path::Path, pid: u32, start: u64) -> Option<String> {
 /// Claude Code: the login is `claudeAiOauth` in `.credentials.json`, and the
 /// account its UI shows is `oauthAccount` in `.claude.json`.
 pub struct Claude {
-    creds_path: PathBuf,
+    storage: SecureStorage,
     config_path: PathBuf,
     api: Api,
 }
@@ -481,15 +482,16 @@ pub struct Claude {
 impl Claude {
     pub fn from_env() -> Result<Self> {
         Ok(Claude {
-            creds_path: paths::claude_credentials(),
+            storage: SecureStorage::in_file(paths::claude_credentials()),
             config_path: paths::claude_config(),
             api: Api::claude()?,
         })
     }
 
+    #[cfg(test)]
     pub fn at(dir: &std::path::Path, api: Api) -> Self {
         Claude {
-            creds_path: dir.join(".credentials.json"),
+            storage: SecureStorage::in_file(dir.join(".credentials.json")),
             config_path: dir.join(".claude.json"),
             api,
         }
@@ -510,7 +512,8 @@ impl Provider for Claude {
     }
 
     fn home(&self) -> PathBuf {
-        self.creds_path
+        self.storage
+            .file()
             .parent()
             .map(PathBuf::from)
             .unwrap_or_default()
@@ -521,7 +524,7 @@ impl Provider for Claude {
     }
 
     fn live_file(&self) -> Option<PathBuf> {
-        Some(self.creds_path.clone())
+        Some(self.storage.file().to_owned())
     }
 
     fn access_token<'a>(&self, creds: &'a Value) -> Option<&'a str> {
@@ -560,7 +563,7 @@ impl Provider for Claude {
     }
 
     fn live(&self) -> Result<Option<Value>> {
-        let Some(file) = read_json(&self.creds_path)? else {
+        let Some(file) = self.storage.read()? else {
             return Ok(None);
         };
         Ok(Self::oauth(&file)
@@ -598,10 +601,11 @@ impl Provider for Claude {
             .oauth_account
             .clone()
             .context("stored credential has no oauthAccount")?;
-        for path in [&self.config_path, &self.creds_path] {
-            if read_json(path)?.is_some_and(|v| !v.is_object()) {
-                bail!("{} is not a JSON object", path.display());
-            }
+        if read_json(&self.config_path)?.is_some_and(|v| !v.is_object()) {
+            bail!("{} is not a JSON object", self.config_path.display());
+        }
+        if self.storage.read()?.is_some_and(|v| !v.is_object()) {
+            bail!("{} is not a JSON object", self.storage.file().display());
         }
         let expected = outgoing.and_then(|o| o.get(OAUTH_KEY));
         let previous = read_json(&self.config_path)?.and_then(|c| c.get("oauthAccount").cloned());
@@ -609,7 +613,7 @@ impl Provider for Claude {
             config["oauthAccount"] = account.clone();
             Ok(())
         })?;
-        let written = update_json(&self.creds_path, |file| {
+        let written = self.storage.update(|file| {
             if expected.is_some_and(|e| file.get(OAUTH_KEY) != Some(e)) {
                 return Err(Changed.into());
             }
@@ -641,7 +645,7 @@ impl Provider for Claude {
     /// login for.
     fn sign_out(&self, outgoing: &Value) -> Result<()> {
         let expected = outgoing.get(OAUTH_KEY);
-        update_json(&self.creds_path, |file| {
+        self.storage.update(|file| {
             if file.get(OAUTH_KEY) != expected {
                 return Err(Changed.into());
             }
@@ -667,7 +671,7 @@ impl Provider for Claude {
             var: "CLAUDE_CONFIG_DIR",
             copied: vec![
                 Copied {
-                    from: self.creds_path.clone(),
+                    from: self.storage.file().to_owned(),
                     name: ".credentials.json",
                     login_keys: &[OAUTH_KEY],
                 },
@@ -682,7 +686,11 @@ impl Provider for Claude {
     }
 
     fn relocated(&self, dir: &std::path::Path) -> Option<Box<dyn Provider>> {
-        Some(Box::new(Claude::at(dir, self.api.clone())))
+        Some(Box::new(Claude {
+            storage: self.storage.relocated(dir),
+            config_path: dir.join(".claude.json"),
+            api: self.api.clone(),
+        }))
     }
 
     fn refresh(&self, creds: &mut Value) -> Result<Option<String>> {

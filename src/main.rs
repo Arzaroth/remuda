@@ -30,6 +30,7 @@ mod provider;
 mod proxy;
 mod runs;
 mod seal;
+mod securestorage;
 mod serve;
 mod served;
 mod session;
