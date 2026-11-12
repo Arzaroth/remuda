@@ -214,6 +214,9 @@ impl Keychain {
     /// too long for that or not printable ASCII, which `security` would print
     /// back as hex to Claude Code.
     pub fn write(&self, password: &str) -> Result<bool> {
+        if unhex(password.as_bytes()).is_some() {
+            return Ok(false);
+        }
         let Some(line) = self.line(password) else {
             return Ok(false);
         };

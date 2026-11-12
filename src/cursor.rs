@@ -243,8 +243,18 @@ impl Provider for Cursor {
             {
                 return Err(Changed.into());
             }
+            let before = Self::item(keychain, REFRESH)?;
             Self::put(keychain, REFRESH, text(&entry.creds, "refreshToken"))?;
-            return Self::put(keychain, ACCESS, Some(access));
+            let Err(e) = Self::put(keychain, ACCESS, Some(access)) else {
+                return Ok(());
+            };
+            if let Err(back) = Self::put(keychain, REFRESH, before.as_deref()) {
+                bail!(
+                    "{e:#}; putting the refresh token back failed too ({back:#}), so cursor-agent's \
+                     Keychain items hold two logins' tokens: sign it in again"
+                );
+            }
+            return Err(e);
         }
         let replacement = entry.creds.clone();
         update_json(&self.auth_path, |file| {

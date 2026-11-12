@@ -143,12 +143,16 @@ impl SecureStorage {
                 return Ok(());
             }
             update_json(&self.file, |file| {
-                let login = file.get(OAUTH_KEY);
-                if login.is_some_and(|l| {
-                    Some(l) != was.get(OAUTH_KEY) && Some(l) != value.get(OAUTH_KEY)
-                }) {
+                let differs = file.as_object().into_iter().flatten().find(|(key, held)| {
+                    Some(*held) != was.get(key.as_str()) && Some(*held) != value.get(key.as_str())
+                });
+                if let Some((key, _)) = differs {
+                    let what = match key.as_str() {
+                        OAUTH_KEY => "another Claude Code login".to_owned(),
+                        other => format!("another {other}"),
+                    };
                     bail!(
-                        "{} holds another Claude Code login than the Keychain, which remuda does not write over",
+                        "{} holds {what} than the Keychain, which remuda does not write over",
                         self.file.display()
                     );
                 }
