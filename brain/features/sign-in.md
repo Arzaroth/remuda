@@ -45,7 +45,7 @@ and `--browser` and `--window` override it for one run (`browser::choose`):
 The browser is handed a private redirect file, never the URL, whose state
 would otherwise be on a command line. With a browser not in the table (Snap
 and Flatpak ones included), no such executable on `PATH` or no answer in time,
-it falls back to `xdg-open`, which cannot be asked for a window, and the
+it falls back to `xdg-open` (`open` on macOS, [macos.md](../architecture/macos.md#browser)), which cannot be asked for a window, and the
 prompt says "the default browser". With no display (neither `DISPLAY` nor
 `WAYLAND_DISPLAY`, `browser::displayed`) nothing is opened: `login` does not
 offer Enter, and the link is to be opened by hand.

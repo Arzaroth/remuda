@@ -79,6 +79,9 @@ The card's "Reachable from other machines" switch (`lan`) makes the proxy
 listen on every interface instead of `127.0.0.1`, and its base URLs and
 `export` lines then carry this machine's LAN address. Traffic is plain HTTP,
 keys included, so it is meant for a network the user trusts or a tailnet.
+On macOS, `serve` run as a LaunchAgent needs remuda allowed under System
+Settings, Privacy & Security, Local Network first: until then its LAN traffic
+fails with `EHOSTUNREACH` ([macos.md](../architecture/macos.md#the-proxy-on-the-lan)).
 While it is on, the card looks for ufw or firewalld and, when one blocks the
 port or its rules cannot be read without root, shows the commands that open
 it, with a copy button, a moment after the switch, since asking firewalld

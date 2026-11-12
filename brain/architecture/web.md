@@ -46,6 +46,8 @@ button runs this.
 
 ## Under systemd
 
+On macOS `serve` is a LaunchAgent instead ([macos.md](macos.md#services)).
+
 `systemd/remuda-serve.service` runs `remuda serve` (`Restart=on-abnormal`, so
 a refusal is not retried) with `REMUDA_SERVICE=1`, and `serve` then:
 

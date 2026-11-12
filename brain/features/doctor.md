@@ -35,7 +35,7 @@ fix indented below. `--json` prints the vitals as they are. Either way it
 exits non-zero when a vital is bad. It syncs the live logins back and takes
 the store lock, as `ls` does, and finds a running `serve` from the files it
 announces itself in ([web.md](../architecture/web.md)), reading the unit it
-runs in from `/proc/<pid>/cgroup`.
+runs in from `/proc/<pid>/cgroup`. On macOS the timer and serve are LaunchAgents, their states and fixes from `launchctl` ([macos.md](../architecture/macos.md#services)).
 
 ## On the page
 

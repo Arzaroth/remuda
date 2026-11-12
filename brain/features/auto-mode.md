@@ -42,7 +42,7 @@ For each CLI whose auto mode is on (`App::auto_round`), under the store lock:
    live login is locked, right before the write, so a session started during
    the switch's own sync and refresh is caught. A process counts by name, by a
    release binary named after its target (`codex-x86_64-...`), or as a
-   `codex.js` script under node, bun or deno; not being able to read `/proc`
+   `codex.js` script under node, bun or deno (on macOS from `proc_listallpids` and `KERN_PROCARGS2`, [macos.md](../architecture/macos.md#processes)); not being able to read `/proc`
    counts as a session running. A `remuda run` session's `codex`, which has
    `REMUDA_OUTER_CODEX_HOME` in its environment and a `CODEX_HOME` under
    `.runs`, does not count: it is on files of its own ([run.md](run.md)).

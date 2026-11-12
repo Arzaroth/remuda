@@ -55,7 +55,8 @@ own logins.
   limit. `tests/cli.rs`
   starts the real `serve` on port 0 to check that `open` reaches it, and runs
   it with `REMUDA_SERVICE` set to check the systemd behaviour. `sync-units` is
-  run with a fake `systemctl` first on `PATH` that logs its arguments, so no
+  run with a fake `systemctl` first on `PATH` (on macOS a fake `launchctl`
+  named by `REMUDA_TEST_LAUNCHCTL`, debug builds only) that logs its arguments, so no
   test reaches the real user manager.
 - **`tests/install.rs`** pipes `scripts/install.sh` into `bash -s` the way
   `curl | bash` does, against a release laid out in a temp directory
