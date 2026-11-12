@@ -687,12 +687,11 @@ fn start_service() -> bool {
     let installed = paths::systemd_user_units()
         .iter()
         .any(|dir| dir.join(units::SERVE).exists());
-    installed
-        && std::process::Command::new("systemctl")
-            .args(["--user", "start", units::SERVE])
-            .stdin(std::process::Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success())
+    if !installed {
+        return false;
+    }
+    systemctl(&["reset-failed", units::SERVE]);
+    systemctl(&["start", units::SERVE])
 }
 
 fn open(no_browser: bool, add: bool) -> Result<()> {
