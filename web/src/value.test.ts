@@ -162,4 +162,25 @@ describe('value', () => {
     expect(arrange(ps, { ...FILTERS, order: 'name' }, logins, now).shown.map((s) => s.plan.login)).toEqual(['perso', 'team', 'work']);
     expect(arrange(ps, { ...FILTERS, removed: false }, logins, now).gone).toEqual([]);
   });
+
+  it('goes back a month to the last day of a shorter month', () => {
+    const now = new Date(2026, 2, 31).getTime();
+    const ends = new Date(2026, 1, 28, 12).getTime();
+    expect(kept(week(0, { openedAt: ends - 7 * DAY, endsAt: ends }), { ...FILTERS, months: 1 }, now)).toBe(true);
+    expect(kept(week(0, { openedAt: ends - 8 * DAY, endsAt: ends - DAY }), { ...FILTERS, months: 1 }, now)).toBe(false);
+  });
+
+  it('orders by the latest week the filters left, and by value over every shown week', () => {
+    const ps = plans([
+      week(5, { used: 1 }),
+      week(2),
+      week(4, { login: 'perso', account: 'd-perso' }),
+      week(0, { login: 'team', account: 'd-team', usd: 500 }),
+      ...[1, 2, 3, 4].map((n) => week(n, { login: 'team', account: 'd-team', usd: 10 })),
+      week(3, { login: 'solo', account: 'd-solo', usd: 100 }),
+    ]);
+    const now = 100 * DAY;
+    expect(arrange(ps, { ...FILTERS, minUsed: 10 }, undefined, now).shown.map((s) => s.plan.login)).toEqual(['perso', 'team', 'solo', 'work']);
+    expect(arrange(ps, { ...FILTERS, order: 'value' }, undefined, now).shown.map((s) => s.plan.login)).toEqual(['team', 'solo', 'work', 'perso']);
+  });
 });
