@@ -996,6 +996,84 @@ fn a_serve_run_by_systemd_checks_the_directories_and_prints_no_token() {
     assert!(get_state(&url).starts_with("HTTP/1.1 200"));
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn sync_units_rewrites_the_installed_agents_and_restarts_serve() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = Home::new();
+    let launchctl = home.path("bin/launchctl");
+    let log = home.path("launchctl.log");
+    std::fs::write(
+        &launchctl,
+        format!(
+            "#!/bin/sh\necho \"$*\" >> '{}'\ncase \"$1\" in print) [ -e '{}' ] || exit 113; echo '\tpid = 7';; esac\n",
+            log.display(),
+            home.path("serve-loaded").display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&launchctl, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let agents = home.path("Library/LaunchAgents");
+    std::fs::create_dir_all(&agents).unwrap();
+    let refresh = agents.join("com.github.arzaroth.remuda.refresh.plist");
+    std::fs::write(&refresh, "old").unwrap();
+    let run = |args: &[&str]| {
+        home.command(args)
+            .env("REMUDA_TEST_LAUNCHCTL", &launchctl)
+            .env("REMUDA_STORE", home.path("store"))
+            .output()
+            .unwrap()
+    };
+
+    let out = run(&["sync-units"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let written = std::fs::read_to_string(&refresh).unwrap();
+    assert!(
+        written.contains("<string>--scheduled</string>"),
+        "{written}"
+    );
+    assert!(
+        written.contains(&home.path("store").display().to_string()),
+        "{written}"
+    );
+    assert!(
+        !agents
+            .join("com.github.arzaroth.remuda.serve.plist")
+            .exists()
+    );
+    let calls = std::fs::read_to_string(&log).unwrap();
+    assert!(!calls.contains("kickstart"), "{calls}");
+
+    std::fs::write(home.path("serve-loaded"), "").unwrap();
+    let out = run(&["sync-units", "--install", "serve"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        agents
+            .join("com.github.arzaroth.remuda.serve.plist")
+            .exists()
+    );
+    assert!(home.path("Library/Logs/remuda").is_dir());
+    let calls = std::fs::read_to_string(&log).unwrap();
+    assert!(calls.contains("bootstrap gui/"), "{calls}");
+
+    std::fs::remove_file(&log).unwrap();
+    assert!(run(&["sync-units"]).status.success());
+    let calls = std::fs::read_to_string(&log).unwrap();
+    assert!(calls.contains("kickstart -k gui/"), "{calls}");
+    assert!(
+        calls.contains("com.github.arzaroth.remuda.serve"),
+        "{calls}"
+    );
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn sync_units_rewrites_the_installed_units_and_reloads_systemd() {

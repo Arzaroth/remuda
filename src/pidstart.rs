@@ -43,3 +43,32 @@ pub fn claude_proc_start(start: u64) -> String {
         .map(|t| t.strftime("%a %b %e %H:%M:%S %Y").to_string())
         .unwrap_or_default()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn this_process_has_a_start_time_and_a_gone_one_none() {
+        assert!(start_time(std::process::id()).is_some());
+        assert_eq!(start_time(999_999_999), None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn claude_s_proc_start_is_what_ps_prints() {
+        let pid = std::process::id();
+        let out = std::process::Command::new("ps")
+            .args(["-o", "lstart=", "-p", &pid.to_string()])
+            .env("LC_ALL", "C")
+            .env("TZ", "UTC")
+            .output()
+            .unwrap();
+        let printed = String::from_utf8(out.stdout).unwrap();
+        assert_eq!(claude_proc_start(start_time(pid).unwrap()), printed.trim());
+        assert_eq!(
+            claude_proc_start(1_791_420_078_000_000),
+            "Thu Oct  8 00:41:18 2026"
+        );
+    }
+}

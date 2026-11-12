@@ -456,6 +456,17 @@ mod tests {
     }
 
     #[test]
+    fn a_window_shows_on_linux_with_a_display_and_on_a_mac_but_over_ssh() {
+        let only = |vars: &'static [&'static str]| move |var: &str| vars.contains(&var);
+        let mac = cfg!(target_os = "macos");
+        assert_eq!(shows(&only(&[])), mac);
+        assert!(shows(&only(&["DISPLAY"])));
+        assert!(shows(&only(&["WAYLAND_DISPLAY"])));
+        assert!(!shows(&only(&["SSH_TTY"])));
+        assert_eq!(shows(&only(&["SSH_CONNECTION", "DISPLAY"])), !mac);
+    }
+
+    #[test]
     fn the_redirect_page_quotes_the_url_for_both_of_its_uses() {
         let page = redirect_page("http://127.0.0.1:1/#a&b\"<c");
         assert!(page.contains("url=http://127.0.0.1:1/#a&amp;b&quot;&lt;c\""));

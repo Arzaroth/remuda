@@ -248,3 +248,102 @@ pub fn install(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::units::{Action, Manager};
+
+    fn env(vars: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {
+        move |v| {
+            vars.iter()
+                .find(|(k, _)| *k == v)
+                .map(|(_, x)| (*x).to_owned())
+        }
+    }
+
+    #[test]
+    fn serve_s_plist_runs_the_installed_binary_with_the_shell_s_directories() {
+        let home = Path::new("/Users/me");
+        let plist = plist(
+            Unit::Serve,
+            home,
+            &env(&[
+                ("REMUDA_STORE", "/Users/me/a&b"),
+                ("CODEX_HOME", ""),
+                ("TERM", "x"),
+            ]),
+        );
+        assert!(plist.contains("<string>com.github.arzaroth.remuda.serve</string>"));
+        assert!(
+            plist.contains(
+                "<string>/Users/me/.local/bin/remuda</string>\n\t\t<string>serve</string>"
+            )
+        );
+        assert!(plist.contains("<key>REMUDA_SERVICE</key>\n\t\t<string>1</string>"));
+        assert!(plist.contains("<key>REMUDA_STORE</key>\n\t\t<string>/Users/me/a&amp;b</string>"));
+        assert!(!plist.contains("CODEX_HOME") && !plist.contains("TERM"));
+        assert!(plist.contains("<string>/Users/me/.local/bin:/opt/homebrew/bin:"));
+        assert!(plist.contains("<key>Crashed</key>"));
+        assert!(plist.contains("/Users/me/Library/Logs/remuda/serve.log"));
+        assert!(!plist.contains("StartInterval"));
+    }
+
+    #[test]
+    fn the_refresh_runs_every_half_hour() {
+        let plist = plist(Unit::Timer, Path::new("/Users/me"), &env(&[]));
+        assert!(plist.contains("<string>refresh</string>\n\t\t<string>--scheduled</string>"));
+        assert!(plist.contains("<key>StartInterval</key>\n\t<integer>1800</integer>"));
+        assert!(!plist.contains("KeepAlive"));
+        assert!(plist.contains("refresh.log"));
+    }
+
+    #[test]
+    fn only_installed_agents_that_differ_are_rewritten() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("LaunchAgents");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(plist_path(&dir, Unit::Timer), "old").unwrap();
+        let (done, changed) = refresh(&dir, tmp.path(), &env(&[]));
+        assert_eq!(done.changed, [REFRESH]);
+        assert_eq!(changed, [Unit::Timer]);
+        assert!(!plist_path(&dir, Unit::Serve).exists());
+        assert_eq!(
+            std::fs::read_to_string(plist_path(&dir, Unit::Timer)).unwrap(),
+            plist(Unit::Timer, tmp.path(), &env(&[]))
+        );
+        let (done, _) = refresh(&dir, tmp.path(), &env(&[]));
+        assert!(done.changed.is_empty());
+    }
+
+    #[test]
+    fn launchctl_s_answers_are_read() {
+        let printed = "gui/501/com.github.arzaroth.remuda.serve = {\n\tactive count = 1\n\tpid = 4242\n\tstate = running\n}\n";
+        assert_eq!(pid_in(printed), Some(4242));
+        assert_eq!(pid_in("state = not running\n"), None);
+        let disabled = "disabled services = {\n\t\"com.github.arzaroth.remuda.refresh\" => disabled\n\t\"com.github.arzaroth.remuda.serve\" => enabled\n}\n";
+        assert!(disabled_in(disabled, Unit::Timer));
+        assert!(!disabled_in(disabled, Unit::Serve));
+    }
+
+    #[test]
+    fn the_fixes_name_launchctl_and_the_agent() {
+        let m = Manager::Launchd {
+            dir: PathBuf::from("/Users/me/Library/LaunchAgents"),
+            home: PathBuf::from("/Users/me"),
+        };
+        assert_eq!(m.name(Unit::Serve), SERVE);
+        assert_eq!(
+            m.fix(Unit::Timer, Action::Enable),
+            format!("`launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/{REFRESH}.plist`")
+        );
+        assert_eq!(
+            m.fix(Unit::Serve, Action::Restart),
+            format!("`launchctl kickstart -k gui/$(id -u)/{SERVE}`")
+        );
+        assert_eq!(
+            m.logs(Unit::Serve),
+            "/Users/me/Library/Logs/remuda/serve.log"
+        );
+    }
+}

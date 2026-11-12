@@ -1980,4 +1980,17 @@ order = [["Axeo"], ["perso"]]
             d.action
         );
     }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_lists_this_process_with_its_arguments_and_environment() {
+        let me = std::process::id();
+        let seen = listed().unwrap();
+        let mine = seen.iter().find(|p| p.pid == me).unwrap();
+        let exe = std::env::current_exe().unwrap();
+        let first = mine.cmdline.split(|b| *b == 0).next().unwrap();
+        assert_eq!(first, exe.as_os_str().as_encoded_bytes());
+        assert!(mine.environ().windows(5).any(|w| w == b"HOME="));
+        assert!(seen.len() > 1);
+    }
 }
