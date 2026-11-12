@@ -41,7 +41,7 @@ struct Pending {
 }
 
 pub struct Places {
-    pub units: Vec<PathBuf>,
+    pub units: crate::units::Manager,
     pub snapshot: PathBuf,
     pub config: PathBuf,
     /// Claude Code's `settings.json`, for the artifact hook's vital.
@@ -65,7 +65,7 @@ pub struct Places {
 impl Places {
     pub fn from_env() -> Self {
         Places {
-            units: paths::systemd_user_units(),
+            units: crate::units::Manager::from_env(),
             snapshot: paths::tokengauge_snapshot(),
             config: paths::config_file(),
             claude_settings: paths::claude_settings(),
@@ -1296,7 +1296,10 @@ mod tests {
 
     fn places(e: &Env) -> Places {
         Places {
-            units: vec![e.tmp.path().join("units"), e.tmp.path().join("global")],
+            units: crate::units::Manager::Systemd(vec![
+                e.tmp.path().join("units"),
+                e.tmp.path().join("global"),
+            ]),
             snapshot: e.tmp.path().join("tokengauge-usage.json"),
             config: e.tmp.path().join("config.toml"),
             claude_settings: e.tmp.path().join("settings.json"),

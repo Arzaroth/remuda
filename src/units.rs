@@ -20,6 +20,68 @@ pub const UNITS: [(&str, &str); 3] = [
     ),
 ];
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Unit {
+    Serve,
+    Timer,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Action {
+    Enable,
+    Unmask,
+    Restart,
+    Status,
+}
+
+/// What runs `serve` and the scheduled refresh: systemd's user units, found
+/// in these directories.
+pub enum Manager {
+    Systemd(Vec<PathBuf>),
+}
+
+impl Manager {
+    pub fn from_env() -> Self {
+        Manager::Systemd(crate::paths::systemd_user_units())
+    }
+
+    pub fn name(&self, unit: Unit) -> String {
+        match (self, unit) {
+            (Manager::Systemd(_), Unit::Serve) => SERVE.to_owned(),
+            (Manager::Systemd(_), Unit::Timer) => TIMER.to_owned(),
+        }
+    }
+
+    /// `enabled`, `disabled`, `masked` or `absent`.
+    pub fn state(&self, unit: Unit) -> &'static str {
+        match self {
+            Manager::Systemd(dirs) => {
+                let wants = match unit {
+                    Unit::Serve => "default.target.wants",
+                    Unit::Timer => "timers.target.wants",
+                };
+                state(dirs, &self.name(unit), wants)
+            }
+        }
+    }
+
+    /// The command that does `action` to `unit`, quoted for a fix line.
+    pub fn fix(&self, unit: Unit, action: Action) -> String {
+        let name = self.name(unit);
+        match self {
+            Manager::Systemd(_) => {
+                let verb = match action {
+                    Action::Enable => "enable --now",
+                    Action::Unmask => "unmask",
+                    Action::Restart => "restart",
+                    Action::Status => "status",
+                };
+                format!("`systemctl --user {verb} {name}`")
+            }
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct Refreshed {
     pub changed: Vec<&'static str>,

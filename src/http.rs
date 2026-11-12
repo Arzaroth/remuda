@@ -341,7 +341,7 @@ mod tests {
         let app = Arc::new(App::new(
             Store::open(e.store.root()),
             crate::serve::Places {
-                units: vec![e.tmp.path().join("units")],
+                units: crate::units::Manager::Systemd(vec![e.tmp.path().join("units")]),
                 snapshot: e.tmp.path().join("tokengauge-usage.json"),
                 config: e.tmp.path().join("config.toml"),
                 claude_settings: e.tmp.path().join("settings.json"),

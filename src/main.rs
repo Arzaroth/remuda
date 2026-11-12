@@ -1321,7 +1321,7 @@ fn main() -> Result<()> {
             let vitals = doctor::vitals(&doctor::Checkup {
                 store: &store,
                 lives: &lives,
-                units: &paths::systemd_user_units(),
+                units: &units::Manager::from_env(),
                 snapshot: &paths::tokengauge_snapshot(),
                 config: &paths::config_file(),
                 serving: served::serving(&paths::runtime_dir()),
