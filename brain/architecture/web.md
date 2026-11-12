@@ -38,7 +38,7 @@ wins.
 status passes that check and `serve.url` names its port, then opens it through
 a redirect file like everything else (or prints it). When nothing serves and
 `remuda-serve.service` is found in the user unit search path, it runs
-`systemctl --user start` on it and waits up to 10 s for the page. `--add` puts
+`systemctl --user reset-failed` and `start` on it and waits up to 10 s for the page. `--add` puts
 `?add` in front of the fragment (`served::adding`); the page keeps that query
 past taking the token and, once the state has loaded, drops it so a reload
 does not open the sheet again, then opens the add-account sheet. TokenGauge's `+`
@@ -46,13 +46,16 @@ button runs this.
 
 ## Under systemd
 
-`systemd/remuda-serve.service` runs `remuda serve` (`Restart=on-abnormal`, so
-a refusal is not retried) with `REMUDA_SERVICE=1`, and `serve` then:
+`systemd/remuda-serve.service` runs `remuda serve` with `REMUDA_SERVICE=1`.
+It restarts 30 s after a failure and gives up after five starts in ten
+minutes; `remuda open` runs `systemctl --user reset-failed` before it starts
+the unit, so a unit that gave up starts again. `serve` then:
 
 - checks the directories record like the scheduled refresh
   ([distribution.md](distribution.md)), printing one line per CLI it would not
-  serve and exiting non-zero rather than serve a login other than the
-  shell's;
+  serve and leaving those CLIs out of the page, auto mode and the proxy, so
+  one CLI it cannot vouch for never stops the others. A CLI left out stays out
+  until the service restarts, even once `remuda ls` has recorded it;
 - prints the URL without its token, since stdout is the journal;
 - opens no browser at start. Sign-ins still open their private window when
   the user manager has a display.
