@@ -534,7 +534,7 @@ impl Provider for Claude {
     }
 
     fn live_file(&self) -> Option<PathBuf> {
-        Some(self.storage.file().to_owned())
+        self.storage.live_file().map(PathBuf::from)
     }
 
     fn access_token<'a>(&self, creds: &'a Value) -> Option<&'a str> {
@@ -693,6 +693,20 @@ impl Provider for Claude {
             ],
             private: &[".credentials.json", ".claude.json"],
         })
+    }
+
+    fn read_copied(&self, c: &Copied) -> Result<Option<Value>> {
+        match c.from == self.storage.file() {
+            true => self.storage.read(),
+            false => read_json(&c.from),
+        }
+    }
+
+    fn update_copied(&self, c: &Copied, edit: &dyn Fn(&mut Value) -> Result<()>) -> Result<()> {
+        match c.from == self.storage.file() {
+            true => self.storage.update(edit),
+            false => update_json(&c.from, edit),
+        }
     }
 
     fn forget_outside(&self) -> Result<()> {

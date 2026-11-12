@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use sha2::{Digest, Sha256};
 
 use crate::child::{self, Ran};
@@ -102,6 +102,39 @@ fn login_name() -> Option<String> {
     }
 }
 
+/// `security -w` prints a password that is not printable as hex.
+fn unhex(out: &[u8]) -> Option<Vec<u8>> {
+    if out.is_empty() || !out.len().is_multiple_of(2) || !out.iter().all(u8::is_ascii_hexdigit) {
+        return None;
+    }
+    let bytes: Vec<u8> = out
+        .chunks(2)
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok())
+        .collect::<Option<_>>()?;
+    bytes
+        .iter()
+        .any(|b| !(0x20..0x7f).contains(b))
+        .then_some(bytes)
+}
+
+/// JSON with every character outside ASCII written as a `\u` escape, the
+/// same value in a form `security` keeps printable.
+pub fn ascii_json(value: &serde_json::Value) -> Result<String> {
+    let text = serde_json::to_string(value)?;
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if c.is_ascii() {
+            out.push(c);
+        } else {
+            let mut units = [0u16; 2];
+            for unit in c.encode_utf16(&mut units) {
+                out.push_str(&format!("\\u{unit:04x}"));
+            }
+        }
+    }
+    Ok(out)
+}
+
 fn locked() -> anyhow::Error {
     anyhow::anyhow!(
         "the login Keychain is locked in this session, so the Claude Code login it holds \
@@ -157,9 +190,11 @@ impl Keychain {
         let ran = self.find(true)?;
         match ran.code {
             Some(0) => {
-                let text = String::from_utf8(ran.out)
+                let out = ran.out.strip_suffix(b"\n").unwrap_or(&ran.out);
+                let bytes = unhex(out).unwrap_or_else(|| out.to_vec());
+                let text = String::from_utf8(bytes)
                     .map_err(|_| anyhow::anyhow!("the Keychain's {} is not text", self.service))?;
-                Ok(Item::Held(text.trim_end_matches('\n').to_owned()))
+                Ok(Item::Held(text))
             }
             Some(MISSING) => Ok(Item::Missing),
             Some(LOCKED) => {
@@ -175,29 +210,35 @@ impl Keychain {
     }
 
     /// Sets the password through `security -i`, so it never reaches a
-    /// command line. False, writing nothing, when it is too long for that.
+    /// command line, and reads it back. False, writing nothing, when it is
+    /// too long for that or not printable ASCII, which `security` would print
+    /// back as hex to Claude Code.
     pub fn write(&self, password: &str) -> Result<bool> {
         let Some(line) = self.line(password) else {
             return Ok(false);
         };
         let ran = self.security.run(&["-i"], Some(line.as_bytes()))?;
         match ran.code {
-            Some(0) => Ok(true),
-            Some(LOCKED) => Err(locked()),
-            _ => Err(failed("add-generic-password", &ran)),
+            Some(0) => {}
+            Some(LOCKED) => return Err(locked()),
+            _ => return Err(failed("add-generic-password", &ran)),
+        }
+        match self.read()? {
+            Item::Held(back) if back == password => Ok(true),
+            _ => bail!(
+                "the Keychain's {} did not keep what was written",
+                self.service
+            ),
         }
     }
 
     fn line(&self, password: &str) -> Option<String> {
-        let value = if password.bytes().all(|b| (0x20..0x7f).contains(&b)) {
-            let quoted = password.replace('\\', "\\\\").replace('"', "\\\"");
-            format!("-w \"{quoted}\"")
-        } else {
-            let hex: String = password.bytes().map(|b| format!("{b:02x}")).collect();
-            format!("-X \"{hex}\"")
-        };
+        if !password.bytes().all(|b| (0x20..0x7f).contains(&b)) {
+            return None;
+        }
+        let quoted = password.replace('\\', "\\\\").replace('"', "\\\"");
         let line = format!(
-            "add-generic-password -U -a \"{}\" -s \"{}\" {value}\n",
+            "add-generic-password -U -a \"{}\" -s \"{}\" -w \"{quoted}\"\n",
             self.account, self.service
         );
         (line.len() <= LINE).then_some(line)
@@ -240,16 +281,14 @@ mod tests {
     }
 
     #[test]
-    fn a_password_is_quoted_when_printable_and_hex_otherwise() {
+    fn a_password_is_quoted_and_only_printable_ascii_is_taken() {
         let k = Keychain::new(Arc::new(Tool("/nowhere".into())), "S".into(), "me".into());
         assert_eq!(
             k.line(r#"{"a":"b\\c"}"#).unwrap(),
             "add-generic-password -U -a \"me\" -s \"S\" -w \"{\\\"a\\\":\\\"b\\\\\\\\c\\\"}\"\n"
         );
-        assert_eq!(
-            k.line("é").unwrap(),
-            "add-generic-password -U -a \"me\" -s \"S\" -X \"c3a9\"\n"
-        );
+        assert!(k.line("é").is_none());
+        assert!(k.line("a\tb").is_none());
         assert!(k.line(&"a".repeat(3900)).is_some());
         assert!(k.line(&"a".repeat(4000)).is_none());
     }

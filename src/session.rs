@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 
 use selvedge::proc::start_time;
 
-use crate::fsx::{create_private_dir, now_ms, read_json, update_json, write_json};
+use crate::fsx::{create_private_dir, now_ms, read_json, write_json};
 use crate::logbook::{self, Event, Kind};
 use crate::ops;
 use crate::provider::{Provider, RunSpec};
@@ -220,7 +220,7 @@ fn prepare(store: &Store, p: &dyn Provider, spec: &RunSpec, entry: &Entry) -> Re
             .with_context(|| format!("failed to link {}", item.path().display()))?;
     }
     for c in &spec.copied {
-        let start = without(read_json(&c.from)?, c.login_keys);
+        let start = without(p.read_copied(c)?, c.login_keys);
         write_json(&base.join(c.name), &start)?;
         write_json(&home.join(c.name), &start)?;
     }
@@ -278,17 +278,33 @@ fn merge(base: &Value, ours: &Value, theirs: &mut Value, skip: &[&str], deep: bo
     changed
 }
 
-fn merge_back(spec: &RunSpec, home: &Path, base: &Path) -> Result<()> {
+/// `session` reads the session's copies where its CLI keeps them, `p` the
+/// CLI's own.
+fn merge_back(
+    p: &dyn Provider,
+    session: &dyn Provider,
+    spec: &RunSpec,
+    home: &Path,
+    base: &Path,
+) -> Result<()> {
+    let theirs = session.run_spec();
     for c in &spec.copied {
-        let Some(ours) = read_json(&home.join(c.name))? else {
+        let in_session = theirs
+            .as_ref()
+            .and_then(|s| s.copied.iter().find(|s| s.name == c.name));
+        let ours = match in_session {
+            Some(s) => session.read_copied(s)?,
+            None => read_json(&home.join(c.name))?,
+        };
+        let Some(ours) = ours else {
             continue;
         };
         let was = read_json(&base.join(c.name))?.unwrap_or_else(|| json!({}));
-        let mut probe = without(read_json(&c.from)?, &[]);
+        let mut probe = without(p.read_copied(c)?, &[]);
         if !merge(&was, &ours, &mut probe, c.login_keys, true) {
             continue;
         }
-        update_json(&c.from, |theirs| {
+        p.update_copied(c, &|theirs| {
             merge(&was, &ours, theirs, c.login_keys, true);
             Ok(())
         })?;
@@ -516,14 +532,18 @@ fn finish(store: &Store, p: &dyn Provider, spec: &RunSpec, name: &str) -> Result
             .relocated(&home)
             .with_context(|| format!("{} cannot run in a directory of its own", p.name()))?;
         said.extend(sync_back(store, p, session.as_ref(), name)?);
-        session.forget_outside()?;
         for aside in move_back(p, spec, &home, &base)? {
             said.push(format!(
                 "the session's copy of a file changed meanwhile is kept as {}",
                 aside.display()
             ));
         }
-        merge_back(spec, &home, &base)?;
+        merge_back(p, session.as_ref(), spec, &home, &base)?;
+        if let Err(e) = session.forget_outside() {
+            said.push(format!(
+                "what the session kept outside its directory stays: {e:#}"
+            ));
+        }
     }
     for dir in [&home, &base] {
         if dir.exists() {

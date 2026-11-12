@@ -5,8 +5,9 @@ use std::time::{Duration, Instant, SystemTime};
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 
-use crate::fsx::{create_private_dir, read_json, update_json, write_private};
-use crate::keychain::{Item, Keychain};
+use crate::claude::OAUTH_KEY;
+use crate::fsx::{create_private_dir, read_json, update_json};
+use crate::keychain::{Item, Keychain, ascii_json};
 
 /// What Claude Code calls its secure storage: the JSON object holding its
 /// login and its MCP servers' tokens. On macOS it is the login Keychain's
@@ -19,6 +20,14 @@ pub struct SecureStorage {
 /// Claude Code's lock on its secure storage, a directory it takes for each
 /// write and counts as abandoned after 15 seconds.
 struct Held(PathBuf);
+
+impl Held {
+    fn touch(&self) {
+        if let Ok(dir) = fs::File::open(&self.0) {
+            let _ = dir.set_modified(SystemTime::now());
+        }
+    }
+}
 
 const STALE: Duration = Duration::from_secs(15);
 const WAIT: Duration = Duration::from_secs(10);
@@ -109,8 +118,9 @@ impl SecureStorage {
             return update_json(&self.file, edit);
         };
         let dir = self.file.parent().context("path has no parent")?;
-        let _held = Held::take(dir)?;
+        let held = Held::take(dir)?;
         for _ in 0..10 {
+            held.touch();
             let Item::Held(before) = keychain.read()? else {
                 return update_json(&self.file, edit);
             };
@@ -118,7 +128,9 @@ impl SecureStorage {
             if !value.is_object() {
                 bail!("the Keychain's {} is not a JSON object", keychain.service());
             }
+            let was = value.clone();
             edit(&mut value)?;
+            held.touch();
             match keychain.read()? {
                 Item::Held(now) if now == before => {}
                 _ => {
@@ -126,18 +138,37 @@ impl SecureStorage {
                     continue;
                 }
             }
-            if keychain.write(&serde_json::to_string(&value)?)? {
+            held.touch();
+            if keychain.write(&ascii_json(&value)?)? {
                 return Ok(());
             }
-            let mut body = serde_json::to_string_pretty(&value)?;
-            body.push('\n');
-            write_private(&self.file, &body)?;
+            update_json(&self.file, |file| {
+                let login = file.get(OAUTH_KEY);
+                if login.is_some_and(|l| {
+                    Some(l) != was.get(OAUTH_KEY) && Some(l) != value.get(OAUTH_KEY)
+                }) {
+                    bail!(
+                        "{} holds another Claude Code login than the Keychain, which remuda does not write over",
+                        self.file.display()
+                    );
+                }
+                *file = value.clone();
+                Ok(())
+            })?;
             return keychain.delete();
         }
         bail!(
             "the Keychain's {} kept changing while remuda wrote it",
             keychain.service()
         )
+    }
+
+    /// The file, unless the Keychain holds the object instead.
+    pub fn live_file(&self) -> Option<&Path> {
+        match &self.keychain {
+            Some(k) if !matches!(k.read(), Ok(Item::Missing)) => None,
+            _ => Some(&self.file),
+        }
     }
 
     /// Removes what the storage keeps outside the directory.
