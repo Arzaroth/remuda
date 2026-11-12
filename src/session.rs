@@ -516,6 +516,7 @@ fn finish(store: &Store, p: &dyn Provider, spec: &RunSpec, name: &str) -> Result
             .relocated(&home)
             .with_context(|| format!("{} cannot run in a directory of its own", p.name()))?;
         said.extend(sync_back(store, p, session.as_ref(), name)?);
+        session.forget_outside()?;
         for aside in move_back(p, spec, &home, &base)? {
             said.push(format!(
                 "the session's copy of a file changed meanwhile is kept as {}",

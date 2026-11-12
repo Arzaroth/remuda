@@ -213,6 +213,11 @@ pub trait Provider: Send + Sync {
     fn relocated(&self, _dir: &std::path::Path) -> Option<Box<dyn Provider>> {
         None
     }
+    /// Removes what the CLI keeps for its directory outside it, once a
+    /// `remuda run` session there is over.
+    fn forget_outside(&self) -> Result<()> {
+        Ok(())
+    }
     /// Spends one of the login's banked usage-limit resets.
     fn redeem_reset(&self, _entry: &Entry, _kind: Option<&str>) -> Result<String> {
         bail!("{} has no banked resets", self.name())

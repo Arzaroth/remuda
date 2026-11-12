@@ -482,7 +482,17 @@ pub struct Claude {
 impl Claude {
     pub fn from_env() -> Result<Self> {
         Ok(Claude {
-            storage: SecureStorage::in_file(paths::claude_credentials()),
+            storage: match crate::keychain::tool() {
+                Some(security) => SecureStorage::with_keychain(
+                    paths::claude_credentials(),
+                    crate::keychain::Keychain::new(
+                        security,
+                        paths::claude_keychain_service(),
+                        crate::keychain::account(std::env::var("USER").ok()),
+                    ),
+                ),
+                None => SecureStorage::in_file(paths::claude_credentials()),
+            },
             config_path: paths::claude_config(),
             api: Api::claude()?,
         })
@@ -683,6 +693,10 @@ impl Provider for Claude {
             ],
             private: &[".credentials.json", ".claude.json"],
         })
+    }
+
+    fn forget_outside(&self) -> Result<()> {
+        self.storage.forget()
     }
 
     fn relocated(&self, dir: &std::path::Path) -> Option<Box<dyn Provider>> {

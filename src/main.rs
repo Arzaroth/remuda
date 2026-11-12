@@ -18,6 +18,7 @@ mod fsx;
 mod gauge;
 mod grok;
 mod http;
+mod keychain;
 mod kimi;
 mod logbook;
 mod oauth;

@@ -9,6 +9,7 @@ use anyhow::{Context, Result, bail};
 /// What a program printed, once it exited within its deadline.
 pub struct Ran {
     pub ok: bool,
+    pub code: Option<i32>,
     pub out: Vec<u8>,
     pub err: Vec<u8>,
 }
@@ -22,13 +23,38 @@ impl Ran {
 /// Runs `program` with nothing on its stdin, killing it at `wait`. `who`
 /// names it in the errors.
 pub fn run(who: &str, program: &Path, args: &[&str], wait: Duration, limit: u64) -> Result<Ran> {
+    run_fed(who, program, args, None, wait, limit)
+}
+
+/// [`run`], with `input` on its stdin.
+pub fn run_fed(
+    who: &str,
+    program: &Path,
+    args: &[&str],
+    input: Option<&[u8]>,
+    wait: Duration,
+    limit: u64,
+) -> Result<Ran> {
     let mut child = Command::new(program)
         .args(args)
-        .stdin(Stdio::null())
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .with_context(|| format!("could not run {}", program.display()))?;
+    if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
+        let fed = std::io::Write::write_all(&mut stdin, input);
+        drop(stdin);
+        if let Err(e) = fed {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(e).with_context(|| format!("could not write to {who}"));
+        }
+    }
     let out = drain(child.stdout.take().context("no output")?, limit);
     let err = drain(child.stderr.take().context("no error output")?, 4096);
     let until = Instant::now() + wait;
@@ -56,6 +82,7 @@ pub fn run(who: &str, program: &Path, args: &[&str], wait: Duration, limit: u64)
     };
     Ok(Ran {
         ok: status.success(),
+        code: status.code(),
         out,
         err,
     })
