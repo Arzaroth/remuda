@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Added
+
+- Usage's Value tab has filters behind a Filters button: a period, a floor
+  on the percent used, and hiding removed logins (on by default), weeks with
+  spend no login claims, the week in progress, incomplete weeks, weeks with
+  no spend and weeks a reset cut short, plus an order for the logins. A
+  card says how many of its weeks are hidden. The choices are remembered.
+- A week a reset ended early says after how many days.
+
+### Fixed
+
+- After a reset that kept the weekly reset time (Claude's), the Value tab
+  showed the week it ended as lasting no time with nothing spent, and gave
+  the spend before the reset to the week in progress, until that week
+  closed.
+
 ## [0.41.0] - 2026-11-11
 
 ### Added

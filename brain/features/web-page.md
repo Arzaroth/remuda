@@ -245,8 +245,13 @@ Three tabs, each filtered by a CLI and a login, the first two by a range (7,
   keeps the old account's weeks as a history of their own, and by its name
   only when that account is unknown. A day
   the week covers in part counts in proportion, today's row as spent so far, a
-  week reset early ends where the next one opened, and the open week runs to
-  now ("so far"). Spend no record attributes is shown beside the week, a week
+  week reset early ends where the next one opened and says after how many
+  days, and the open week runs to now ("so far"). TokenGauge, not remuda,
+  tells a reset: a figure that went down starts a new instance, whether the
+  reset moved `resetsAt` (Codex) or left it in place (Claude), and in the
+  second case the instance opens at the last sighting of the one before,
+  which the open week reads from the trail's `openedAt`. A reset seen at 0%,
+  or missed until the figure climbed past the old one, leaves one week. Spend no record attributes is shown beside the week, a week
   with unpriced use of its login or from before the usage record starts is
   marked, and a week of a login neither the store nor the attribution ledger
   names has no figure. An unreadable window history says so rather than
@@ -260,7 +265,16 @@ Three tabs, each filtered by a CLI and a login, the first two by a range (7,
   card only. A ×0.63 plan measured at ×0.71 gives more per percent than its
   weight says. Use the export cannot see (the web, the desktop apps, a
   machine without TokenGauge) makes a week look worth less than it was, and
-  the tab says so.
+  the tab says so. A Filters button folds the tab's filters (`value.ts`
+  `arrange`, remembered in the browser): a period, a floor on the percent
+  used, and hiding removed logins (on by default; a login whose account the
+  store no longer holds counts), weeks with spend no login claims, the open
+  week, weeks marked incomplete, weeks with no spend and weeks a reset cut
+  short, plus the cards' order (latest week, best dollars per percent over
+  the shown weeks, name). They change the tables and charts only: the
+  comparison with the weeks before and the measured weight read every week.
+  A card says how many of its weeks are hidden, and a login left with none
+  is named under the cards.
 
 Charts are inline SVG (`Charts.tsx`) with a hover readout; models and token
 rates take a fixed categorical palette (`--c1` to `--c7`, validated for both
