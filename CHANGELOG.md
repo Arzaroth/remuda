@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.42.1] - 2026-11-12
+
 ### Fixed
 
 - The Value tab's "Removed logins" filter hides a login this machine never
