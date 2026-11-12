@@ -160,3 +160,366 @@ impl SecureStorage {
     }
 }
 
+#[cfg(test)]
+pub mod testing {
+    use std::collections::BTreeMap;
+    use std::sync::{Arc, Mutex};
+
+    use anyhow::Result;
+
+    use crate::child::Ran;
+    use crate::keychain::{Keychain, Security};
+
+    type Hook = Box<dyn FnMut(&mut BTreeMap<String, String>) + Send>;
+
+    /// A login Keychain in memory, answering as `security` does.
+    #[derive(Default)]
+    pub struct Fake {
+        pub items: Mutex<BTreeMap<String, String>>,
+        pub locked: Mutex<bool>,
+        pub calls: Mutex<Vec<(Vec<String>, Option<String>)>>,
+        pub after_read: Mutex<Option<Hook>>,
+    }
+
+    fn ran(code: i32, out: &str) -> Ran {
+        Ran {
+            ok: code == 0,
+            code: Some(code),
+            out: out.as_bytes().to_vec(),
+            err: Vec::new(),
+        }
+    }
+
+    fn unquote(s: &str) -> String {
+        let mut out = String::new();
+        let mut chars = s.chars();
+        while let Some(c) = chars.next() {
+            match c {
+                '\\' => out.extend(chars.next()),
+                c => out.push(c),
+            }
+        }
+        out
+    }
+
+    impl Fake {
+        pub fn keychain(self: &Arc<Self>, service: &str) -> Keychain {
+            Keychain::new(self.clone(), service.to_owned(), "me".to_owned())
+        }
+
+        pub fn put(&self, service: &str, value: &str) {
+            self.items
+                .lock()
+                .unwrap()
+                .insert(service.to_owned(), value.to_owned());
+        }
+
+        pub fn get(&self, service: &str) -> Option<String> {
+            self.items.lock().unwrap().get(service).cloned()
+        }
+    }
+
+    impl Security for Fake {
+        fn run(&self, args: &[&str], input: Option<&[u8]>) -> Result<Ran> {
+            let input = input.map(|i| String::from_utf8(i.to_vec()).unwrap());
+            self.calls.lock().unwrap().push((
+                args.iter().map(|a| (*a).to_owned()).collect(),
+                input.clone(),
+            ));
+            let locked = *self.locked.lock().unwrap();
+            let mut items = self.items.lock().unwrap();
+            let service = |args: &[&str]| {
+                let at = args.iter().position(|a| *a == "-s").unwrap();
+                args[at + 1].to_owned()
+            };
+            Ok(match args[0] {
+                "find-generic-password" if args.contains(&"-w") => {
+                    if locked {
+                        ran(36, "")
+                    } else {
+                        let found = items.get(&service(args)).cloned();
+                        if let Some(hook) = self.after_read.lock().unwrap().as_mut() {
+                            hook(&mut items);
+                        }
+                        match found {
+                            Some(v) => ran(0, &format!("{v}\n")),
+                            None => ran(44, ""),
+                        }
+                    }
+                }
+                "find-generic-password" => match items.contains_key(&service(args)) {
+                    true => ran(0, ""),
+                    false => ran(44, ""),
+                },
+                "delete-generic-password" => match items.remove(&service(args)) {
+                    Some(_) => ran(0, ""),
+                    None => ran(44, ""),
+                },
+                "-i" if locked => ran(36, ""),
+                "-i" => {
+                    let line = input.unwrap();
+                    assert!(line.len() <= 4096 && line.ends_with('\n'));
+                    let line = line.trim_end_matches('\n');
+                    let rest = line
+                        .strip_prefix("add-generic-password -U -a \"me\" -s \"")
+                        .unwrap();
+                    let (svc, rest) = rest.split_once('"').unwrap();
+                    let value = if let Some(q) = rest.strip_prefix(" -w \"") {
+                        unquote(q.strip_suffix('"').unwrap())
+                    } else {
+                        let hex = rest
+                            .strip_prefix(" -X \"")
+                            .unwrap()
+                            .strip_suffix('"')
+                            .unwrap();
+                        let bytes: Vec<u8> = (0..hex.len())
+                            .step_by(2)
+                            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+                            .collect();
+                        String::from_utf8(bytes).unwrap()
+                    };
+                    items.insert(svc.to_owned(), value);
+                    ran(0, "")
+                }
+                other => panic!("unexpected security {other}"),
+            })
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use serde_json::json;
+
+    use super::testing::Fake;
+    use super::*;
+    use crate::fsx::write_json;
+
+    const SERVICE: &str = "Claude Code-credentials";
+
+    fn storage(tmp: &tempfile::TempDir) -> (Arc<Fake>, SecureStorage) {
+        let fake = Arc::new(Fake::default());
+        let storage = SecureStorage::with_keychain(
+            tmp.path().join(".credentials.json"),
+            fake.keychain(SERVICE),
+        );
+        (fake, storage)
+    }
+
+    fn held(fake: &Fake) -> Value {
+        serde_json::from_str(&fake.get(SERVICE).unwrap()).unwrap()
+    }
+
+    fn mcp(n: usize) -> Value {
+        let servers: serde_json::Map<String, Value> = (0..n)
+            .map(|i| {
+                (
+                    format!("server-{i}"),
+                    json!({"accessToken": format!("mcp-{i}-{}", "x".repeat(200))}),
+                )
+            })
+            .collect();
+        Value::Object(servers)
+    }
+
+    #[test]
+    fn the_keychain_item_is_read_before_the_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (fake, storage) = storage(&tmp);
+        write_json(
+            storage.file(),
+            &json!({"claudeAiOauth": {"accessToken": "file"}}),
+        )
+        .unwrap();
+        assert_eq!(
+            storage.read().unwrap().unwrap()["claudeAiOauth"]["accessToken"],
+            "file"
+        );
+
+        fake.put(SERVICE, r#"{"claudeAiOauth":{"accessToken":"keychain"}}"#);
+        assert_eq!(
+            storage.read().unwrap().unwrap()["claudeAiOauth"]["accessToken"],
+            "keychain"
+        );
+    }
+
+    #[test]
+    fn a_locked_keychain_holding_the_login_is_refused_and_one_without_it_reads_the_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (fake, storage) = storage(&tmp);
+        write_json(
+            storage.file(),
+            &json!({"claudeAiOauth": {"accessToken": "file"}}),
+        )
+        .unwrap();
+        *fake.locked.lock().unwrap() = true;
+        assert_eq!(
+            storage.read().unwrap().unwrap()["claudeAiOauth"]["accessToken"],
+            "file"
+        );
+        storage
+            .update(|v| {
+                v["claudeAiOauth"]["accessToken"] = json!("new");
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            read_json(storage.file()).unwrap().unwrap()["claudeAiOauth"]["accessToken"],
+            "new"
+        );
+
+        fake.put(SERVICE, r#"{"claudeAiOauth":{"accessToken":"keychain"}}"#);
+        let err = storage.read().unwrap_err().to_string();
+        assert!(err.contains("security unlock-keychain"), "{err}");
+        let err = storage.update(|_| Ok(())).unwrap_err().to_string();
+        assert!(err.contains("locked"), "{err}");
+        assert!(!tmp.path().join(".storage-write.lock").exists());
+    }
+
+    #[test]
+    fn an_update_rewrites_the_item_through_stdin_and_keeps_every_other_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (fake, storage) = storage(&tmp);
+        let mut start = json!({"claudeAiOauth": {"accessToken": "old"}, "mcpOAuth": mcp(3)});
+        start["mcpOAuth"]["server-0"]["note"] = json!("a \"quoted\" back\\slash");
+        fake.put(SERVICE, &serde_json::to_string(&start).unwrap());
+
+        storage
+            .update(|v| {
+                v["claudeAiOauth"] = json!({"accessToken": "secret-new"});
+                Ok(())
+            })
+            .unwrap();
+
+        let now = held(&fake);
+        assert_eq!(now["claudeAiOauth"]["accessToken"], "secret-new");
+        assert_eq!(now["mcpOAuth"], start["mcpOAuth"]);
+        assert!(!storage.file().exists());
+        assert!(!tmp.path().join(".storage-write.lock").exists());
+        for (args, _) in fake.calls.lock().unwrap().iter() {
+            assert!(args.iter().all(|a| !a.contains("secret-new")), "{args:?}");
+        }
+    }
+
+    #[test]
+    fn an_item_too_long_for_stdin_moves_to_the_file_whole() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (fake, storage) = storage(&tmp);
+        let start = json!({"claudeAiOauth": {"accessToken": "old"}, "mcpOAuth": mcp(20)});
+        fake.put(SERVICE, &serde_json::to_string(&start).unwrap());
+
+        storage
+            .update(|v| {
+                v["claudeAiOauth"] = json!({"accessToken": "new"});
+                Ok(())
+            })
+            .unwrap();
+
+        assert_eq!(fake.get(SERVICE), None);
+        let file = read_json(storage.file()).unwrap().unwrap();
+        assert_eq!(file["claudeAiOauth"]["accessToken"], "new");
+        assert_eq!(file["mcpOAuth"], start["mcpOAuth"]);
+        assert_eq!(storage.read().unwrap().unwrap(), file);
+    }
+
+    #[test]
+    fn with_no_item_the_file_is_updated_and_no_item_is_made() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (fake, storage) = storage(&tmp);
+        write_json(storage.file(), &json!({"mcpOAuth": {"a": 1}})).unwrap();
+        storage
+            .update(|v| {
+                v["claudeAiOauth"] = json!({"accessToken": "new"});
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(fake.get(SERVICE), None);
+        let file = read_json(storage.file()).unwrap().unwrap();
+        assert_eq!(
+            file,
+            json!({"mcpOAuth": {"a": 1}, "claudeAiOauth": {"accessToken": "new"}})
+        );
+    }
+
+    #[test]
+    fn an_item_changed_while_it_was_edited_is_edited_again() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (fake, storage) = storage(&tmp);
+        fake.put(SERVICE, r#"{"claudeAiOauth":{"accessToken":"a"}}"#);
+        let mut once = true;
+        *fake.after_read.lock().unwrap() = Some(Box::new(move |items| {
+            if std::mem::take(&mut once) {
+                items.insert(
+                    SERVICE.to_owned(),
+                    r#"{"claudeAiOauth":{"accessToken":"b"},"x":1}"#.to_owned(),
+                );
+            }
+        }));
+        storage
+            .update(|v| {
+                v["y"] = json!(2);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            held(&fake),
+            json!({"claudeAiOauth": {"accessToken": "b"}, "x": 1, "y": 2})
+        );
+    }
+
+    #[test]
+    fn an_edit_that_says_changed_writes_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (fake, storage) = storage(&tmp);
+        fake.put(SERVICE, r#"{"claudeAiOauth":{"accessToken":"a"}}"#);
+        let err = storage
+            .update(|_| Err(crate::fsx::Changed.into()))
+            .unwrap_err();
+        assert!(err.is::<crate::fsx::Changed>());
+        assert_eq!(
+            fake.get(SERVICE).unwrap(),
+            r#"{"claudeAiOauth":{"accessToken":"a"}}"#
+        );
+    }
+
+    #[test]
+    fn a_lock_claude_code_abandoned_is_taken_over() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (fake, storage) = storage(&tmp);
+        fake.put(SERVICE, "{}");
+        let lock = tmp.path().join(".storage-write.lock");
+        fs::create_dir(&lock).unwrap();
+        let old = SystemTime::now() - Duration::from_secs(60);
+        fs::File::open(&lock).unwrap().set_modified(old).unwrap();
+        storage
+            .update(|v| {
+                v["a"] = json!(1);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(held(&fake), json!({"a": 1}));
+        assert!(!lock.exists());
+    }
+
+    #[test]
+    fn a_session_directory_has_an_item_of_its_own_and_forgets_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (fake, storage) = storage(&tmp);
+        let dir = tmp.path().join("session");
+        let session = storage.relocated(&dir);
+        let service = crate::keychain::service(Some(&dir.to_string_lossy()));
+        assert_ne!(service, SERVICE);
+        assert_eq!(session.file(), dir.join(".credentials.json"));
+        fake.put(&service, r#"{"claudeAiOauth":{"accessToken":"s"}}"#);
+        fake.put(SERVICE, "{}");
+        assert_eq!(
+            session.read().unwrap().unwrap()["claudeAiOauth"]["accessToken"],
+            "s"
+        );
+        session.forget().unwrap();
+        assert_eq!(fake.get(&service), None);
+        assert_eq!(fake.get(SERVICE).as_deref(), Some("{}"));
+    }
+}

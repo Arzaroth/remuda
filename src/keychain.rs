@@ -222,3 +222,63 @@ impl Keychain {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn services_are_named_as_claude_code_names_them() {
+        assert_eq!(service(None), "Claude Code-credentials");
+        assert_eq!(service(Some("abc")), "Claude Code-ba7816bf-credentials");
+    }
+
+    #[test]
+    fn an_account_outside_the_simple_names_is_claude_codes_default() {
+        assert_eq!(account(Some("marc.e-b_1".into())), "marc.e-b_1");
+        assert_eq!(account(Some("marc e".into())), "claude-code-user");
+        assert_eq!(account(Some("é".into())), "claude-code-user");
+    }
+
+    #[test]
+    fn a_password_is_quoted_when_printable_and_hex_otherwise() {
+        let k = Keychain::new(Arc::new(Tool("/nowhere".into())), "S".into(), "me".into());
+        assert_eq!(
+            k.line(r#"{"a":"b\\c"}"#).unwrap(),
+            "add-generic-password -U -a \"me\" -s \"S\" -w \"{\\\"a\\\":\\\"b\\\\\\\\c\\\"}\"\n"
+        );
+        assert_eq!(
+            k.line("é").unwrap(),
+            "add-generic-password -U -a \"me\" -s \"S\" -X \"c3a9\"\n"
+        );
+        assert!(k.line(&"a".repeat(3900)).is_some());
+        assert!(k.line(&"a".repeat(4000)).is_none());
+    }
+
+    /// Only where the login Keychain can be written: a Mac's own session,
+    /// or one unlocked with `security unlock-keychain`.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "writes the login Keychain of whoever runs it"]
+    fn the_real_keychain_takes_a_long_item_through_stdin_and_gives_it_back() {
+        let k = Keychain::new(
+            tool().unwrap(),
+            format!("remuda-test-{}-credentials", std::process::id()),
+            account(std::env::var("USER").ok()),
+        );
+        let value = format!("{{\"a\":\"{}\\\\\"}}", "x\"y".repeat(900));
+        match k.write(&value) {
+            Err(e) if e.to_string().contains("locked") => {
+                eprintln!("skipped: {e}");
+                return;
+            }
+            written => assert!(written.unwrap()),
+        }
+        let back = k.read();
+        k.delete().unwrap();
+        match back.unwrap() {
+            Item::Held(text) => assert_eq!(text, value),
+            Item::Missing => panic!("the item was not written"),
+        }
+        assert!(matches!(k.read().unwrap(), Item::Missing));
+    }
+}

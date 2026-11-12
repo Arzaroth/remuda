@@ -44,12 +44,55 @@ fn read(path: &Path) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
+/// macOS's `security`, keeping each item as a file under `$HOME/keychain`,
+/// and locked while `$HOME/keychain/.locked` exists.
+const SECURITY: &str = r#"#!/bin/sh
+dir="$HOME/keychain"
+mkdir -p "$dir"
+service() {
+    while [ $# -gt 0 ]; do
+        [ "$1" = -s ] && { printf '%s' "$2"; return; }
+        shift
+    done
+}
+case "$1" in
+find-generic-password)
+    s=$(service "$@")
+    case " $* " in *" -w "*) [ -e "$dir/.locked" ] && exit 36; w=1 ;; esac
+    [ -e "$dir/$s" ] || exit 44
+    [ -n "$w" ] && { cat "$dir/$s"; echo; }
+    exit 0 ;;
+delete-generic-password)
+    s=$(service "$@")
+    [ -e "$dir/$s" ] || exit 44
+    rm "$dir/$s" ;;
+-i)
+    [ -e "$dir/.locked" ] && exit 36
+    IFS= read -r line
+    s=$(printf '%s' "$line" | sed -n 's/^add-generic-password -U -a "[^"]*" -s "\([^"]*\)" -w ".*$/\1/p')
+    [ -n "$s" ] || exit 1
+    printf '%s' "$line" | sed -n 's/^add-generic-password -U -a "[^"]*" -s "[^"]*" -w "\(.*\)"$/\1/p' |
+        sed 's/\\\(["\\]\)/\1/g' > "$dir/$s" ;;
+*) exit 1 ;;
+esac
+"#;
+
 impl Home {
     fn new() -> Self {
-        Home {
+        let home = Home {
             dir: tempfile::tempdir().unwrap(),
             api: std::cell::RefCell::new(mockito::Server::new()),
-        }
+        };
+        let security = home.path("bin/security");
+        std::fs::create_dir_all(security.parent().unwrap()).unwrap();
+        std::fs::write(&security, SECURITY).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&security, std::fs::Permissions::from_mode(0o755)).unwrap();
+        home
+    }
+
+    fn keychain(&self) -> PathBuf {
+        self.path("keychain/Claude Code-credentials")
     }
 
     fn path(&self, rel: &str) -> PathBuf {
@@ -98,7 +141,8 @@ impl Home {
             .env("REMUDA_TEST_XAI_API", self.api.borrow().url())
             .env("REMUDA_TEST_KIMI_API", self.api.borrow().url())
             .env("REMUDA_TEST_CURSOR_API", self.api.borrow().url())
-            .env("REMUDA_TEST_GH", self.path("bin/gh"));
+            .env("REMUDA_TEST_GH", self.path("bin/gh"))
+            .env("REMUDA_TEST_SECURITY", self.path("bin/security"));
         // Coverage runs record the binary's own profile through this.
         if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
             cmd.env("LLVM_PROFILE_FILE", profile);
@@ -300,6 +344,56 @@ fn the_store_and_claude_code_follow_their_environment_variables() {
     run(&[("REMUDA_STORE", &explicit), ("XDG_DATA_HOME", &xdg)], "b");
     assert!(explicit.join("claude/b.json").exists());
     assert!(!home.path(".claude/.credentials.json").exists());
+}
+
+#[test]
+fn a_mac_switches_the_keychain_item_and_keeps_its_mcp_tokens() {
+    let home = Home::new();
+    home.sign_in("a-work", "r-work", "u-work");
+    home.ok(&["import", "work"]);
+    home.sign_in("a-perso", "r-perso", "u-perso");
+    std::fs::create_dir_all(home.keychain().parent().unwrap()).unwrap();
+    std::fs::rename(home.creds(), home.keychain()).unwrap();
+    assert!(
+        home.ok(&["ls"])
+            .contains("u-perso@example.com, which is not stored")
+    );
+    home.ok(&["import", "perso"]);
+
+    home.ok(&["use", "work"]);
+    let item = read(&home.keychain());
+    assert_eq!(item["claudeAiOauth"]["refreshToken"], "r-work");
+    assert_eq!(item["mcpOAuth"]["srv"]["accessToken"], "mcp");
+    assert!(!home.creds().exists());
+    assert_eq!(
+        read(&home.config())["oauthAccount"]["accountUuid"],
+        "u-work"
+    );
+    assert!(home.ok(&["ls"]).contains("* work"));
+    assert!(!home.path(".claude/.storage-write.lock").exists());
+}
+
+#[test]
+fn a_locked_keychain_holding_the_login_says_how_to_unlock_it() {
+    let home = Home::new();
+    home.sign_in("a-work", "r-work", "u-work");
+    home.ok(&["import", "work"]);
+    std::fs::create_dir_all(home.keychain().parent().unwrap()).unwrap();
+    std::fs::rename(home.creds(), home.keychain()).unwrap();
+    std::fs::write(home.path("keychain/.locked"), "").unwrap();
+    let err = home.fails(&["use", "work"]);
+    assert!(err.contains("security unlock-keychain"), "{err}");
+    assert!(!home.path(".claude/.storage-write.lock").exists());
+
+    std::fs::remove_file(home.keychain()).unwrap();
+    home.sign_in("a-perso", "r-perso", "u-perso");
+    home.ok(&["import", "perso"]);
+    home.ok(&["use", "work"]);
+    assert_eq!(
+        read(&home.creds())["claudeAiOauth"]["refreshToken"],
+        "r-work"
+    );
+    assert!(!home.keychain().exists());
 }
 
 #[test]
