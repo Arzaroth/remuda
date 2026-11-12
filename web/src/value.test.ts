@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { change, changeText, plans, rate, weights, type Week } from './value';
+import { arrange, change, changed, changeText, cutShort, FILTERS, kept, plans, rate, removed, weights, type Week } from './value';
+import type { Login } from './spend';
 
 const DAY = 86_400_000;
 const week = (n: number, over: Partial<Week> = {}): Week => ({
@@ -88,5 +89,98 @@ describe('value', () => {
     const got = weights(ps, { codex: { max: 20, pro: 2 } });
     expect(got.get(ps.find((p) => p.weeks[0].account === 'new')!)).toEqual({ advertised: 1, measured: 1 });
     expect(got.has(ps.find((p) => p.weeks[0].account === 'old')!)).toBe(false);
+  });
+
+  it('says after how many days a reset cut a week short', () => {
+    expect(cutShort(week(0))).toBeNull();
+    expect(cutShort(week(0, { endsAt: 3 * DAY }))).toBe(3);
+    expect(cutShort(week(0, { endsAt: DAY, open: true }))).toBeNull();
+    expect(cutShort(week(0, { endsAt: 7 * DAY - DAY / 48 }))).toBeNull();
+  });
+
+  it('keeps a week only when every filter lets it through', () => {
+    const now = Date.UTC(2026, 10, 12);
+    const at = (ms: number, over: Partial<Week> = {}) => week(0, { openedAt: ms, endsAt: ms + 7 * DAY, ...over });
+    const f = (over: Partial<typeof FILTERS>) => ({ ...FILTERS, ...over });
+    expect(kept(at(Date.UTC(2026, 9, 1)), f({ months: 1 }), now)).toBe(false);
+    expect(kept(at(Date.UTC(2026, 9, 8)), f({ months: 1 }), now)).toBe(true);
+    expect(kept(at(Date.UTC(2025, 9, 1)), f({}), now)).toBe(true);
+    expect(kept(week(0, { used: 9 }), f({ minUsed: 10 }), now)).toBe(false);
+    expect(kept(week(0, { used: 10 }), f({ minUsed: 10 }), now)).toBe(true);
+    expect(kept(week(0, { unattributedUsd: 5 }), f({ unclaimed: true }), now)).toBe(false);
+    expect(kept(week(0, { unattributedUsd: 0.001 }), f({ unclaimed: true }), now)).toBe(true);
+    expect(kept(week(0, { open: true }), f({ open: true }), now)).toBe(false);
+    expect(kept(week(0, { partial: true }), f({ incomplete: true }), now)).toBe(false);
+    expect(kept(week(0, { unpriced: true }), f({ incomplete: true }), now)).toBe(false);
+    expect(kept(week(0, { usd: 0 }), f({ idle: true }), now)).toBe(false);
+    expect(kept(week(0, { endsAt: 2 * DAY }), f({ cut: true }), now)).toBe(false);
+    expect(kept(week(0, { usd: 0, open: true, partial: true, endsAt: DAY }), FILTERS, now)).toBe(true);
+  });
+
+  it('counts the filters changed, the order aside', () => {
+    expect(changed(FILTERS)).toBe(0);
+    expect(changed({ ...FILTERS, order: 'name' })).toBe(0);
+    expect(changed({ ...FILTERS, months: 3, removed: false })).toBe(2);
+  });
+
+  it('calls a login removed when the store dropped its account', () => {
+    const logins: Record<string, Login> = {
+      'd-work': { provider: 'codex', name: 'work' },
+      'd-old': { provider: 'codex', name: 'old', removed: true },
+    };
+    const [work] = plans([week(0)]);
+    const [old] = plans([week(0, { account: 'd-old' })]);
+    const [lost] = plans([week(0, { account: 'd-lost' })]);
+    const [unknown] = plans([week(0, { account: null })]);
+    expect([work, old, lost, unknown].map((p) => removed(p, logins))).toEqual([false, true, true, false]);
+    expect(removed(old, undefined)).toBe(false);
+  });
+
+  it('arranges the logins left after the filters and names those it left out', () => {
+    const logins: Record<string, Login> = {
+      'd-work': { provider: 'codex', name: 'work' },
+      'd-perso': { provider: 'codex', name: 'perso' },
+      'd-team': { provider: 'codex', name: 'team' },
+      'd-old': { provider: 'codex', name: 'old', removed: true },
+    };
+    const ps = plans([
+      week(5, { usd: 50, usdPerPercent: 1 }),
+      week(4, { usd: 10, used: 5 }),
+      week(4, { login: 'perso', account: 'd-perso', usd: 200, usdPerPercent: 4 }),
+      week(3, { login: 'team', account: 'd-team', used: 2, usd: 1 }),
+      week(2, { login: 'old', account: 'd-old' }),
+    ]);
+    const now = 100 * DAY;
+    const got = arrange(ps, { ...FILTERS, minUsed: 10 }, logins, now);
+    expect(got.shown.map((s) => [s.plan.login, s.weeks.length, s.hidden])).toEqual([
+      ['work', 1, 1],
+      ['perso', 1, 0],
+    ]);
+    expect(got.empty.map((p) => p.login)).toEqual(['team']);
+    expect(got.gone.map((p) => p.login)).toEqual(['old']);
+    expect(arrange(ps, { ...FILTERS, order: 'value' }, logins, now).shown.map((s) => s.plan.login)).toEqual(['perso', 'work', 'team']);
+    expect(arrange(ps, { ...FILTERS, order: 'name' }, logins, now).shown.map((s) => s.plan.login)).toEqual(['perso', 'team', 'work']);
+    expect(arrange(ps, { ...FILTERS, removed: false }, logins, now).gone).toEqual([]);
+  });
+
+  it('goes back a month to the last day of a shorter month', () => {
+    const now = new Date(2026, 2, 31).getTime();
+    const ends = new Date(2026, 1, 28, 12).getTime();
+    expect(kept(week(0, { openedAt: ends - 7 * DAY, endsAt: ends }), { ...FILTERS, months: 1 }, now)).toBe(true);
+    expect(kept(week(0, { openedAt: ends - 8 * DAY, endsAt: ends - DAY }), { ...FILTERS, months: 1 }, now)).toBe(false);
+  });
+
+  it('orders by the latest week the filters left, and by value over every shown week', () => {
+    const ps = plans([
+      week(5, { used: 1 }),
+      week(2),
+      week(4, { login: 'perso', account: 'd-perso' }),
+      week(0, { login: 'team', account: 'd-team', usd: 500 }),
+      ...[1, 2, 3, 4].map((n) => week(n, { login: 'team', account: 'd-team', usd: 10 })),
+      week(3, { login: 'solo', account: 'd-solo', usd: 100 }),
+    ]);
+    const now = 100 * DAY;
+    expect(arrange(ps, { ...FILTERS, minUsed: 10 }, undefined, now).shown.map((s) => s.plan.login)).toEqual(['perso', 'team', 'solo', 'work']);
+    expect(arrange(ps, { ...FILTERS, order: 'value' }, undefined, now).shown.map((s) => s.plan.login)).toEqual(['team', 'solo', 'work', 'perso']);
   });
 });

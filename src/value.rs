@@ -124,12 +124,13 @@ fn spans(history: &Value, now: i64) -> Vec<Span> {
         if resets <= now {
             continue;
         }
+        let due = resets - WEEK_MINUTES as i64 * 60_000;
         out.push(Span {
             provider,
             login: text(t, "credential"),
             digest: text(t, "accountDigest"),
             window,
-            opened: resets - WEEK_MINUTES as i64 * 60_000,
+            opened: ms(t.get("openedAt")).map_or(due, |at| at.max(due)),
             resets,
             used: used.unwrap_or(0),
             open: true,
@@ -392,6 +393,34 @@ mod tests {
         assert!(close(open.usd, 6.0));
         assert!(!shut.open && shut.ends_at == next);
         assert!(close(shut.usd, 7.0));
+    }
+
+    #[test]
+    fn a_reset_that_left_resets_at_in_place_opens_the_open_week_where_the_trail_says() {
+        let reset = MON + 3 * DAY;
+        let now = reset + DAY;
+        let history = json!({
+            "closed": [{"provider": "codex", "credential": "work", "window": "primary",
+                        "windowMinutes": WEEK_MINUTES, "openedAt": iso(MON),
+                        "resetsAt": iso(MON + 7 * DAY), "used": 90, "seenAt": iso(reset)}],
+            "trails": [{"provider": "codex", "credential": "work", "window": "primary",
+                        "windowMinutes": WEEK_MINUTES, "resetsAt": iso(MON + 7 * DAY),
+                        "openedAt": iso(reset), "samples": [[reset + DAY / 4, 2], [now, 10]]}]
+        });
+        let rows = export(
+            &[
+                ("2026-10-05", Some("d-work"), 7.0),
+                ("2026-10-08", Some("d-work"), 6.0),
+            ],
+            Some("2026-09-01"),
+        );
+        let weeks = weeks(&history, &rows, &digests(), &known(), &TimeZone::UTC, now);
+        assert_eq!(weeks.len(), 2);
+        let (open, shut) = (&weeks[0], &weeks[1]);
+        assert!(open.open && open.opened_at == reset && open.used == 10);
+        assert!(close(open.usd, 6.0), "{}", open.usd);
+        assert_eq!((shut.opened_at, shut.ends_at, shut.used), (MON, reset, 90));
+        assert!(close(shut.usd, 7.0), "{}", shut.usd);
     }
 
     #[test]

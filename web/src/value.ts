@@ -18,7 +18,7 @@ export type Week = {
 
 export type ValueAnswer = { weeks?: Week[]; logins?: Record<string, Login>; unavailable?: string };
 
-export type Plan = { provider: string; login: string; weeks: Week[] };
+export type Plan = { provider: string; login: string; account: string | null; weeks: Week[] };
 
 // Every login's weeks, oldest first, the logins in the order their newest
 // week came. Two accounts that held one name are two histories.
@@ -27,7 +27,7 @@ export function plans(weeks: Week[]): Plan[] {
   for (const w of [...weeks].sort((a, b) => b.openedAt - a.openedAt)) {
     if (!w.login) continue;
     const key = `${w.provider}/${w.login}/${w.account ?? ''}`;
-    if (!out.has(key)) out.set(key, { provider: w.provider, login: w.login, weeks: [] });
+    if (!out.has(key)) out.set(key, { provider: w.provider, login: w.login, account: w.account, weeks: [] });
     out.get(key)!.weeks.unshift(w);
   }
   return [...out.values()];
@@ -43,6 +43,15 @@ export function change(weeks: Week[]): number | null {
   const before = closed.slice(-5, -1).map((w) => w.usdPerPercent!);
   const mean = before.reduce((a, b) => a + b, 0) / before.length;
   return mean > 0 ? last / mean : null;
+}
+
+const DAY = 86_400_000;
+
+// The days a week ran when a reset closed it before its seventh.
+export function cutShort(w: Week): number | null {
+  if (w.open) return null;
+  const days = (w.endsAt - w.openedAt) / DAY;
+  return days < 7 - 1 / 24 ? days : null;
 }
 
 export function changeText(ratio: number): string {
@@ -76,4 +85,85 @@ export function weights(ps: Plan[], advertised: Record<string, Record<string, nu
     for (const r of rated) out.set(r.plan, { advertised: r.weight / top, measured: r.rate / ref.rate });
   }
   return out;
+}
+
+export type Order = 'recent' | 'value' | 'name';
+
+export type Filters = {
+  months: number;
+  minUsed: number;
+  removed: boolean;
+  unclaimed: boolean;
+  open: boolean;
+  incomplete: boolean;
+  idle: boolean;
+  cut: boolean;
+  order: Order;
+};
+
+export const FILTERS: Filters = {
+  months: 0,
+  minUsed: 0,
+  removed: true,
+  unclaimed: false,
+  open: false,
+  incomplete: false,
+  idle: false,
+  cut: false,
+  order: 'recent',
+};
+
+export function changed(f: Filters): number {
+  return (Object.keys(FILTERS) as (keyof Filters)[]).filter((k) => k !== 'order' && f[k] !== FILTERS[k]).length;
+}
+
+export function removed(p: Plan, logins: Record<string, Login> | undefined): boolean {
+  if (!p.account || !logins) return false;
+  const l = logins[p.account];
+  return !l || !!l.removed;
+}
+
+export function kept(w: Week, f: Filters, now: number): boolean {
+  if (f.months > 0) {
+    const since = new Date(now);
+    const day = since.getDate();
+    since.setDate(1);
+    since.setMonth(since.getMonth() - f.months);
+    since.setDate(Math.min(day, new Date(since.getFullYear(), since.getMonth() + 1, 0).getDate()));
+    if (w.endsAt <= since.getTime()) return false;
+  }
+  if (w.used < f.minUsed) return false;
+  if (f.unclaimed && w.unattributedUsd >= 0.01) return false;
+  if (f.open && w.open) return false;
+  if (f.incomplete && (w.partial || w.unpriced)) return false;
+  if (f.idle && w.usd < 0.01) return false;
+  if (f.cut && cutShort(w) != null) return false;
+  return true;
+}
+
+export type Shown = { plan: Plan; weeks: Week[]; hidden: number };
+
+// The logins with a week left after the filters, in the order asked, and
+// those left with none or hidden as removed, so the page can name them.
+export function arrange(
+  ps: Plan[],
+  f: Filters,
+  logins: Record<string, Login> | undefined,
+  now: number,
+): { shown: Shown[]; empty: Plan[]; gone: Plan[] } {
+  const gone = f.removed ? ps.filter((p) => removed(p, logins)) : [];
+  const all = ps
+    .filter((p) => !gone.includes(p))
+    .map((plan) => {
+      const weeks = plan.weeks.filter((w) => kept(w, f, now));
+      return { plan, weeks, hidden: plan.weeks.length - weeks.length };
+    });
+  const shown = all.filter((s) => s.weeks.length);
+  if (f.order === 'recent') shown.sort((a, b) => b.weeks[b.weeks.length - 1].openedAt - a.weeks[a.weeks.length - 1].openedAt);
+  if (f.order === 'name') shown.sort((a, b) => a.plan.login.localeCompare(b.plan.login) || a.plan.provider.localeCompare(b.plan.provider));
+  if (f.order === 'value') {
+    const per = new Map(shown.map((s) => [s, rate(s.weeks, s.weeks.length)]));
+    shown.sort((a, b) => (per.get(b) ?? -1) - (per.get(a) ?? -1));
+  }
+  return { shown, empty: all.filter((s) => !s.weeks.length).map((s) => s.plan), gone };
 }
