@@ -118,7 +118,8 @@ export function changed(f: Filters): number {
 }
 
 export function removed(p: Plan, logins: Record<string, Login> | undefined): boolean {
-  if (!p.account || !logins) return false;
+  if (!logins) return false;
+  if (!p.account) return !Object.values(logins).some((l) => !l.removed && l.provider === p.provider && l.name === p.login);
   const l = logins[p.account];
   return !l || !!l.removed;
 }
