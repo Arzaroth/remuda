@@ -24,6 +24,7 @@ mod logbook;
 mod oauth;
 mod ops;
 mod paths;
+mod pidstart;
 mod pins;
 mod pkce;
 mod project;

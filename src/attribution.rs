@@ -109,7 +109,7 @@ impl RunWatch {
         pid: u32,
     ) -> Option<RunWatch> {
         let session_of = p.run_sessions()?;
-        let start = selvedge::proc::start_time(pid)?;
+        let start = crate::pidstart::start_time(pid)?;
         let root = store.root().to_owned();
         let home = home.to_owned();
         let provider = p.id().to_owned();
@@ -300,7 +300,7 @@ mod tests {
             serde_json::json!({
                 "pid": std::process::id(),
                 "sessionId": session,
-                "procStart": start.to_string(),
+                "procStart": crate::pidstart::claude_proc_start(start),
                 "kind": "interactive",
             })
             .to_string(),
@@ -318,7 +318,7 @@ mod tests {
         let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);
         let home = e.tmp.path().join("run-home");
-        let me = selvedge::proc::start_time(std::process::id()).unwrap();
+        let me = crate::pidstart::start_time(std::process::id()).unwrap();
         running(&home, "s-1", me);
 
         let watching = watch(&e, &home).unwrap();
@@ -353,7 +353,7 @@ mod tests {
         let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);
         let home = e.tmp.path().join("run-home");
-        let me = selvedge::proc::start_time(std::process::id()).unwrap();
+        let me = crate::pidstart::start_time(std::process::id()).unwrap();
         running(&home, "s-old", me + 1);
 
         drop(watch(&e, &home).unwrap());
@@ -366,7 +366,7 @@ mod tests {
         let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);
         let home = e.tmp.path().join("run-home");
-        let me = selvedge::proc::start_time(std::process::id()).unwrap();
+        let me = crate::pidstart::start_time(std::process::id()).unwrap();
         running(&home, "s-1", me);
 
         drop(watch(&e, &home).unwrap());
