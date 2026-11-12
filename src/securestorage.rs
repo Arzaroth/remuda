@@ -208,6 +208,7 @@ pub mod testing {
     pub struct Fake {
         pub items: Mutex<BTreeMap<String, String>>,
         pub locked: Mutex<bool>,
+        pub forgets_writes: Mutex<bool>,
         pub calls: Mutex<Vec<(Vec<String>, Option<String>)>>,
         pub after_read: Mutex<Option<Hook>>,
     }
@@ -309,7 +310,9 @@ pub mod testing {
                             .collect();
                         String::from_utf8(bytes).unwrap()
                     };
-                    items.insert(svc.to_owned(), value);
+                    if !*self.forgets_writes.lock().unwrap() {
+                        items.insert(svc.to_owned(), value);
+                    }
                     ran(0, "")
                 }
                 other => panic!("unexpected security {other}"),
@@ -453,6 +456,73 @@ mod tests {
         assert_eq!(file["claudeAiOauth"]["accessToken"], "new");
         assert_eq!(file["mcpOAuth"], start["mcpOAuth"]);
         assert_eq!(storage.read().unwrap().unwrap(), file);
+    }
+
+    #[test]
+    fn an_item_too_long_for_stdin_never_replaces_another_login_in_the_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (fake, storage) = storage(&tmp);
+        let start = json!({"claudeAiOauth": {"accessToken": "old"}, "mcpOAuth": mcp(20)});
+        fake.put(SERVICE, &serde_json::to_string(&start).unwrap());
+        let other = json!({"claudeAiOauth": {"accessToken": "rotated-over-ssh"}});
+        write_json(storage.file(), &other).unwrap();
+
+        let err = storage
+            .update(|v| {
+                v["claudeAiOauth"] = json!({"accessToken": "new"});
+                Ok(())
+            })
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("another Claude Code login"), "{err}");
+        assert_eq!(read_json(storage.file()).unwrap().unwrap(), other);
+        assert!(fake.get(SERVICE).is_some());
+    }
+
+    #[test]
+    fn non_ascii_goes_in_as_escapes_and_comes_back_from_hex() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (fake, storage) = storage(&tmp);
+        fake.put(SERVICE, "{}");
+        storage
+            .update(|v| {
+                v["name"] = json!("Zoé 🐎");
+                Ok(())
+            })
+            .unwrap();
+        let raw = fake.get(SERVICE).unwrap();
+        assert!(raw.is_ascii() && raw.contains("\\u00e9"), "{raw}");
+        assert_eq!(storage.read().unwrap().unwrap()["name"], "Zoé 🐎");
+
+        let hex: String = r#"{"name":"é"}"#.bytes().map(|b| format!("{b:02x}")).collect();
+        fake.put(SERVICE, &hex);
+        assert_eq!(storage.read().unwrap().unwrap()["name"], "é");
+    }
+
+    #[test]
+    fn a_write_the_keychain_did_not_keep_is_an_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (fake, storage) = storage(&tmp);
+        fake.put(SERVICE, "{}");
+        *fake.forgets_writes.lock().unwrap() = true;
+        let err = storage
+            .update(|v| {
+                v["a"] = json!(1);
+                Ok(())
+            })
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("did not keep"), "{err}");
+    }
+
+    #[test]
+    fn a_login_in_the_keychain_has_no_file_to_date_it_by() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (fake, storage) = storage(&tmp);
+        assert_eq!(storage.live_file(), Some(storage.file()));
+        fake.put(SERVICE, "{}");
+        assert_eq!(storage.live_file(), None);
     }
 
     #[test]

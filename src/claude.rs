@@ -507,6 +507,19 @@ impl Claude {
         }
     }
 
+    #[cfg(test)]
+    pub fn in_keychain(
+        dir: &std::path::Path,
+        api: Api,
+        keychain: crate::keychain::Keychain,
+    ) -> Self {
+        Claude {
+            storage: SecureStorage::with_keychain(dir.join(".credentials.json"), keychain),
+            config_path: dir.join(".claude.json"),
+            api,
+        }
+    }
+
     fn oauth(creds: &Value) -> Option<&Map<String, Value>> {
         creds.get(OAUTH_KEY).and_then(Value::as_object)
     }

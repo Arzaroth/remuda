@@ -120,6 +120,15 @@ impl Cursor {
         }
     }
 
+    #[cfg(test)]
+    pub fn in_keychain(keychain: Keychain, api: Api) -> Self {
+        Cursor {
+            auth_path: PathBuf::from("/nowhere/auth.json"),
+            keychain: Some(keychain),
+            api,
+        }
+    }
+
     fn item(keychain: &Keychain, service: &str) -> Result<Option<String>> {
         Ok(match keychain.with_service(service.to_owned()).read()? {
             Item::Held(token) => Some(token).filter(|t| !t.is_empty()),
@@ -634,5 +643,44 @@ mod tests {
         let login = c.begin_login(false).unwrap().finish(None).unwrap();
         cut.assert();
         assert_eq!(login.creds["refreshToken"], "r7");
+    }
+
+    #[test]
+    fn on_a_mac_the_login_is_the_keychain_s_two_items() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let fake = std::sync::Arc::new(crate::securestorage::testing::Fake::default());
+        let c = Cursor::in_keychain(fake.keychain(ACCESS), Api::local(&OFFLINE));
+        assert_eq!(c.live().unwrap(), None);
+        assert_eq!(c.live_file(), None);
+        fake.put(API_KEY, "key");
+        assert_eq!(c.foreign_login().unwrap().as_deref(), Some("an API key"));
+        for (name, user) in [("work", "u1"), ("perso", "u2")] {
+            let creds = auth(user, name, &format!("r-{name}"));
+            let identity = c.identify(&creds).unwrap();
+            store
+                .save(&Entry::new("cursor", name, creds, identity, 1))
+                .unwrap();
+        }
+        let work = store.get("cursor", "work").unwrap().unwrap();
+        c.install(&work, None).unwrap();
+        assert_eq!(c.foreign_login().unwrap(), None);
+        assert_eq!(fake.get(REFRESH).as_deref(), Some("r-work"));
+
+        ops::switch(&store, &c, "perso", false).unwrap();
+
+        let perso = store.get("cursor", "perso").unwrap().unwrap().creds;
+        assert_eq!(fake.get(ACCESS).as_deref(), perso["accessToken"].as_str());
+        assert_eq!(fake.get(REFRESH).as_deref(), Some("r-perso"));
+        assert_eq!(fake.get(API_KEY).as_deref(), Some("key"));
+        let live = c.live().unwrap().unwrap();
+        assert!(
+            c.install(&work, Some(&auth("u3", "x", "r-x")))
+                .unwrap_err()
+                .is::<Changed>()
+        );
+        c.sign_out(&live).unwrap();
+        assert_eq!(fake.get(ACCESS), None);
+        assert_eq!(fake.get(REFRESH), None);
     }
 }

@@ -747,6 +747,44 @@ mod tests {
     }
 
     #[test]
+    fn on_a_mac_a_session_starts_from_the_keychain_and_gives_its_own_item_back() {
+        let mut server = mockito::Server::new();
+        profile(&mut server, "a-rotated", "u-work");
+        let e = env(&server.url());
+        e.stored("work", "u-work", HOUR);
+        let fake = std::sync::Arc::new(crate::securestorage::testing::Fake::default());
+        let claude = crate::claude::Claude::in_keychain(
+            e.tmp.path(),
+            crate::claude::Api::local(&server.url()),
+            fake.keychain("Claude Code-credentials"),
+        );
+        let live = json!({OAUTH_KEY: oauth("a-live", "r-live", HOUR)[OAUTH_KEY], "mcpOAuth": {"srv": {"accessToken": "mcp"}}});
+        fake.put("Claude Code-credentials", &live.to_string());
+
+        let (lease, _, home) = start(&e.store, &claude, "work").unwrap();
+        let session = read(&home.join(".credentials.json"));
+        assert_eq!(session[OAUTH_KEY]["refreshToken"], "r-work");
+        assert_eq!(session["mcpOAuth"]["srv"]["accessToken"], "mcp");
+
+        let own = crate::keychain::service(Some(&home.to_string_lossy()));
+        let mut rotated = session.clone();
+        rotated[OAUTH_KEY] = oauth("a-rotated", "r-rotated", 2 * HOUR)[OAUTH_KEY].clone();
+        rotated["mcpOAuth"]["new"] = json!({"accessToken": "n"});
+        fake.put(&own, &rotated.to_string());
+        fs::remove_file(home.join(".credentials.json")).unwrap();
+        leave(&e.store, &claude, lease);
+
+        assert!(!home.exists());
+        assert_eq!(fake.get(&own), None);
+        let main: Value =
+            serde_json::from_str(&fake.get("Claude Code-credentials").unwrap()).unwrap();
+        assert_eq!(main[OAUTH_KEY]["refreshToken"], "r-live");
+        assert_eq!(main["mcpOAuth"]["new"]["accessToken"], "n");
+        let work = e.store.get("claude", "work").unwrap().unwrap();
+        assert_eq!(work.creds[OAUTH_KEY]["refreshToken"], "r-rotated");
+    }
+
+    #[test]
     fn a_session_links_the_cli_s_files_and_keeps_only_the_login_its_own() {
         let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);
