@@ -16,6 +16,14 @@ own logins.
   that wants one writes a stand-in, so the developer's own `gh` login, which
   may live in the system keyring, is never read. `ApiKey::with` drops that
   lookup for unit tests (`falling_back_to` gives one back).
+  `REMUDA_TEST_SECURITY` names the macOS `security` tool, and turns the
+  Keychain on wherever it is set: `tests/cli.rs` gives every run a shell
+  stand-in keeping items as files under the throwaway home, so the CLI tests
+  take the Keychain path on Linux too and never touch a real Keychain on a
+  Mac. Unit tests give `SecureStorage` an in-memory one
+  (`securestorage::testing::Fake`). The one test that writes the real login
+  Keychain is ignored by default: `cargo test -- --ignored the_real_keychain`
+  on a Mac, from its own session or after `security unlock-keychain`.
 - **Offline is a bound port nobody listens on** (`ops::testing::OFFLINE`):
   bound once and kept for the whole run without listening, so connecting is
   refused at once and no other test's server can be given the port. It serves

@@ -20,8 +20,10 @@
    three times). `--discard` skips that check, except when the live login is
    stored and confirmed: then there is nothing to drop, and the check stays. For Claude the install writes
    `oauthAccount` into `.claude.json`, then `claudeAiOauth` into
-   `.credentials.json`, keeping every other key; for Codex it replaces
-   `auth.json`.
+   `.credentials.json`, keeping every other key (on macOS, into the login
+   Keychain item when there is one,
+   [providers.md](../architecture/providers.md#claude-code)); for Codex it
+   replaces `auth.json`.
 6. Note the time in `<store>/.last-switch.json` under the provider id
    (`runs::switched`, best effort), so the page can tell usage TokenGauge
    fetched before the switch from usage of the new login.

@@ -38,6 +38,28 @@ refresh token into "sign this credential in again".
 - Files: `.credentials.json` (`claudeAiOauth`) and `.claude.json`
   (`oauthAccount`), both under `CLAUDE_CONFIG_DIR` when set, else `~/.claude`
   and `~/.claude.json`.
+- On macOS the object `.credentials.json` holds lives in the login Keychain
+  instead, as the generic password `Claude Code-credentials` (with
+  `CLAUDE_CONFIG_DIR` set, `Claude Code-<first 8 hex of its SHA-256>-credentials`)
+  for the account `$USER`, and the file is only Claude Code's fallback, read
+  when the Keychain has no such item. `SecureStorage`
+  ([securestorage.rs](../../src/securestorage.rs)) reads and writes it the same
+  way, through `/usr/bin/security` ([keychain.rs](../../src/keychain.rs)):
+  - read: the item when there is one, else the file. A Keychain locked in
+    this session (over SSH) that holds the item is an error naming
+    `security unlock-keychain`; one without it reads the file, as Claude
+    Code does.
+  - write: under Claude Code's own lock (the directory
+    `.storage-write.lock`, taken over after 15 seconds), compare the item
+    with what was read, then `add-generic-password -U` through `security -i`
+    on stdin. An item too long for its one 4096-byte line is written whole to
+    `.credentials.json` and the item deleted: Claude Code then reads the
+    file, and moves it back into the Keychain on its next write. With no
+    item, the file is edited as on Linux.
+  - A `remuda run` session's directory has an item of its own, which the
+    session's end deletes (`Provider::forget_outside`).
+  - Debug builds take another `security` from `REMUDA_TEST_SECURITY`, on any
+    system.
 - Identity: `oauthAccount.accountUuid` in `.claude.json`, which is a different
   file from the tokens and can lag them, hence `identify` calls the profile
   endpoint.
@@ -246,6 +268,8 @@ as `PendingLogin::user_code`, which the prompt and the page show.
 
 - [src/provider.rs](../../src/provider.rs)
 - [src/claude.rs](../../src/claude.rs)
+- [src/securestorage.rs](../../src/securestorage.rs)
+- [src/keychain.rs](../../src/keychain.rs)
 - [src/codex.rs](../../src/codex.rs)
 - [src/grok.rs](../../src/grok.rs)
 - [src/kimi.rs](../../src/kimi.rs)
