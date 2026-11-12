@@ -124,12 +124,13 @@ fn spans(history: &Value, now: i64) -> Vec<Span> {
         if resets <= now {
             continue;
         }
+        let due = resets - WEEK_MINUTES as i64 * 60_000;
         out.push(Span {
             provider,
             login: text(t, "credential"),
             digest: text(t, "accountDigest"),
             window,
-            opened: resets - WEEK_MINUTES as i64 * 60_000,
+            opened: ms(t.get("openedAt")).map_or(due, |at| at.max(due)),
             resets,
             used: used.unwrap_or(0),
             open: true,
