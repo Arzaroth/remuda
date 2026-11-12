@@ -1,8 +1,23 @@
-import { createMemo, For, Show } from 'solid-js';
+import { createMemo, createSignal, For, Show } from 'solid-js';
 import { brand } from '../brand';
 import { money } from '../spend';
-import { store } from '../state';
-import { change, changeText, cutShort, plans, weights, type ValueAnswer, type Week } from '../value';
+import { now, store } from '../state';
+import { remember, remembered } from '../storage';
+import {
+  arrange,
+  change,
+  changed,
+  changeText,
+  cutShort,
+  FILTERS,
+  plans,
+  weights,
+  type Filters,
+  type Order,
+  type Plan,
+  type ValueAnswer,
+  type Week,
+} from '../value';
 import { LineChart } from './Charts';
 import { ProviderIcon } from './ProviderIcon';
 
@@ -24,6 +39,29 @@ function flags(w: Week): string {
   return out.join(' · ');
 }
 
+const PERIODS: [number, string][] = [
+  [1, '1 month'],
+  [3, '3 months'],
+  [6, '6 months'],
+  [12, '1 year'],
+  [0, 'All'],
+];
+const HIDE: [keyof Filters, string][] = [
+  ['removed', 'Removed logins'],
+  ['unclaimed', 'Weeks with unclaimed spend'],
+  ['open', 'The week in progress'],
+  ['incomplete', 'Incomplete weeks'],
+  ['idle', 'Weeks with no spend'],
+  ['cut', 'Weeks cut short by a reset'],
+];
+const ORDERS: [Order, string][] = [
+  ['recent', 'Latest week first'],
+  ['value', 'Best value first'],
+  ['name', 'By name'],
+];
+const weeksText = (n: number) => `${n} week${n === 1 ? '' : 's'}`;
+const names = (ps: Plan[]) => ps.map((p) => p.login).join(', ');
+
 export function Value(props: { answer: ValueAnswer; provider: string | null; login: string | null }) {
   const shown = createMemo(() =>
     plans(props.answer.weeks ?? []).filter(
@@ -39,6 +77,16 @@ export function Value(props: { answer: ValueAnswer; provider: string | null; log
     return out;
   });
   const measured = createMemo(() => weights(plans(props.answer.weeks ?? []), advertised()));
+  const [filters, setFilters] = createSignal<Filters>({ ...FILTERS, ...(remembered<Partial<Filters>>('remuda-value-filters') || {}) });
+  const set = (patch: Partial<Filters>) => {
+    const next = { ...filters(), ...patch };
+    setFilters(next);
+    remember('remuda-value-filters', next);
+  };
+  const view = createMemo(() => arrange(shown(), filters(), props.answer.logins, now()));
+  const hidden = () =>
+    [...view().shown.map((s) => s.hidden), ...[...view().empty, ...view().gone].map((p) => p.weeks.length)].reduce((a, n) => a + n, 0);
+  const active = () => changed(filters());
   return (
     <>
       <p class="page-sub">
@@ -55,10 +103,69 @@ export function Value(props: { answer: ValueAnswer; provider: string | null; log
           </p>
         }
       >
-        <For each={shown()}>
-          {(p) => {
+        <details class="v-filters">
+          <summary class="chip" aria-pressed={active() > 0}>
+            Filters{active() ? ` · ${active()}` : ''}
+            <Show when={hidden()}> · {weeksText(hidden())} hidden</Show>
+          </summary>
+          <div class="v-panel">
+            <div class="v-row">
+              <div class="chips" role="group" aria-label="Period">
+                <For each={PERIODS}>
+                  {([months, text]) => (
+                    <button type="button" class="chip" aria-pressed={filters().months === months} onClick={() => set({ months })}>
+                      {text}
+                    </button>
+                  )}
+                </For>
+              </div>
+              <label class="v-range">
+                <span>Used at least</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="5"
+                  value={filters().minUsed}
+                  onInput={(e) => set({ minUsed: Number(e.currentTarget.value) })}
+                />
+                <output>{filters().minUsed}%</output>
+              </label>
+            </div>
+            <div class="chips" role="group" aria-label="Hide">
+              <span class="v-label">Hide</span>
+              <For each={HIDE}>
+                {([key, text]) => (
+                  <button type="button" class="chip" aria-pressed={!!filters()[key]} onClick={() => set({ [key]: !filters()[key] })}>
+                    {text}
+                  </button>
+                )}
+              </For>
+            </div>
+            <div class="chips" role="group" aria-label="Order">
+              <span class="v-label">Order</span>
+              <For each={ORDERS}>
+                {([order, text]) => (
+                  <button type="button" class="chip" aria-pressed={filters().order === order} onClick={() => set({ order })}>
+                    {text}
+                  </button>
+                )}
+              </For>
+            </div>
+            <Show when={active()}>
+              <button type="button" class="u-link v-reset" onClick={() => set({ ...FILTERS, order: filters().order })}>
+                Reset filters
+              </button>
+            </Show>
+          </div>
+        </details>
+        <Show when={!view().shown.length}>
+          <p class="note">No week left with these filters.</p>
+        </Show>
+        <For each={view().shown}>
+          {({ plan: p, weeks, hidden }) => {
             const ratio = () => change(p.weeks);
-            const charted = () => p.weeks.filter((w) => !w.open && !w.partial && !w.unpriced && w.usdPerPercent != null);
+            const charted = () => weeks.filter((w) => !w.open && !w.partial && !w.unpriced && w.usdPerPercent != null);
             return (
               <section class="u-card">
                 <h3 class="u-plan">
@@ -97,7 +204,7 @@ export function Value(props: { answer: ValueAnswer; provider: string | null; log
                     </tr>
                   </thead>
                   <tbody>
-                    <For each={[...p.weeks].reverse()}>
+                    <For each={[...weeks].reverse()}>
                       {(w) => (
                         <tr>
                           <td>
@@ -112,10 +219,21 @@ export function Value(props: { answer: ValueAnswer; provider: string | null; log
                     </For>
                   </tbody>
                 </table>
+                <Show when={hidden}>
+                  <p class="v-hidden">{weeksText(hidden)} hidden by the filters</p>
+                </Show>
               </section>
             );
           }}
         </For>
+        <Show when={view().empty.length || view().gone.length}>
+          <p class="v-hidden">
+            <Show when={view().empty.length}>No week left to show for {names(view().empty)}. </Show>
+            <Show when={view().gone.length}>
+              Removed login{view().gone.length === 1 ? '' : 's'} hidden: {names(view().gone)}.
+            </Show>
+          </p>
+        </Show>
       </Show>
     </>
   );
