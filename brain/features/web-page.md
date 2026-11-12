@@ -268,7 +268,8 @@ Three tabs, each filtered by a CLI and a login, the first two by a range (7,
   the tab says so. A Filters button folds the tab's filters (`value.ts`
   `arrange`, remembered in the browser): a period, a floor on the percent
   used, and hiding removed logins (on by default; a login whose account the
-  store no longer holds counts), weeks with spend no login claims, the open
+  store no longer holds counts, and so does one with no account when no
+  stored login, not itself removed, has its provider and name), weeks with spend no login claims, the open
   week, weeks marked incomplete, weeks with no spend and weeks a reset cut
   short, plus the cards' order (latest week, best dollars per percent over
   the shown weeks, name). They change the tables and charts only: the

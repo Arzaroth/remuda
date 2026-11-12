@@ -132,7 +132,8 @@ describe('value', () => {
     const [old] = plans([week(0, { account: 'd-old' })]);
     const [lost] = plans([week(0, { account: 'd-lost' })]);
     const [unknown] = plans([week(0, { account: null })]);
-    expect([work, old, lost, unknown].map((p) => removed(p, logins))).toEqual([false, true, true, false]);
+    const [stranger] = plans([week(0, { login: 'axeo', account: null })]);
+    expect([work, old, lost, unknown, stranger].map((p) => removed(p, logins))).toEqual([false, true, true, false, true]);
     expect(removed(old, undefined)).toBe(false);
   });
 
