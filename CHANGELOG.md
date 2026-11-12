@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The Value tab's "Removed logins" filter hides a login this machine never
+  stored, such as one whose weeks came from another machine's TokenGauge.
+
 ## [0.42.0] - 2026-11-12
 
 ### Added
