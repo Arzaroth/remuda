@@ -996,6 +996,7 @@ fn a_serve_run_by_systemd_checks_the_directories_and_prints_no_token() {
     assert!(get_state(&url).starts_with("HTTP/1.1 200"));
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn sync_units_rewrites_the_installed_units_and_reloads_systemd() {
     use std::os::unix::fs::PermissionsExt;
