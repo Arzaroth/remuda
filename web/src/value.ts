@@ -45,6 +45,15 @@ export function change(weeks: Week[]): number | null {
   return mean > 0 ? last / mean : null;
 }
 
+const DAY = 86_400_000;
+
+// The days a week ran when a reset closed it before its seventh.
+export function cutShort(w: Week): number | null {
+  if (w.open) return null;
+  const days = (w.endsAt - w.openedAt) / DAY;
+  return days < 7 - 1 / 24 ? days : null;
+}
+
 export function changeText(ratio: number): string {
   if (ratio >= 1.05) return `${ratio.toFixed(1)}x the weeks before`;
   if (ratio <= 0.95) return `${Math.round((1 - ratio) * 100)}% under the weeks before`;

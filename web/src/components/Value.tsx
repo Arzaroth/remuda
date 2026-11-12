@@ -2,7 +2,7 @@ import { createMemo, For, Show } from 'solid-js';
 import { brand } from '../brand';
 import { money } from '../spend';
 import { store } from '../state';
-import { change, changeText, plans, weights, type ValueAnswer, type Week } from '../value';
+import { change, changeText, cutShort, plans, weights, type ValueAnswer, type Week } from '../value';
 import { LineChart } from './Charts';
 import { ProviderIcon } from './ProviderIcon';
 
@@ -16,6 +16,8 @@ const day = (ms: number) => new Date(ms).toLocaleDateString(undefined, { month: 
 function flags(w: Week): string {
   const out: string[] = [];
   if (w.open) out.push('so far');
+  const days = cutShort(w);
+  if (days != null) out.push(days < 1 ? 'reset the same day' : `reset after ${Math.round(days)} day${Math.round(days) === 1 ? '' : 's'}`);
   if (w.partial) out.push('the record starts mid-week');
   if (w.unpriced) out.push('some use has no price');
   if (w.unattributedUsd >= 0.01) out.push(`${money(w.unattributedUsd)} more no login claims`);
