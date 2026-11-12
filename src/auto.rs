@@ -590,18 +590,23 @@ pub struct Process {
 }
 
 enum Environ {
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     At(std::path::PathBuf),
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    Read(Vec<u8>),
 }
 
 impl Process {
     fn environ(&self) -> Vec<u8> {
         match &self.environ {
             Environ::At(path) => std::fs::read(path).unwrap_or_default(),
+            Environ::Read(bytes) => bytes.clone(),
         }
     }
 }
 
 /// The processes under `proc`, a `/proc`.
+#[cfg(any(test, not(target_os = "macos")))]
 pub fn in_proc(proc: &std::path::Path) -> std::io::Result<Vec<Process>> {
     let mut seen = Vec::new();
     for entry in std::fs::read_dir(proc)? {
@@ -621,6 +626,69 @@ pub fn in_proc(proc: &std::path::Path) -> std::io::Result<Vec<Process>> {
         });
     }
     Ok(seen)
+}
+
+/// This user's processes, as macOS lists them.
+#[cfg(target_os = "macos")]
+pub fn listed() -> std::io::Result<Vec<Process>> {
+    let mut pids = vec![0 as libc::c_int; 4096];
+    let size = (pids.len() * std::mem::size_of::<libc::c_int>()) as libc::c_int;
+    // SAFETY: the buffer holds `size` bytes.
+    let n = unsafe { libc::proc_listallpids(pids.as_mut_ptr().cast(), size) };
+    if n < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    pids.truncate(n as usize);
+    Ok(pids
+        .into_iter()
+        .filter(|pid| *pid > 0)
+        .filter_map(|pid| {
+            let mut name = [0u8; 64];
+            // SAFETY: the buffer holds its length in bytes.
+            let len = unsafe { libc::proc_name(pid, name.as_mut_ptr().cast(), name.len() as u32) };
+            let comm = name[..len.max(0) as usize].to_vec();
+            let (cmdline, environ) = procargs(pid).unwrap_or_default();
+            (!comm.is_empty() || !cmdline.is_empty()).then_some(Process {
+                pid: pid as u32,
+                comm,
+                cmdline,
+                environ: Environ::Read(environ),
+            })
+        })
+        .collect())
+}
+
+/// `KERN_PROCARGS2`: argc, the executable's path, then argv and the
+/// environment, NUL-terminated. Only this user's processes answer.
+#[cfg(target_os = "macos")]
+fn procargs(pid: libc::c_int) -> Option<(Vec<u8>, Vec<u8>)> {
+    let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
+    let mut buf = vec![0u8; 256 * 1024];
+    let mut len = buf.len();
+    // SAFETY: `len` is the buffer's size, and sysctl writes at most that.
+    let rc = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            3,
+            buf.as_mut_ptr().cast(),
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if rc != 0 || len < 4 {
+        return None;
+    }
+    buf.truncate(len);
+    let argc = i32::from_ne_bytes(buf[..4].try_into().ok()?).max(0) as usize;
+    let rest = &buf[4..];
+    let path_end = rest.iter().position(|b| *b == 0)?;
+    let mut strings = rest[path_end..]
+        .split(|b| *b == 0)
+        .skip_while(|s| s.is_empty());
+    let args: Vec<&[u8]> = strings.by_ref().take(argc).collect();
+    let env: Vec<&[u8]> = strings.take_while(|s| !s.is_empty()).collect();
+    Some((args.join(&0), env.join(&0)))
 }
 
 /// How many of `seen` run one of `names`: by name, by a release binary
@@ -688,6 +756,9 @@ pub fn sessions_open(p: &dyn Provider) -> Option<String> {
         return None;
     }
     let apart = p.run_spec().map(|s| s.var);
+    #[cfg(target_os = "macos")]
+    let seen = listed();
+    #[cfg(not(target_os = "macos"))]
     let seen = in_proc(std::path::Path::new("/proc"));
     match seen.map(|seen| running(&seen, names, std::process::id(), apart)) {
         Ok(0) => None,
