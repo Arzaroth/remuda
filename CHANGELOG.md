@@ -8,6 +8,8 @@
   Keychain, where Claude Code keeps it, through `/usr/bin/security` with the
   token on its stdin. A Keychain locked in this session (over SSH) that holds
   the login is refused with `security unlock-keychain` as the fix.
+- On macOS, cursor-agent's login is read from and switched in its two
+  Keychain items, `cursor-access-token` and `cursor-refresh-token`.
 
 ## [0.42.1] - 2026-11-12
 

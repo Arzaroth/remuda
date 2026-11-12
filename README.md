@@ -399,7 +399,8 @@ On macOS, Claude Code keeps its login in the login Keychain
 (`Claude Code-credentials`), and remuda switches it there, through
 `/usr/bin/security` and never with a token on its command line. Over SSH the
 Keychain is locked: remuda then refuses to touch a login it holds and says to
-run `security unlock-keychain` first.
+run `security unlock-keychain` first. cursor-agent's login is in the Keychain
+there too, and switched the same way.
 
 For Codex, the whole of `~/.codex/auth.json` belongs to the login, so a switch
 replaces it. It honours `CODEX_HOME`. Only ChatGPT sign-ins are stored: an API
