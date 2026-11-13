@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The Value tab splits a day's spend where a weekly window reset, rather than
+  across the whole day by the clock: spend from before a reset no longer lands
+  in the new week. It needs TokenGauge 0.62.0 (`--usage-json --by-hour`); an older
+  TokenGauge still gives the day's share.
+
 ## [0.42.1] - 2026-11-12
 
 ### Fixed
