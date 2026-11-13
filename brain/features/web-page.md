@@ -243,8 +243,11 @@ Three tabs, each filtered by a CLI and a login, the first two by a range (7,
   percent covers the whole of it. A week is matched to the spend by the account
   TokenGauge recorded it for, so a name the store reused for another account
   keeps the old account's weeks as a history of their own, and by its name
-  only when that account is unknown. A day
-  the week covers in part counts in proportion, today's row as spent so far, a
+  only when that account is unknown. The spend comes by the hour
+  (`--usage-json --by-hour`, TokenGauge 0.62 or later), so a reset mid-day
+  splits the day at the hour it happened; an hour (or a day, from an older
+  TokenGauge or past its hourly retention) the week covers in part counts in
+  proportion, the row running now as spent so far, a
   week reset early ends where the next one opened and says after how many
   days, and the open week runs to now ("so far"). TokenGauge, not remuda,
   tells a reset: a figure that went down starts a new instance, whether the
