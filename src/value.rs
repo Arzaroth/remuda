@@ -2,9 +2,11 @@
 //! dollars per percent of its weekly window.
 //!
 //! The weeks are TokenGauge's window history (`closed`, and the trails of the
-//! weeks still open), the dollars its usage export, both by login. A week's
-//! spend is every row of its login on a day the week covers, a day it covers
-//! only in part counted in proportion. Spend no record attributes (before
+//! weeks still open), the dollars its usage export by the hour, both by login.
+//! A week's spend is every row of its login in the stretch the week covers, a
+//! row it covers only in part counted in proportion: an hour, a UTC day the
+//! record kept only by the day, or a local day from a TokenGauge that exports
+//! no hours. Spend no record attributes (before
 //! remuda's ledger, from a machine without remuda) is shown beside it rather
 //! than guessed at, since it may be this login's.
 //!
@@ -192,12 +194,20 @@ pub fn weeks(
             end.timestamp().as_millisecond(),
         ))
     };
-    let days: Vec<Option<(i64, i64)>> = export.rows.iter().map(|r| day_ms(&r.date)).collect();
+    let stretches: Vec<Option<(i64, i64)>> = export
+        .rows
+        .iter()
+        .map(|r| match (r.from, r.until) {
+            (Some(from), Some(until)) if from < until => Some((from, until)),
+            _ => day_ms(&r.date),
+        })
+        .collect();
     let covers_from = export
         .covers_from
         .as_deref()
         .and_then(day_ms)
         .map(|(s, _)| s);
+    let seen = export.generated_at.min(now);
     let mut out = Vec::new();
     for (i, s) in spans.iter().enumerate() {
         let next = spans
@@ -215,14 +225,14 @@ pub fn weeks(
         let digest = s.digest.as_ref();
         let (mut usd, mut unattributed, mut unpriced, mut nobody_unpriced) =
             (0.0, 0.0, false, false);
-        for (row, day) in export.rows.iter().zip(&days) {
-            let Some((start, end)) = *day else {
+        for (row, stretch) in export.rows.iter().zip(&stretches) {
+            let Some((start, end)) = *stretch else {
                 continue;
             };
             if row.provider != s.provider {
                 continue;
             }
-            let overlap = (end.min(ends) - start.max(s.opened)).max(0);
+            let overlap = (end.min(ends).min(seen) - start.max(s.opened)).max(0);
             if overlap == 0 {
                 continue;
             }
@@ -232,8 +242,9 @@ pub fn weeks(
                     row.tokens.total() > 0 && row.login.as_ref() == digest && digest.is_some();
                 continue;
             };
-            // Today's row holds what was spent so far, not a whole day.
-            let length = end.min(now) - start;
+            // The row running when the export was made holds what was spent
+            // by then, not all of it.
+            let length = end.min(seen) - start;
             let share = cost.total() * overlap as f64 / length.max(overlap) as f64;
             match (&row.login, digest) {
                 (None, _) => unattributed += share,
@@ -292,6 +303,7 @@ mod tests {
     use serde_json::json;
 
     const DAY: i64 = 86_400_000;
+    const HOUR: i64 = 3_600_000;
     // 2026-10-05T00:00:00Z, a Monday.
     const MON: i64 = 1_791_158_400_000;
 
@@ -307,7 +319,7 @@ mod tests {
 
     fn export(rows: &[(&str, Option<&str>, f64)], covers_from: Option<&str>) -> UsageExport {
         serde_json::from_value(json!({
-            "schemaVersion": 1, "generatedAt": 0, "currency": "USD", "coversFrom": covers_from,
+            "schemaVersion": 1, "generatedAt": i64::MAX, "currency": "USD", "coversFrom": covers_from,
             "rows": rows.iter().map(|(date, login, usd)| json!({
                 "date": date, "provider": "codex", "model": "gpt-6", "login": login, "source": "cli",
                 "tokens": {"input": 0, "output": 0, "cacheWrite5m": 0, "cacheWrite1h": 0, "cacheRead": 0},
@@ -315,6 +327,20 @@ mod tests {
             })).collect::<Vec<_>>()
         }))
         .unwrap()
+    }
+
+    fn hourly(rows: &[(i64, Option<&str>, f64)]) -> UsageExport {
+        let mut export = export(
+            &rows
+                .iter()
+                .map(|(_, login, usd)| ("2026-10-08", *login, *usd))
+                .collect::<Vec<_>>(),
+            Some("2026-09-01"),
+        );
+        for (row, (from, ..)) in export.rows.iter_mut().zip(rows) {
+            (row.from, row.until) = (Some(*from), Some(from + HOUR));
+        }
+        export
     }
 
     fn digests() -> HashMap<(String, String), String> {
@@ -393,6 +419,49 @@ mod tests {
         assert!(close(open.usd, 6.0));
         assert!(!shut.open && shut.ends_at == next);
         assert!(close(shut.usd, 7.0));
+    }
+
+    #[test]
+    fn spend_by_the_hour_goes_to_the_week_it_was_spent_in_not_the_day_s_share() {
+        let reset = MON + 3 * DAY + 17 * HOUR;
+        let now = reset + DAY;
+        let history = json!({
+            "closed": [closed("work", "primary", WEEK_MINUTES, reset - 7 * DAY, 100)],
+            "trails": [{"provider": "codex", "credential": "work", "window": "primary",
+                        "windowMinutes": WEEK_MINUTES, "resetsAt": iso(reset + 7 * DAY),
+                        "samples": [[reset, 0], [now, 0]]}]
+        });
+        let rows = hourly(&[
+            (reset - 8 * HOUR, Some("d-work"), 300.0),
+            (reset - HOUR, Some("d-work"), 100.0),
+            (reset, Some("d-work"), 0.0),
+            (now - HOUR / 2, Some("d-work"), 2.0),
+        ]);
+        let weeks = weeks(&history, &rows, &digests(), &known(), &TimeZone::UTC, now);
+        let (open, shut) = (&weeks[0], &weeks[1]);
+        assert!(open.open && open.opened_at == reset);
+        assert!(close(open.usd, 2.0), "{}", open.usd);
+        assert_eq!(shut.ends_at, reset);
+        assert!(close(shut.usd, 400.0), "{}", shut.usd);
+    }
+
+    #[test]
+    fn a_row_still_running_splits_as_it_stood_when_exported_however_long_ago() {
+        let reset = MON + 3 * DAY + 17 * HOUR + 30_000;
+        let history = json!({
+            "closed": [closed("work", "primary", WEEK_MINUTES, reset - 7 * DAY, 100)],
+            "trails": [{"provider": "codex", "credential": "work", "window": "primary",
+                        "windowMinutes": WEEK_MINUTES, "resetsAt": iso(reset + 7 * DAY),
+                        "samples": [[reset, 0]]}]
+        });
+        let mut rows = hourly(&[(reset - 30_000, Some("d-work"), 6.0)]);
+        rows.generated_at = reset + 30_000;
+        for now in [reset + 30_000, reset + 60_000] {
+            let weeks = weeks(&history, &rows, &digests(), &known(), &TimeZone::UTC, now);
+            let (open, shut) = (&weeks[0], &weeks[1]);
+            assert!(close(open.usd, 3.0), "{now}: {}", open.usd);
+            assert!(close(shut.usd, 3.0), "{now}: {}", shut.usd);
+        }
     }
 
     #[test]
