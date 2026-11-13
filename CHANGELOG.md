@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.42.2] - 2026-11-13
+
 ### Fixed
 
 - The Value tab splits a day's spend where a weekly window reset, rather than
