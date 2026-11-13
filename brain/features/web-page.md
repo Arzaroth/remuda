@@ -247,7 +247,7 @@ Three tabs, each filtered by a CLI and a login, the first two by a range (7,
   (`--usage-json --by-hour`, TokenGauge 0.62 or later), so a reset mid-day
   splits the day at the hour it happened; an hour (or a day, from an older
   TokenGauge or past its hourly retention) the week covers in part counts in
-  proportion, the row running now as spent so far, a
+  proportion, the row still running as spent when the export was made, a
   week reset early ends where the next one opened and says after how many
   days, and the open week runs to now ("so far"). TokenGauge, not remuda,
   tells a reset: a figure that went down starts a new instance, whether the
