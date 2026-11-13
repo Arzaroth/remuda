@@ -207,6 +207,7 @@ pub fn weeks(
         .as_deref()
         .and_then(day_ms)
         .map(|(s, _)| s);
+    let seen = export.generated_at.min(now);
     let mut out = Vec::new();
     for (i, s) in spans.iter().enumerate() {
         let next = spans
@@ -231,7 +232,7 @@ pub fn weeks(
             if row.provider != s.provider {
                 continue;
             }
-            let overlap = (end.min(ends) - start.max(s.opened)).max(0);
+            let overlap = (end.min(ends).min(seen) - start.max(s.opened)).max(0);
             if overlap == 0 {
                 continue;
             }
@@ -241,8 +242,9 @@ pub fn weeks(
                     row.tokens.total() > 0 && row.login.as_ref() == digest && digest.is_some();
                 continue;
             };
-            // The row running now holds what was spent so far, not all of it.
-            let length = end.min(now) - start;
+            // The row running when the export was made holds what was spent
+            // by then, not all of it.
+            let length = end.min(seen) - start;
             let share = cost.total() * overlap as f64 / length.max(overlap) as f64;
             match (&row.login, digest) {
                 (None, _) => unattributed += share,
@@ -317,7 +319,7 @@ mod tests {
 
     fn export(rows: &[(&str, Option<&str>, f64)], covers_from: Option<&str>) -> UsageExport {
         serde_json::from_value(json!({
-            "schemaVersion": 1, "generatedAt": 0, "currency": "USD", "coversFrom": covers_from,
+            "schemaVersion": 1, "generatedAt": i64::MAX, "currency": "USD", "coversFrom": covers_from,
             "rows": rows.iter().map(|(date, login, usd)| json!({
                 "date": date, "provider": "codex", "model": "gpt-6", "login": login, "source": "cli",
                 "tokens": {"input": 0, "output": 0, "cacheWrite5m": 0, "cacheWrite1h": 0, "cacheRead": 0},
@@ -441,6 +443,25 @@ mod tests {
         assert!(close(open.usd, 2.0), "{}", open.usd);
         assert_eq!(shut.ends_at, reset);
         assert!(close(shut.usd, 400.0), "{}", shut.usd);
+    }
+
+    #[test]
+    fn a_row_still_running_splits_as_it_stood_when_exported_however_long_ago() {
+        let reset = MON + 3 * DAY + 17 * HOUR + 30_000;
+        let history = json!({
+            "closed": [closed("work", "primary", WEEK_MINUTES, reset - 7 * DAY, 100)],
+            "trails": [{"provider": "codex", "credential": "work", "window": "primary",
+                        "windowMinutes": WEEK_MINUTES, "resetsAt": iso(reset + 7 * DAY),
+                        "samples": [[reset, 0]]}]
+        });
+        let mut rows = hourly(&[(reset - 30_000, Some("d-work"), 6.0)]);
+        rows.generated_at = reset + 30_000;
+        for now in [reset + 30_000, reset + 60_000] {
+            let weeks = weeks(&history, &rows, &digests(), &known(), &TimeZone::UTC, now);
+            let (open, shut) = (&weeks[0], &weeks[1]);
+            assert!(close(open.usd, 3.0), "{now}: {}", open.usd);
+            assert!(close(shut.usd, 3.0), "{now}: {}", shut.usd);
+        }
     }
 
     #[test]

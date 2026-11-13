@@ -2438,7 +2438,7 @@ mod tests {
         e.stored("work", "u-work", HOUR);
         let digest = selvedge::usage::account_digest("u-work");
         let export = json!({
-            "schemaVersion": 1, "generatedAt": 5, "currency": "USD", "coversFrom": "2026-01-01",
+            "schemaVersion": 1, "generatedAt": crate::fsx::now_ms(), "currency": "USD", "coversFrom": "2026-01-01",
             "rows": [{"date": "2026-10-06", "provider": "claude", "model": "claude-x",
                       "login": digest, "source": "cli",
                       "tokens": {"o": 3}, "usd": {"input": 0.0, "output": 20.0, "cacheWrite": 0.0, "cacheRead": 0.0}}],
@@ -2472,7 +2472,7 @@ mod tests {
         let e = env(&OFFLINE);
         e.stored("work", "u-work", HOUR);
         let export = json!({
-            "schemaVersion": 1, "generatedAt": 5, "currency": "USD", "coversFrom": "2026-01-01",
+            "schemaVersion": 1, "generatedAt": crate::fsx::now_ms(), "currency": "USD", "coversFrom": "2026-01-01",
             "rows": [{"date": "2026-10-06", "provider": "claude", "model": "claude-x",
                       "login": selvedge::usage::account_digest("u-work"), "source": "cli",
                       "tokens": {"o": 3}, "usd": {"input": 0.0, "output": 20.0, "cacheWrite": 0.0, "cacheRead": 0.0}}],
