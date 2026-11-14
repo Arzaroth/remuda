@@ -194,6 +194,12 @@ pub trait Provider: Send + Sync {
     }
     /// Returns the account id the token endpoint answered for, when it says.
     fn refresh(&self, creds: &mut Value) -> Result<Option<String>>;
+    /// Re-reads the plan the account is on now into `creds`, for a CLI that
+    /// records it beside the tokens and never reads it again itself, and says
+    /// whose account answered. None for a CLI that keeps no plan.
+    fn replan(&self, _creds: &mut Value) -> Result<Option<Identity>> {
+        Ok(None)
+    }
     /// How to read which session a CLI process started at a start time is
     /// running, from the directory a `remuda run` gave it, for a CLI whose
     /// transcripts name a session but no login.

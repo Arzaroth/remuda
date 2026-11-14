@@ -24,6 +24,8 @@ const CLI_USER_AGENT: &str = "claude-cli/2.1.304 (external, cli)";
 const INFERENCE_BETAS: &str =
     "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14";
 const IDENTITY: &str = "You are Claude Code, Anthropic's official CLI for Claude.";
+/// The rate-limit tier of an account with no Claude plan.
+const FREE_TIER: &str = "default_claude_ai";
 const LOGIN_SCOPES: &[&str] = &[
     "org:create_api_key",
     "user:profile",
@@ -549,7 +551,11 @@ impl Provider for Claude {
         let o = Self::oauth(creds);
         let get = |k| o.and_then(|o| o.get(k)).and_then(Value::as_str);
         let Some(sub) = get("subscriptionType") else {
-            return "-".to_owned();
+            return match get("rateLimitTier") {
+                Some(FREE_TIER) => "free",
+                _ => "-",
+            }
+            .to_owned();
         };
         let tier = get("rateLimitTier").filter(|_| !is_team(sub));
         if let Some(plan) = tier
@@ -696,6 +702,20 @@ impl Provider for Claude {
             .and_then(Value::as_object_mut)
             .context("stored credential has no login")?;
         refresh(&self.api, oauth)
+    }
+
+    fn replan(&self, creds: &mut Value) -> Result<Option<Identity>> {
+        let access = self
+            .access_token(creds)
+            .context("credential has no access token")?;
+        let p = profile(&self.api, access)?;
+        let identity = identity_of(oauth_account_from_profile(&p)?)?;
+        let oauth = creds
+            .get_mut(OAUTH_KEY)
+            .and_then(Value::as_object_mut)
+            .context("stored credential has no login")?;
+        apply_plan(oauth, &p);
+        Ok(Some(identity))
     }
 
     fn redeem_reset(&self, entry: &Entry, kind: Option<&str>) -> Result<String> {

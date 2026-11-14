@@ -295,6 +295,28 @@ pub fn refresh_entry(store: &Store, p: &dyn Provider, entry: &mut Entry) -> Resu
             kept.display()
         );
     }
+    match p.replan(&mut entry.creds) {
+        Ok(Some(id)) if id.account_id != entry.meta.account_id => {
+            let kept = store.set_aside(p.id(), &id.account_id, &entry.creds)?;
+            bail!(
+                "the refreshed tokens belong to account {}, not {}; they are in {}",
+                id.account_id,
+                entry.meta.account_id,
+                kept.display()
+            );
+        }
+        Ok(Some(id)) => {
+            if let Some(fresh) = id.oauth_account {
+                entry.meta.oauth_account =
+                    Some(profile_over(entry.meta.oauth_account.take(), fresh));
+            }
+        }
+        Ok(None) => {}
+        Err(e) => eprintln!(
+            "warning: {} is refreshed, but its plan could not be read again: {e:#}",
+            entry.qualified()
+        ),
+    }
     Ok(())
 }
 
