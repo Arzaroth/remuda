@@ -506,7 +506,13 @@ mod tests {
     #[test]
     fn a_body_sent_after_its_head_is_read_and_odd_requests_are_refused() {
         let e = env(&OFFLINE);
-        let port = start(&e, quick());
+        let port = start(
+            &e,
+            Limits {
+                read_for: Duration::from_secs(5),
+                ..quick()
+            },
+        );
         let body = r#"{"name":"nope"}"#;
         let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
         s.write_all(
