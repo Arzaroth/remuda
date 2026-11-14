@@ -19,12 +19,15 @@
   processes apart, and links open in the default browser. A Mac's `serve`
   reaches the LAN only once remuda is allowed under Local Network privacy.
 
+## [0.42.3] - 2026-11-14
+
 ### Fixed
 
 - A Claude login whose subscription lapsed no longer keeps listing its old
   plan: refreshing a stored login reads the plan its account is on now, and
-  an account with no plan lists as `free`. TokenGauge reads the same fields,
-  so it stops showing the old plan's figures for it too.
+  an account with no plan lists as `free`. TokenGauge reads the same fields:
+  from TokenGauge 0.62.1 such a login shows as having no plan instead of the
+  old plan's last figures, and the page says so.
 
 ## [0.42.2] - 2026-11-13
 

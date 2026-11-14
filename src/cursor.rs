@@ -238,20 +238,30 @@ impl Provider for Cursor {
         if let Some(keychain) = &self.keychain {
             let access =
                 text(&entry.creds, "accessToken").context("stored login has no access token")?;
-            if outgoing
-                .is_some_and(|o| Self::from_keychain(keychain).ok().flatten().as_ref() != Some(o))
-            {
+            let live = Self::from_keychain(keychain)?;
+            if outgoing.is_some_and(|o| live.as_ref() != Some(o)) {
                 return Err(Changed.into());
             }
-            let before = Self::item(keychain, REFRESH)?;
-            Self::put(keychain, REFRESH, text(&entry.creds, "refreshToken"))?;
-            let Err(e) = Self::put(keychain, ACCESS, Some(access)) else {
+            let before_access = Self::item(keychain, ACCESS)?;
+            let before_refresh = Self::item(keychain, REFRESH)?;
+            let new_refresh = text(&entry.creds, "refreshToken");
+            let written = Self::put(keychain, REFRESH, new_refresh)
+                .and_then(|()| Self::put(keychain, ACCESS, Some(access)));
+            let Err(e) = written else {
                 return Ok(());
             };
-            if let Err(back) = Self::put(keychain, REFRESH, before.as_deref()) {
+            let restore = |service: &str, ours: Option<&str>, before: Option<&str>| -> Result<()> {
+                match Self::item(keychain, service)?.as_deref() == ours && ours != before {
+                    true => Self::put(keychain, service, before),
+                    false => Ok(()),
+                }
+            };
+            let refresh = restore(REFRESH, new_refresh, before_refresh.as_deref());
+            let access = restore(ACCESS, Some(access), before_access.as_deref());
+            if let Err(back) = refresh.and(access) {
                 bail!(
-                    "{e:#}; putting the refresh token back failed too ({back:#}), so cursor-agent's \
-                     Keychain items hold two logins' tokens: sign it in again"
+                    "{e:#}; putting the previous tokens back failed too ({back:#}), so cursor-agent's \
+                     Keychain items may hold two logins' tokens: sign it in again"
                 );
             }
             return Err(e);
@@ -276,7 +286,18 @@ impl Provider for Cursor {
                 return Err(Changed.into());
             }
             Self::put(keychain, ACCESS, None)?;
-            return Self::put(keychain, REFRESH, None);
+            let Err(e) = Self::put(keychain, REFRESH, None) else {
+                return Ok(());
+            };
+            let access = text(outgoing, "accessToken");
+            if let Err(back) = Self::put(keychain, ACCESS, access) {
+                bail!(
+                    "{e:#}; putting the access token back failed too ({back:#}), so the refresh \
+                     token stays in cursor-agent's Keychain item {REFRESH}: delete it with \
+                     `security delete-generic-password -a cursor-user -s {REFRESH}`"
+                );
+            }
+            return Err(e);
         }
         crate::fsx::remove_json_if(&self.auth_path, outgoing)
     }
@@ -721,5 +742,45 @@ mod tests {
             "{err}"
         );
         assert_eq!(fake.get(REFRESH).as_deref(), Some("r-old"));
+    }
+
+    #[test]
+    fn a_locked_keychain_says_so_rather_than_that_the_login_changed() {
+        let fake = std::sync::Arc::new(crate::securestorage::testing::Fake::default());
+        let c = Cursor::in_keychain(fake.keychain(ACCESS), Api::local(&OFFLINE));
+        fake.put(ACCESS, "a-old");
+        *fake.locked.lock().unwrap() = true;
+        let creds = auth("u1", "work", "r-work");
+        let entry = Entry::new(
+            "cursor",
+            "work",
+            creds.clone(),
+            c.identify(&creds).unwrap(),
+            1,
+        );
+        let err = c.install(&entry, Some(&creds)).unwrap_err();
+        assert!(!err.is::<Changed>());
+        assert!(
+            err.to_string().contains("security unlock-keychain"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_sign_out_cut_short_can_be_tried_again() {
+        let fake = std::sync::Arc::new(crate::securestorage::testing::Fake::default());
+        let c = Cursor::in_keychain(fake.keychain(ACCESS), Api::local(&OFFLINE));
+        fake.put(ACCESS, "a-old");
+        fake.put(REFRESH, "r-old");
+        let live = c.live().unwrap().unwrap();
+        *fake.refuses.lock().unwrap() = Some(REFRESH.to_owned());
+        assert!(c.sign_out(&live).is_err());
+        assert_eq!(fake.get(ACCESS).as_deref(), Some("a-old"));
+        assert_eq!(fake.get(REFRESH).as_deref(), Some("r-old"));
+
+        *fake.refuses.lock().unwrap() = None;
+        c.sign_out(&live).unwrap();
+        assert_eq!(fake.get(ACCESS), None);
+        assert_eq!(fake.get(REFRESH), None);
     }
 }
