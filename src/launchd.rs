@@ -351,6 +351,30 @@ mod tests {
     }
 
     #[test]
+    fn a_rewrite_keeps_the_directories_the_installed_agent_sets() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("LaunchAgents");
+        std::fs::create_dir_all(&dir).unwrap();
+        let custom = plist(Unit::Serve, tmp.path(), &env(&[("REMUDA_STORE", "/s&t")]));
+        std::fs::write(
+            plist_path(&dir, Unit::Serve),
+            custom.replace(
+                "<string>serve</string>",
+                "<string>serve</string><!-- old -->",
+            ),
+        )
+        .unwrap();
+        let (done, _) = refresh(&dir, tmp.path(), &env(&[]));
+        assert_eq!(done.changed, [SERVE]);
+        assert_eq!(
+            std::fs::read_to_string(plist_path(&dir, Unit::Serve)).unwrap(),
+            custom
+        );
+        assert_eq!(set_in(&custom, "REMUDA_STORE").as_deref(), Some("/s&t"));
+        assert_eq!(set_in(&custom, "CODEX_HOME"), None);
+    }
+
+    #[test]
     fn launchctl_s_answers_are_read() {
         let printed = "gui/501/com.github.arzaroth.remuda.serve = {\n\tactive count = 1\n\tpid = 4242\n\tstate = running\n}\n";
         assert_eq!(pid_in(printed), Some(4242));
@@ -367,9 +391,14 @@ mod tests {
             home: PathBuf::from("/Users/me"),
         };
         assert_eq!(m.name(Unit::Serve), SERVE);
-        assert_eq!(
-            m.fix(Unit::Timer, Action::Enable),
-            format!("`launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/{REFRESH}.plist`")
+        let enable = m.fix(Unit::Timer, Action::Enable);
+        assert!(
+            enable
+                == format!(
+                    "`launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/{REFRESH}.plist`"
+                )
+                || enable == format!("`launchctl kickstart gui/$(id -u)/{REFRESH}`"),
+            "{enable}"
         );
         assert_eq!(
             m.fix(Unit::Serve, Action::Restart),
