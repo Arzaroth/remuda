@@ -11,6 +11,13 @@
 - On macOS, cursor-agent's login is read from and switched in its two
   Keychain items, `cursor-access-token` and `cursor-refresh-token`.
 
+### Fixed
+
+- A Claude login whose subscription lapsed no longer keeps listing its old
+  plan: refreshing a stored login reads the plan its account is on now, and
+  an account with no plan lists as `free`. TokenGauge reads the same fields,
+  so it stops showing the old plan's figures for it too.
+
 ## [0.42.2] - 2026-11-13
 
 ### Fixed

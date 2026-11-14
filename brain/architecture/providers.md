@@ -77,7 +77,9 @@ refresh token into "sign this credential in again".
   (`selvedge::plans::max_plan`: `_5x` is "max", `_20x` "ultra"). A Team
   login is its seat ("team premium"), never its tier's multiplier. Anything
   else is `subscriptionType` plus the tier's `Nx` suffix ("enterprise 5x"),
-  or `subscriptionType` alone.
+  or `subscriptionType` alone. No `subscriptionType` with the
+  `default_claude_ai` tier is "free". A refresh reads the plan off the profile
+  again ([refresh.md](../features/refresh.md)), since Claude Code never does.
 - OAuth (from Claude Code 2.1.322): client id `9d1c250a-e61b-44d9-88ed-5944d1962f5e`,
   authorize at `claude.com/cai/oauth/authorize`, token at
   `platform.claude.com/v1/oauth/token` (JSON body), profile at
