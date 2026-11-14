@@ -46,6 +46,21 @@ pub fn logs(home: &Path, unit: Unit) -> PathBuf {
     home.join("Library/Logs/remuda").join(name)
 }
 
+/// What an installed plist sets `var` to, as [`plist`] writes it.
+pub fn set_in(installed: &str, var: &str) -> Option<String> {
+    let key = format!("<key>{var}</key>");
+    let after = &installed[installed.find(&key)? + key.len()..];
+    let value = after.trim_start().strip_prefix("<string>")?;
+    let value = &value[..value.find("</string>")?];
+    Some(
+        value
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&amp;", "&"),
+    )
+    .filter(|v| !v.is_empty())
+}
+
 fn escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -125,7 +140,13 @@ pub fn refresh(
     let mut changed = Vec::new();
     for unit in [Unit::Timer, Unit::Serve] {
         let path = plist_path(dir, unit);
-        let body = plist(unit, home, env);
+        let installed = std::fs::read_to_string(&path).unwrap_or_default();
+        let kept = |v: &str| {
+            env(v)
+                .filter(|x| !x.is_empty())
+                .or_else(|| set_in(&installed, v))
+        };
+        let body = plist(unit, home, &kept);
         let installed = std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_file());
         if !installed || std::fs::read_to_string(&path).is_ok_and(|text| text == body) {
             continue;
@@ -212,6 +233,13 @@ pub fn runs(unit: Unit, pid: u32) -> bool {
     loaded(unit).and_then(|p| pid_in(&p)) == Some(pid)
 }
 
+/// Loads the agent's plist afresh, so a changed one takes effect.
+pub fn reload(dir: &Path, unit: Unit) -> bool {
+    let _ = launchctl(&["bootout", &target(unit)]);
+    let plist = plist_path(dir, unit);
+    launchctl(&["bootstrap", &domain(), &plist.to_string_lossy()]).is_some_and(|(ok, _)| ok)
+}
+
 /// Loads the agent, or restarts it when it is loaded already.
 pub fn start(dir: &Path, unit: Unit) -> bool {
     if loaded(unit).is_some() {
@@ -231,10 +259,16 @@ pub fn install(
     std::fs::create_dir_all(dir)?;
     for unit in units {
         if let Some(parent) = logs(home, *unit).parent() {
-            std::fs::create_dir_all(parent)?;
+            fsx::create_private_dir(parent)?;
         }
         let path = plist_path(dir, *unit);
-        fsx::write_private(&path, &plist(*unit, home, env))?;
+        let installed = std::fs::read_to_string(&path).unwrap_or_default();
+        let kept = |v: &str| {
+            env(v)
+                .filter(|x| !x.is_empty())
+                .or_else(|| set_in(&installed, v))
+        };
+        fsx::write_private(&path, &plist(*unit, home, &kept))?;
         let _ = launchctl(&["bootout", &target(*unit)]);
         let _ = launchctl(&["enable", &target(*unit)]);
         if !launchctl(&["bootstrap", &domain(), &path.to_string_lossy()]).is_some_and(|(ok, _)| ok)

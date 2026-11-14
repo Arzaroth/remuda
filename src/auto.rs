@@ -631,14 +631,27 @@ pub fn in_proc(proc: &std::path::Path) -> std::io::Result<Vec<Process>> {
 /// This user's processes, as macOS lists them.
 #[cfg(target_os = "macos")]
 pub fn listed() -> std::io::Result<Vec<Process>> {
-    let mut pids = vec![0 as libc::c_int; 4096];
-    let size = (pids.len() * std::mem::size_of::<libc::c_int>()) as libc::c_int;
-    // SAFETY: the buffer holds `size` bytes.
-    let n = unsafe { libc::proc_listallpids(pids.as_mut_ptr().cast(), size) };
-    if n < 0 {
-        return Err(std::io::Error::last_os_error());
+    // SAFETY: a null buffer asks for the count alone.
+    let mut capacity = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) }.max(0) as usize;
+    let mut pids = Vec::new();
+    for _ in 0..4 {
+        capacity += 256;
+        pids = vec![0 as libc::c_int; capacity];
+        let size = (pids.len() * std::mem::size_of::<libc::c_int>()) as libc::c_int;
+        // SAFETY: the buffer holds `size` bytes.
+        let n = unsafe { libc::proc_listallpids(pids.as_mut_ptr().cast(), size) };
+        if n <= 0 {
+            return Err(std::io::Error::other("macOS listed no processes"));
+        }
+        pids.truncate(n as usize);
+        if (n as usize) < capacity {
+            break;
+        }
+        capacity *= 2;
     }
-    pids.truncate(n as usize);
+    if !pids.contains(&(std::process::id() as libc::c_int)) {
+        return Err(std::io::Error::other("macOS did not list every process"));
+    }
     Ok(pids
         .into_iter()
         .filter(|pid| *pid > 0)
@@ -663,8 +676,22 @@ pub fn listed() -> std::io::Result<Vec<Process>> {
 #[cfg(target_os = "macos")]
 fn procargs(pid: libc::c_int) -> Option<(Vec<u8>, Vec<u8>)> {
     let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
-    let mut buf = vec![0u8; 256 * 1024];
-    let mut len = buf.len();
+    let mut len = 0;
+    // SAFETY: a null buffer asks for the record's size alone.
+    let rc = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            3,
+            std::ptr::null_mut(),
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if rc != 0 || len < 4 {
+        return None;
+    }
+    let mut buf = vec![0u8; len];
     // SAFETY: `len` is the buffer's size, and sysctl writes at most that.
     let rc = unsafe {
         libc::sysctl(

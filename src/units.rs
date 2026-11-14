@@ -141,9 +141,15 @@ impl Manager {
                     println!("updated {}", done.changed.join(", "));
                 }
                 for unit in [Unit::Timer, Unit::Serve] {
-                    let loaded = crate::launchd::loaded(unit).is_some();
-                    let restart = unit == Unit::Serve || changed.contains(&unit);
-                    if loaded && restart && !crate::launchd::start(dir, unit) {
+                    if crate::launchd::loaded(unit).is_none() {
+                        continue;
+                    }
+                    let done = match changed.contains(&unit) {
+                        true => crate::launchd::reload(dir, unit),
+                        false if unit == Unit::Serve => crate::launchd::start(dir, unit),
+                        false => true,
+                    };
+                    if !done {
                         eprintln!(
                             "warning: {} still runs the old binary; run {}",
                             self.name(unit),
@@ -188,6 +194,9 @@ impl Manager {
                 format!("`systemctl --user {verb} {name}`")
             }
             Manager::Launchd { .. } => match action {
+                Action::Enable if crate::launchd::loaded(unit).is_some() => {
+                    format!("`launchctl kickstart gui/$(id -u)/{name}`")
+                }
                 Action::Enable => format!(
                     "`launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/{name}.plist`"
                 ),
