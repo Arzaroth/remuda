@@ -687,12 +687,11 @@ fn start_service() -> bool {
     let installed = paths::systemd_user_units()
         .iter()
         .any(|dir| dir.join(units::SERVE).exists());
-    installed
-        && std::process::Command::new("systemctl")
-            .args(["--user", "start", units::SERVE])
-            .stdin(std::process::Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success())
+    if !installed {
+        return false;
+    }
+    systemctl(&["reset-failed", units::SERVE]);
+    systemctl(&["start", units::SERVE])
 }
 
 fn open(no_browser: bool, add: bool) -> Result<()> {
@@ -1063,16 +1062,11 @@ fn main() -> Result<()> {
         dirs::record(&store, &seen);
     }
     if let Cmd::Serve { port, no_browser } = command {
-        if service {
-            let plan = dirs::plan(dirs::recorded(&store).as_ref(), &seen, "serving");
-            for line in &plan.skipped {
-                eprintln!("{line}");
-            }
-            if !plan.skipped.is_empty() {
-                bail!("not serving: the service would act on other logins than the shell's");
-            }
+        let plan = service.then(|| dirs::plan(dirs::recorded(&store).as_ref(), &seen, "serving"));
+        for line in plan.iter().flat_map(|p| &p.skipped) {
+            eprintln!("{line}");
         }
-        let providers: Vec<Box<dyn Provider>> = vec![
+        let mut providers: Vec<Box<dyn Provider>> = vec![
             Box::new(claude),
             Box::new(codex),
             Box::new(copilot),
@@ -1085,6 +1079,9 @@ fn main() -> Result<()> {
             Box::new(opencode),
             Box::new(openrouter),
         ];
+        if let Some(plan) = &plan {
+            providers.retain(|p| plan.usable.iter().any(|id| id == p.id()));
+        }
         let (listener, port) = http::bind(port)?;
         let token = match served::taken_over(&paths::runtime_dir(), port) {
             Some(token) if service => token,
