@@ -743,4 +743,43 @@ mod tests {
         assert_eq!(fake.get(REFRESH).as_deref(), Some("r-old"));
     }
 
+    #[test]
+    fn a_locked_keychain_says_so_rather_than_that_the_login_changed() {
+        let fake = std::sync::Arc::new(crate::securestorage::testing::Fake::default());
+        let c = Cursor::in_keychain(fake.keychain(ACCESS), Api::local(&OFFLINE));
+        fake.put(ACCESS, "a-old");
+        *fake.locked.lock().unwrap() = true;
+        let creds = auth("u1", "work", "r-work");
+        let entry = Entry::new(
+            "cursor",
+            "work",
+            creds.clone(),
+            c.identify(&creds).unwrap(),
+            1,
+        );
+        let err = c.install(&entry, Some(&creds)).unwrap_err();
+        assert!(!err.is::<Changed>());
+        assert!(
+            err.to_string().contains("security unlock-keychain"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_sign_out_cut_short_can_be_tried_again() {
+        let fake = std::sync::Arc::new(crate::securestorage::testing::Fake::default());
+        let c = Cursor::in_keychain(fake.keychain(ACCESS), Api::local(&OFFLINE));
+        fake.put(ACCESS, "a-old");
+        fake.put(REFRESH, "r-old");
+        let live = c.live().unwrap().unwrap();
+        *fake.refuses.lock().unwrap() = Some(REFRESH.to_owned());
+        assert!(c.sign_out(&live).is_err());
+        assert_eq!(fake.get(ACCESS).as_deref(), Some("a-old"));
+        assert_eq!(fake.get(REFRESH).as_deref(), Some("r-old"));
+
+        *fake.refuses.lock().unwrap() = None;
+        c.sign_out(&live).unwrap();
+        assert_eq!(fake.get(ACCESS), None);
+        assert_eq!(fake.get(REFRESH), None);
+    }
 }

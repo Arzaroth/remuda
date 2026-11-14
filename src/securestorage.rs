@@ -325,6 +325,11 @@ pub mod testing {
                     true => ran(0, ""),
                     false => ran(44, ""),
                 },
+                "delete-generic-password"
+                    if self.refuses.lock().unwrap().as_deref() == Some(&service(args)) =>
+                {
+                    ran(1, "")
+                }
                 "delete-generic-password" => match items.remove(&service(args)) {
                     Some(_) => ran(0, ""),
                     None => ran(44, ""),
@@ -669,6 +674,22 @@ mod tests {
             .unwrap();
         assert_eq!(held(&fake), json!({"a": 1}));
         assert!(!lock.exists());
+    }
+
+    #[test]
+    fn the_lock_is_removed_only_while_it_is_still_this_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let lock = tmp.path().join(".storage-write.lock");
+        let held = Held::take(tmp.path()).unwrap();
+        assert!(lock.is_dir());
+        drop(held);
+        assert!(!lock.exists());
+
+        let held = Held::take(tmp.path()).unwrap();
+        fs::remove_dir(&lock).unwrap();
+        fs::create_dir(&lock).unwrap();
+        drop(held);
+        assert!(lock.is_dir(), "another writer's lock is left alone");
     }
 
     #[test]
