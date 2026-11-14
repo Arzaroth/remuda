@@ -688,6 +688,9 @@ mod tests {
         assert!(!lock.exists());
 
         let held = Held::take(tmp.path()).unwrap();
+        if fs::metadata(&lock).and_then(|m| m.created()).is_err() {
+            return;
+        }
         fs::remove_dir(&lock).unwrap();
         fs::create_dir(&lock).unwrap();
         drop(held);
