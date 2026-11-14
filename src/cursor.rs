@@ -244,19 +244,20 @@ impl Provider for Cursor {
             }
             let before_access = Self::item(keychain, ACCESS)?;
             let before_refresh = Self::item(keychain, REFRESH)?;
-            let written = Self::put(keychain, REFRESH, text(&entry.creds, "refreshToken"))
+            let new_refresh = text(&entry.creds, "refreshToken");
+            let written = Self::put(keychain, REFRESH, new_refresh)
                 .and_then(|()| Self::put(keychain, ACCESS, Some(access)));
             let Err(e) = written else {
                 return Ok(());
             };
-            let restore = |service: &str, before: Option<&str>| -> Result<()> {
-                match Self::item(keychain, service)?.as_deref() == before {
-                    true => Ok(()),
-                    false => Self::put(keychain, service, before),
+            let restore = |service: &str, ours: Option<&str>, before: Option<&str>| -> Result<()> {
+                match Self::item(keychain, service)?.as_deref() == ours && ours != before {
+                    true => Self::put(keychain, service, before),
+                    false => Ok(()),
                 }
             };
-            let refresh = restore(REFRESH, before_refresh.as_deref());
-            let access = restore(ACCESS, before_access.as_deref());
+            let refresh = restore(REFRESH, new_refresh, before_refresh.as_deref());
+            let access = restore(ACCESS, Some(access), before_access.as_deref());
             if let Err(back) = refresh.and(access) {
                 bail!(
                     "{e:#}; putting the previous tokens back failed too ({back:#}), so cursor-agent's \

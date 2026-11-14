@@ -25,7 +25,7 @@ pub struct SecureStorage {
 /// while it is held, and it is removed only while it is still this one.
 struct Held {
     path: PathBuf,
-    ino: u64,
+    id: (u64, Option<SystemTime>),
     stop: Arc<AtomicBool>,
     keeper: Option<std::thread::JoinHandle<()>>,
 }
@@ -34,8 +34,10 @@ const STALE: Duration = Duration::from_secs(15);
 const WAIT: Duration = Duration::from_secs(10);
 const KEEP: Duration = Duration::from_secs(5);
 
-fn ino(path: &Path) -> Option<u64> {
-    fs::metadata(path).ok().map(|m| m.ino())
+/// The directory's inode and, where the filesystem keeps one, its birth
+/// time, since a directory made again can be given the inode just freed.
+fn id(path: &Path) -> Option<(u64, Option<SystemTime>)> {
+    fs::metadata(path).ok().map(|m| (m.ino(), m.created().ok()))
 }
 
 fn touch(path: &Path) {
@@ -52,7 +54,7 @@ impl Held {
         loop {
             match fs::create_dir(&path) {
                 Ok(()) => {
-                    let ino = ino(&path).context("the lock directory went at once")?;
+                    let id = id(&path).context("the lock directory went at once")?;
                     let stop = Arc::new(AtomicBool::new(false));
                     let keeper = {
                         let (path, stop) = (path.clone(), stop.clone());
@@ -60,7 +62,7 @@ impl Held {
                             let mut last = Instant::now();
                             while !stop.load(Ordering::Relaxed) {
                                 std::thread::sleep(Duration::from_millis(100));
-                                if last.elapsed() >= KEEP && self::ino(&path) == Some(ino) {
+                                if last.elapsed() >= KEEP && self::id(&path) == Some(id) {
                                     touch(&path);
                                     last = Instant::now();
                                 }
@@ -69,7 +71,7 @@ impl Held {
                     };
                     return Ok(Held {
                         path,
-                        ino,
+                        id,
                         stop,
                         keeper: Some(keeper),
                     });
@@ -109,7 +111,7 @@ impl Drop for Held {
         if let Some(keeper) = self.keeper.take() {
             let _ = keeper.join();
         }
-        if ino(&self.path) == Some(self.ino) {
+        if id(&self.path) == Some(self.id) {
             let _ = fs::remove_dir(&self.path);
         }
     }
