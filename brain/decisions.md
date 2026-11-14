@@ -66,6 +66,27 @@ first: Claude Code adopts a login when the credentials file changes, and by
 then its UI already shows the right account. Codex's `auth.json` holds nothing
 but the login, so it is replaced whole.
 
+## On macOS, Claude Code's Keychain item through `security` on stdin
+
+Claude Code keeps its login in the login Keychain on macOS and writes it with
+`/usr/bin/security`, so the item trusts that tool alone. A write from any other
+binary, Security.framework included, takes the item over: `security` then
+needs a prompt to read it, and Claude Code loses its login. So remuda drives
+`security` too. Its `-w` and `-X` options take the password on the command
+line, which other users can read with `ps`, so the password goes through
+`security -i` on stdin instead. That reads one command line of 4096 bytes,
+about 3900 bytes of JSON quoted, and a Keychain item with many MCP logins can
+be longer. Such an item goes to `.credentials.json`, the file Claude Code
+falls back to and moves back into the Keychain on its own next write, rather
+than onto a command line.
+
+A Keychain locked in this session, as it is over SSH, cannot be read, so the
+login it holds cannot be synced back. Claude Code started in that session
+falls back to the file, but one in the Mac's own session uses the item, and
+filing a switch over it would leave its rotated tokens out of the store. So
+remuda refuses and names `security unlock-keychain`, unless the Keychain holds
+no such item: then every Claude Code reads the file, and so does remuda.
+
 ## Only ChatGPT sign-ins for Codex
 
 An API key or personal access token has no account to switch between, so

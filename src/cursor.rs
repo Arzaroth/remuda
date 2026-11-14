@@ -7,6 +7,7 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
 use crate::fsx::{Changed, read_json, update_json};
+use crate::keychain::{Item, Keychain};
 use crate::oauth::{self, claims};
 use crate::paths;
 use crate::pkce;
@@ -82,13 +83,30 @@ fn identity_of(creds: &Value) -> Option<Identity> {
 /// IDE keeps its own login in a database remuda leaves alone.
 pub struct Cursor {
     auth_path: PathBuf,
+    keychain: Option<Keychain>,
     api: Api,
 }
 
+const ACCESS: &str = "cursor-access-token";
+const REFRESH: &str = "cursor-refresh-token";
+const API_KEY: &str = "cursor-api-key";
+
 impl Cursor {
+    /// On macOS cursor-agent keeps each token in a Keychain item of its own,
+    /// unless `AGENT_CLI_CREDENTIAL_STORE=file` sends it to
+    /// `~/.cursor/auth.json`.
     pub fn from_env() -> Result<Self> {
+        let file = std::env::var("AGENT_CLI_CREDENTIAL_STORE").is_ok_and(|s| s == "file");
+        let keychain = crate::keychain::tool()
+            .filter(|_| !file)
+            .map(|security| Keychain::new(security, ACCESS.to_owned(), "cursor-user".to_owned()));
+        let auth_path = match cfg!(target_os = "macos") && file {
+            true => paths::home().join(".cursor/auth.json"),
+            false => paths::cursor_auth(),
+        };
         Ok(Cursor {
-            auth_path: paths::cursor_auth(),
+            auth_path,
+            keychain,
             api: Api::cursor()?,
         })
     }
@@ -97,7 +115,48 @@ impl Cursor {
     pub fn at(dir: &std::path::Path, api: Api) -> Self {
         Cursor {
             auth_path: dir.join("auth.json"),
+            keychain: None,
             api,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn in_keychain(keychain: Keychain, api: Api) -> Self {
+        Cursor {
+            auth_path: PathBuf::from("/nowhere/auth.json"),
+            keychain: Some(keychain),
+            api,
+        }
+    }
+
+    fn item(keychain: &Keychain, service: &str) -> Result<Option<String>> {
+        Ok(match keychain.with_service(service.to_owned()).read()? {
+            Item::Held(token) => Some(token).filter(|t| !t.is_empty()),
+            Item::Missing => None,
+        })
+    }
+
+    /// The login as the Keychain's items hold it, in the shape of
+    /// `auth.json`.
+    fn from_keychain(keychain: &Keychain) -> Result<Option<Value>> {
+        let Some(access) = Self::item(keychain, ACCESS)? else {
+            return Ok(None);
+        };
+        let mut login = serde_json::json!({ "accessToken": access });
+        if let Some(refresh) = Self::item(keychain, REFRESH)? {
+            login["refreshToken"] = Value::String(refresh);
+        }
+        Ok(Some(login))
+    }
+
+    fn put(keychain: &Keychain, service: &str, token: Option<&str>) -> Result<()> {
+        let item = keychain.with_service(service.to_owned());
+        match token {
+            None => item.delete(),
+            Some(token) => match item.write(token)? {
+                true => Ok(()),
+                false => anyhow::bail!("the token for {service} cannot be passed to `security`"),
+            },
         }
     }
 }
@@ -119,7 +178,7 @@ impl Provider for Cursor {
     }
 
     fn live_file(&self) -> Option<PathBuf> {
-        Some(self.auth_path.clone())
+        self.keychain.is_none().then(|| self.auth_path.clone())
     }
 
     fn access_token<'a>(&self, creds: &'a Value) -> Option<&'a str> {
@@ -145,6 +204,9 @@ impl Provider for Cursor {
     }
 
     fn live(&self) -> Result<Option<Value>> {
+        if let Some(keychain) = &self.keychain {
+            return Self::from_keychain(keychain);
+        }
         let Some(file) = read_json(&self.auth_path)? else {
             return Ok(None);
         };
@@ -152,6 +214,11 @@ impl Provider for Cursor {
     }
 
     fn foreign_login(&self) -> Result<Option<String>> {
+        if let Some(keychain) = &self.keychain {
+            let api_key = Self::from_keychain(keychain)?.is_none()
+                && Self::item(keychain, API_KEY)?.is_some();
+            return Ok(api_key.then(|| "an API key".to_owned()));
+        }
         let Some(file) = read_json(&self.auth_path)? else {
             return Ok(None);
         };
@@ -168,6 +235,37 @@ impl Provider for Cursor {
     }
 
     fn install(&self, entry: &Entry, outgoing: Option<&Value>) -> Result<()> {
+        if let Some(keychain) = &self.keychain {
+            let access =
+                text(&entry.creds, "accessToken").context("stored login has no access token")?;
+            let live = Self::from_keychain(keychain)?;
+            if outgoing.is_some_and(|o| live.as_ref() != Some(o)) {
+                return Err(Changed.into());
+            }
+            let before_access = Self::item(keychain, ACCESS)?;
+            let before_refresh = Self::item(keychain, REFRESH)?;
+            let new_refresh = text(&entry.creds, "refreshToken");
+            let written = Self::put(keychain, REFRESH, new_refresh)
+                .and_then(|()| Self::put(keychain, ACCESS, Some(access)));
+            let Err(e) = written else {
+                return Ok(());
+            };
+            let restore = |service: &str, ours: Option<&str>, before: Option<&str>| -> Result<()> {
+                match Self::item(keychain, service)?.as_deref() == ours && ours != before {
+                    true => Self::put(keychain, service, before),
+                    false => Ok(()),
+                }
+            };
+            let refresh = restore(REFRESH, new_refresh, before_refresh.as_deref());
+            let access = restore(ACCESS, Some(access), before_access.as_deref());
+            if let Err(back) = refresh.and(access) {
+                bail!(
+                    "{e:#}; putting the previous tokens back failed too ({back:#}), so cursor-agent's \
+                     Keychain items may hold two logins' tokens: sign it in again"
+                );
+            }
+            return Err(e);
+        }
         let replacement = entry.creds.clone();
         update_json(&self.auth_path, |file| {
             if outgoing.is_some_and(|o| file != o) {
@@ -183,6 +281,24 @@ impl Provider for Cursor {
     }
 
     fn sign_out(&self, outgoing: &Value) -> Result<()> {
+        if let Some(keychain) = &self.keychain {
+            if Self::from_keychain(keychain)?.as_ref() != Some(outgoing) {
+                return Err(Changed.into());
+            }
+            Self::put(keychain, ACCESS, None)?;
+            let Err(e) = Self::put(keychain, REFRESH, None) else {
+                return Ok(());
+            };
+            let access = text(outgoing, "accessToken");
+            if let Err(back) = Self::put(keychain, ACCESS, access) {
+                bail!(
+                    "{e:#}; putting the access token back failed too ({back:#}), so the refresh \
+                     token stays in cursor-agent's Keychain item {REFRESH}: delete it with \
+                     `security delete-generic-password -a cursor-user -s {REFRESH}`"
+                );
+            }
+            return Err(e);
+        }
         crate::fsx::remove_json_if(&self.auth_path, outgoing)
     }
 
@@ -558,5 +674,113 @@ mod tests {
         let login = c.begin_login(false).unwrap().finish(None).unwrap();
         cut.assert();
         assert_eq!(login.creds["refreshToken"], "r7");
+    }
+
+    #[test]
+    fn on_a_mac_the_login_is_the_keychain_s_two_items() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let fake = std::sync::Arc::new(crate::securestorage::testing::Fake::default());
+        let c = Cursor::in_keychain(fake.keychain(ACCESS), Api::local(&OFFLINE));
+        assert_eq!(c.live().unwrap(), None);
+        assert_eq!(c.live_file(), None);
+        fake.put(API_KEY, "key");
+        assert_eq!(c.foreign_login().unwrap().as_deref(), Some("an API key"));
+        for (name, user) in [("work", "u1"), ("perso", "u2")] {
+            let creds = auth(user, name, &format!("r-{name}"));
+            let identity = c.identify(&creds).unwrap();
+            store
+                .save(&Entry::new("cursor", name, creds, identity, 1))
+                .unwrap();
+        }
+        let work = store.get("cursor", "work").unwrap().unwrap();
+        c.install(&work, None).unwrap();
+        assert_eq!(c.foreign_login().unwrap(), None);
+        assert_eq!(fake.get(REFRESH).as_deref(), Some("r-work"));
+
+        ops::switch(&store, &c, "perso", false).unwrap();
+
+        let perso = store.get("cursor", "perso").unwrap().unwrap().creds;
+        assert_eq!(fake.get(ACCESS).as_deref(), perso["accessToken"].as_str());
+        assert_eq!(fake.get(REFRESH).as_deref(), Some("r-perso"));
+        assert_eq!(fake.get(API_KEY).as_deref(), Some("key"));
+        let live = c.live().unwrap().unwrap();
+        assert!(
+            c.install(&work, Some(&auth("u3", "x", "r-x")))
+                .unwrap_err()
+                .is::<Changed>()
+        );
+        c.sign_out(&live).unwrap();
+        assert_eq!(fake.get(ACCESS), None);
+        assert_eq!(fake.get(REFRESH), None);
+    }
+
+    #[test]
+    fn an_access_token_the_keychain_refuses_puts_the_refresh_token_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let fake = std::sync::Arc::new(crate::securestorage::testing::Fake::default());
+        let c = Cursor::in_keychain(fake.keychain(ACCESS), Api::local(&OFFLINE));
+        let creds = auth("u1", "work", "r-work");
+        let identity = c.identify(&creds).unwrap();
+        store
+            .save(&Entry::new("cursor", "work", creds, identity, 1))
+            .unwrap();
+        fake.put(ACCESS, "a-old");
+        fake.put(REFRESH, "r-old");
+        *fake.refuses.lock().unwrap() = Some(ACCESS.to_owned());
+
+        let work = store.get("cursor", "work").unwrap().unwrap();
+        assert!(c.install(&work, None).is_err());
+        assert_eq!(fake.get(ACCESS).as_deref(), Some("a-old"));
+        assert_eq!(fake.get(REFRESH).as_deref(), Some("r-old"));
+
+        *fake.refuses.lock().unwrap() = Some(REFRESH.to_owned());
+        let err = c.install(&work, None).unwrap_err().to_string();
+        assert!(
+            err.contains("cannot be passed") || err.contains("failed"),
+            "{err}"
+        );
+        assert_eq!(fake.get(REFRESH).as_deref(), Some("r-old"));
+    }
+
+    #[test]
+    fn a_locked_keychain_says_so_rather_than_that_the_login_changed() {
+        let fake = std::sync::Arc::new(crate::securestorage::testing::Fake::default());
+        let c = Cursor::in_keychain(fake.keychain(ACCESS), Api::local(&OFFLINE));
+        fake.put(ACCESS, "a-old");
+        *fake.locked.lock().unwrap() = true;
+        let creds = auth("u1", "work", "r-work");
+        let entry = Entry::new(
+            "cursor",
+            "work",
+            creds.clone(),
+            c.identify(&creds).unwrap(),
+            1,
+        );
+        let err = c.install(&entry, Some(&creds)).unwrap_err();
+        assert!(!err.is::<Changed>());
+        assert!(
+            err.to_string().contains("security unlock-keychain"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_sign_out_cut_short_can_be_tried_again() {
+        let fake = std::sync::Arc::new(crate::securestorage::testing::Fake::default());
+        let c = Cursor::in_keychain(fake.keychain(ACCESS), Api::local(&OFFLINE));
+        fake.put(ACCESS, "a-old");
+        fake.put(REFRESH, "r-old");
+        let live = c.live().unwrap().unwrap();
+        *fake.refuses.lock().unwrap() = Some(REFRESH.to_owned());
+        assert!(c.sign_out(&live).is_err());
+        assert_eq!(fake.get(ACCESS).as_deref(), Some("a-old"));
+        assert_eq!(fake.get(REFRESH).as_deref(), Some("r-old"));
+
+        *fake.refuses.lock().unwrap() = None;
+        c.sign_out(&live).unwrap();
+        assert_eq!(fake.get(ACCESS), None);
+        assert_eq!(fake.get(REFRESH), None);
     }
 }

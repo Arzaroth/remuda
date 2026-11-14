@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 
 use selvedge::proc::start_time;
 
-use crate::fsx::{create_private_dir, now_ms, read_json, update_json, write_json};
+use crate::fsx::{create_private_dir, now_ms, read_json, write_json};
 use crate::logbook::{self, Event, Kind};
 use crate::ops;
 use crate::provider::{Provider, RunSpec};
@@ -220,7 +220,7 @@ fn prepare(store: &Store, p: &dyn Provider, spec: &RunSpec, entry: &Entry) -> Re
             .with_context(|| format!("failed to link {}", item.path().display()))?;
     }
     for c in &spec.copied {
-        let start = without(read_json(&c.from)?, c.login_keys);
+        let start = without(p.read_copied(c)?, c.login_keys);
         write_json(&base.join(c.name), &start)?;
         write_json(&home.join(c.name), &start)?;
     }
@@ -278,17 +278,33 @@ fn merge(base: &Value, ours: &Value, theirs: &mut Value, skip: &[&str], deep: bo
     changed
 }
 
-fn merge_back(spec: &RunSpec, home: &Path, base: &Path) -> Result<()> {
+/// `session` reads the session's copies where its CLI keeps them, `p` the
+/// CLI's own.
+fn merge_back(
+    p: &dyn Provider,
+    session: &dyn Provider,
+    spec: &RunSpec,
+    home: &Path,
+    base: &Path,
+) -> Result<()> {
+    let theirs = session.run_spec();
     for c in &spec.copied {
-        let Some(ours) = read_json(&home.join(c.name))? else {
+        let in_session = theirs
+            .as_ref()
+            .and_then(|s| s.copied.iter().find(|s| s.name == c.name));
+        let ours = match in_session {
+            Some(s) => session.read_copied(s)?,
+            None => read_json(&home.join(c.name))?,
+        };
+        let Some(ours) = ours else {
             continue;
         };
         let was = read_json(&base.join(c.name))?.unwrap_or_else(|| json!({}));
-        let mut probe = without(read_json(&c.from)?, &[]);
+        let mut probe = without(p.read_copied(c)?, &[]);
         if !merge(&was, &ours, &mut probe, c.login_keys, true) {
             continue;
         }
-        update_json(&c.from, |theirs| {
+        p.update_copied(c, &|theirs| {
             merge(&was, &ours, theirs, c.login_keys, true);
             Ok(())
         })?;
@@ -522,7 +538,8 @@ fn finish(store: &Store, p: &dyn Provider, spec: &RunSpec, name: &str) -> Result
                 aside.display()
             ));
         }
-        merge_back(spec, &home, &base)?;
+        merge_back(p, session.as_ref(), spec, &home, &base)?;
+        session.forget_outside()?;
     }
     for dir in [&home, &base] {
         if dir.exists() {
@@ -723,6 +740,44 @@ mod tests {
             !place.exists(),
             "a dead CLI and no lock: the session is finished"
         );
+    }
+
+    #[test]
+    fn on_a_mac_a_session_starts_from_the_keychain_and_gives_its_own_item_back() {
+        let mut server = mockito::Server::new();
+        profile(&mut server, "a-rotated", "u-work");
+        let e = env(&server.url());
+        e.stored("work", "u-work", HOUR);
+        let fake = std::sync::Arc::new(crate::securestorage::testing::Fake::default());
+        let claude = crate::claude::Claude::in_keychain(
+            e.tmp.path(),
+            crate::claude::Api::local(&server.url()),
+            fake.keychain("Claude Code-credentials"),
+        );
+        let live = json!({OAUTH_KEY: oauth("a-live", "r-live", HOUR)[OAUTH_KEY], "mcpOAuth": {"srv": {"accessToken": "mcp"}}});
+        fake.put("Claude Code-credentials", &live.to_string());
+
+        let (lease, _, home) = start(&e.store, &claude, "work").unwrap();
+        let session = read(&home.join(".credentials.json"));
+        assert_eq!(session[OAUTH_KEY]["refreshToken"], "r-work");
+        assert_eq!(session["mcpOAuth"]["srv"]["accessToken"], "mcp");
+
+        let own = crate::keychain::service(Some(&home.to_string_lossy()));
+        let mut rotated = session.clone();
+        rotated[OAUTH_KEY] = oauth("a-rotated", "r-rotated", 2 * HOUR)[OAUTH_KEY].clone();
+        rotated["mcpOAuth"]["new"] = json!({"accessToken": "n"});
+        fake.put(&own, &rotated.to_string());
+        fs::remove_file(home.join(".credentials.json")).unwrap();
+        leave(&e.store, &claude, lease);
+
+        assert!(!home.exists());
+        assert_eq!(fake.get(&own), None);
+        let main: Value =
+            serde_json::from_str(&fake.get("Claude Code-credentials").unwrap()).unwrap();
+        assert_eq!(main[OAUTH_KEY]["refreshToken"], "r-live");
+        assert_eq!(main["mcpOAuth"]["new"]["accessToken"], "n");
+        let work = e.store.get("claude", "work").unwrap().unwrap();
+        assert_eq!(work.creds[OAUTH_KEY]["refreshToken"], "r-rotated");
     }
 
     #[test]

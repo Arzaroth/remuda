@@ -1,7 +1,7 @@
 use std::env;
 use std::path::{Path, PathBuf};
 
-fn home() -> PathBuf {
+pub fn home() -> PathBuf {
     env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
 }
 
@@ -28,6 +28,15 @@ pub fn claude_credentials() -> PathBuf {
     claude_config_dir()
         .unwrap_or_else(|| home().join(".claude"))
         .join(".credentials.json")
+}
+
+/// The Keychain item Claude Code keeps its login in on macOS, named after
+/// `CLAUDE_CONFIG_DIR` as it was given.
+pub fn claude_keychain_service() -> String {
+    let given = env::var(outer("CLAUDE_CONFIG_DIR"))
+        .or_else(|_| env::var("CLAUDE_CONFIG_DIR"))
+        .ok();
+    crate::keychain::service(given.as_deref().map(str::trim).filter(|d| !d.is_empty()))
 }
 
 pub fn claude_settings() -> PathBuf {

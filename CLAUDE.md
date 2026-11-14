@@ -43,7 +43,8 @@ Tests never touch the developer's real files or the network: providers are
 built with `::at(dir, Api::local(url))`, and `tests/cli.rs` points the binary
 at a mock through `REMUDA_TEST_CLAUDE_API`, `REMUDA_TEST_OPENAI_API`,
 `REMUDA_TEST_XAI_API`, `REMUDA_TEST_KIMI_API` and `REMUDA_TEST_CURSOR_API`,
-and at a stand-in `gh` through `REMUDA_TEST_GH`, which exist in debug builds
+at a stand-in `gh` through `REMUDA_TEST_GH`, and at a stand-in `security`
+(the macOS Keychain) through `REMUDA_TEST_SECURITY`, which exist in debug builds
 only. A release build has no way to redirect an OAuth
 endpoint; keep it that way. The suite must pass with no network and an empty
 `HOME`; `brain/architecture/testing.md` has the command. Manual smoke tests use

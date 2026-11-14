@@ -117,6 +117,10 @@ lock and the session's exclusive lock:
    still hold: the one with the later `expiresAt` is the one a refresh
    rotated to. What the CLI removed meanwhile stays removed.
 
+   On macOS, Claude Code in the session keeps its login in a Keychain item
+   named after `home` once it rotates it; the tokens are read back from there
+   and the item deleted.
+
    The copy of `.credentials.json` keeps the CLI's MCP logins (`mcpOAuth`), so
    a session can use them. Their refresh tokens are then in two files: an MCP
    server that revokes a reused refresh token may ask both sides to sign in

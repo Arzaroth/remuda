@@ -38,6 +38,39 @@ refresh token into "sign this credential in again".
 - Files: `.credentials.json` (`claudeAiOauth`) and `.claude.json`
   (`oauthAccount`), both under `CLAUDE_CONFIG_DIR` when set, else `~/.claude`
   and `~/.claude.json`.
+- On macOS the object `.credentials.json` holds lives in the login Keychain
+  instead, as the generic password `Claude Code-credentials` (with
+  `CLAUDE_CONFIG_DIR` set, `Claude Code-<first 8 hex of its SHA-256>-credentials`)
+  for the account `$USER`, and the file is only Claude Code's fallback, read
+  when the Keychain has no such item. `SecureStorage`
+  ([securestorage.rs](../../src/securestorage.rs)) reads and writes it the same
+  way, through `/usr/bin/security` ([keychain.rs](../../src/keychain.rs)):
+  - read: the item when there is one, else the file. A Keychain locked in
+    this session (over SSH) that holds the item is an error naming
+    `security unlock-keychain`; one without it reads the file, as Claude
+    Code does.
+  - write: under Claude Code's own lock (the directory
+    `.storage-write.lock`, which Claude Code takes over after 15 seconds, so
+    a thread keeps it fresh while remuda holds it, and it is removed only
+    while it is still the directory remuda made), compare the item with
+    what was read, then `add-generic-password -U` through `security -i` on
+    stdin, and read it back. The JSON goes as printable ASCII, anything else
+    as `\u` escapes, since `security -w` prints other bytes as hex (which a
+    read decodes). An item too long for that one 4096-byte line is written
+    whole to `.credentials.json` and the item deleted: Claude Code then reads
+    the file, and moves it back into the Keychain on its next write. The file
+    is written over only while every key it holds is the Keychain's, before
+    or after the edit, since a Claude Code that found the Keychain locked
+    keeps its rotated tokens and MCP logins there. With no item, the file is edited as on Linux.
+  - A `remuda run` session's directory has an item of its own. The session
+    starts from the item's copy (`Provider::read_copied`), its changes go
+    back there (`Provider::update_copied`), and its item is deleted last
+    (`Provider::forget_outside`); when that fails the session stays, for the
+    next command to finish.
+  - `live_file` is none while the item holds the login, so a login changed
+    meanwhile is dated when remuda notices it.
+  - Debug builds take another `security` from `REMUDA_TEST_SECURITY`, on any
+    system.
 - Identity: `oauthAccount.accountUuid` in `.claude.json`, which is a different
   file from the tokens and can lag them, hence `identify` calls the profile
   endpoint.
@@ -160,6 +193,21 @@ refresh token into "sign this credential in again".
 - File: `cursor-agent`'s `auth.json` under `CURSOR_CONFIG_DIR`, else
   `$XDG_CONFIG_HOME/cursor`: `{accessToken, refreshToken, apiKey}`, stored
   whole. A file with only an `apiKey` is a foreign login.
+- On macOS cursor-agent keeps each token in a login Keychain item of its own,
+  for the account `cursor-user`: `cursor-access-token`, `cursor-refresh-token`
+  and `cursor-api-key`, each holding the bare token, unless
+  `AGENT_CLI_CREDENTIAL_STORE=file` sends them to `~/.cursor/auth.json`.
+  remuda reads the first two as `{accessToken, refreshToken}`, the stored
+  shape, and switches them through `security -i` as for Claude Code: the
+  refresh token first, then the access token, after comparing both with the
+  login the switch synced. When a write fails, whichever item changed is
+  put back, so the items never hold two logins' tokens unsaid. A sign-out
+  whose refresh token cannot be deleted puts the access token back, so it can
+  be tried again. A sign-out deletes both; an API key stays. A token that `security`
+  would print back as hex is refused before anything is written.
+- Codex, Grok and Kimi keep the same files on macOS. Codex can be told to use
+  the Keychain (`cli_auth_credentials_store = "keyring"` or `"auto"`), which
+  remuda does not read: it then sees no Codex login.
 - Identity: the user id after the `|` in the access token's `sub`.
 - cursor-agent is closed source. Refresh is a JSON POST to
   `api2.cursor.sh/oauth/token` with client id `KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB`;
@@ -248,6 +296,8 @@ as `PendingLogin::user_code`, which the prompt and the page show.
 
 - [src/provider.rs](../../src/provider.rs)
 - [src/claude.rs](../../src/claude.rs)
+- [src/securestorage.rs](../../src/securestorage.rs)
+- [src/keychain.rs](../../src/keychain.rs)
 - [src/codex.rs](../../src/codex.rs)
 - [src/grok.rs](../../src/grok.rs)
 - [src/kimi.rs](../../src/kimi.rs)

@@ -16,6 +16,7 @@ running.
 | `ops.rs` | The two operations everything rests on: `sync_live` and `switch`, plus `refresh_entry` |
 | `provider.rs` | The `Provider` and `PendingLogin` traits |
 | `claude.rs`, `codex.rs` | The two providers, including their OAuth clients |
+| `securestorage.rs`, `keychain.rs` | Where Claude Code's login lives: its file, or the macOS login Keychain through `security` |
 | `store.rs` | The credential store: entries, sidecars, rename, remove, the lock |
 | `serve.rs` | The local page and its JSON API; the page is built from `web/` by `build.rs` |
 | `served.rs` | The files a running page announces itself in, and finding it again for `open` |
