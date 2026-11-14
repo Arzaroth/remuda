@@ -115,7 +115,7 @@ pub struct App {
     /// Provider to why the proxy last turned its active login down, until
     /// it next spends it.
     refused: Mutex<BTreeMap<String, String>>,
-    spent: Mutex<BTreeMap<u32, (Instant, Value)>>,
+    spent: Mutex<BTreeMap<(u32, bool), (Instant, Value)>>,
     versions: Mutex<Option<(Instant, Value)>>,
     firewall: Mutex<FirewallSeen>,
     me: OnceLock<Weak<App>>,
@@ -731,16 +731,17 @@ impl App {
         }
     }
 
-    /// The spend over the last `days`, as TokenGauge exports it, with the
-    /// stored logins its digests name; or why there is none.
-    fn spend(&self, days: u32) -> Value {
+    /// The spend over the last `days`, as TokenGauge exports it (`by_hour`, a
+    /// row per hour), with the stored logins its digests name; or why there is
+    /// none.
+    fn spend(&self, days: u32, by_hour: bool) -> Value {
         if let Ok(spent) = self.spent.lock()
-            && let Some((at, answer)) = spent.get(&days)
+            && let Some((at, answer)) = spent.get(&(days, by_hour))
             && at.elapsed() < SPEND_FRESH
         {
             return answer.clone();
         }
-        let answer = match crate::usage::spend(self.places.tokengauge.as_deref(), days) {
+        let answer = match crate::usage::spend(self.places.tokengauge.as_deref(), days, by_hour) {
             Ok(export) => json!({
                 "export": export,
                 "logins": crate::usage::logins(&self.store, &self.providers()),
@@ -748,15 +749,16 @@ impl App {
             Err(e) => json!({ "unavailable": format!("{e:#}") }),
         };
         if let Ok(mut spent) = self.spent.lock() {
-            spent.insert(days, (Instant::now(), answer.clone()));
+            spent.insert((days, by_hour), (Instant::now(), answer.clone()));
         }
         answer
     }
 
     /// What a week of each login bought: its weekly windows, from
-    /// TokenGauge's history, against the spend of the last 400 days.
+    /// TokenGauge's history, against the spend of the last 400 days by the
+    /// hour.
     fn value(&self) -> Value {
-        let spent = self.spend(400);
+        let spent = self.spend(400, true);
         let Some(export) = spent.get("export").and_then(|e| {
             serde_json::from_value::<selvedge::usage::export::UsageExport>(e.clone()).ok()
         }) else {
@@ -894,7 +896,7 @@ impl App {
                 .and_then(Value::as_u64)
                 .map_or(30, |d| d.clamp(1, 400)) as u32;
             return match view {
-                "spend" => Ok(self.spend(days)),
+                "spend" => Ok(self.spend(days, false)),
                 "value" => Ok(self.value()),
                 "requests" => {
                     let keys = self
@@ -2436,7 +2438,7 @@ mod tests {
         e.stored("work", "u-work", HOUR);
         let digest = selvedge::usage::account_digest("u-work");
         let export = json!({
-            "schemaVersion": 1, "generatedAt": 5, "currency": "USD", "coversFrom": "2026-01-01",
+            "schemaVersion": 1, "generatedAt": crate::fsx::now_ms(), "currency": "USD", "coversFrom": "2026-01-01",
             "rows": [{"date": "2026-10-06", "provider": "claude", "model": "claude-x",
                       "login": digest, "source": "cli",
                       "tokens": {"o": 3}, "usd": {"input": 0.0, "output": 20.0, "cacheWrite": 0.0, "cacheRead": 0.0}}],
@@ -2449,7 +2451,10 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let app = app_with_tokengauge(&e, &format!("echo '{export}'"));
+        let app = app_with_tokengauge(
+            &e,
+            &format!("[ \"$4\" = --by-hour ] || exit 2\necho '{export}'"),
+        );
 
         let (status, body) = call(&app, "POST", "/api/usage/value", json!({}));
 
@@ -2460,6 +2465,37 @@ mod tests {
         assert_eq!(week["usd"], 20.0);
         assert_eq!(week["usdPerPercent"], 0.5);
         assert_eq!(body["logins"][&digest]["name"], "work");
+    }
+
+    #[test]
+    fn a_tokengauge_without_hours_gives_the_value_its_days() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let export = json!({
+            "schemaVersion": 1, "generatedAt": crate::fsx::now_ms(), "currency": "USD", "coversFrom": "2026-01-01",
+            "rows": [{"date": "2026-10-06", "provider": "claude", "model": "claude-x",
+                      "login": selvedge::usage::account_digest("u-work"), "source": "cli",
+                      "tokens": {"o": 3}, "usd": {"input": 0.0, "output": 20.0, "cacheWrite": 0.0, "cacheRead": 0.0}}],
+        });
+        std::fs::write(
+            e.tmp.path().join("tokengauge-window-history.json"),
+            json!({"closed": [{"provider": "claude", "credential": "work", "window": "secondary",
+                "windowMinutes": 10080, "openedAt": "2026-10-04T12:00:00Z",
+                "resetsAt": "2026-10-11T12:00:00Z", "used": 40, "seenAt": "2026-10-11T11:00:00Z"}]})
+            .to_string(),
+        )
+        .unwrap();
+        let app = app_with_tokengauge(
+            &e,
+            &format!(
+                "[ -z \"$4\" ] || {{ echo \"error: unexpected argument '$4' found\" >&2; exit 2; }}\necho '{export}'"
+            ),
+        );
+
+        let (status, body) = call(&app, "POST", "/api/usage/value", json!({}));
+
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(body["weeks"][0]["usd"], 20.0);
     }
 
     #[test]

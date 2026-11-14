@@ -72,18 +72,21 @@ pub fn logins(store: &Store, providers: &[&dyn Provider]) -> Value {
     Value::Object(out)
 }
 
-/// `tokengauge --usage-json --since <first day>`, parsed.
-pub fn spend(tokengauge: Option<&Path>, days: u32) -> Result<UsageExport> {
+/// `tokengauge --usage-json --since <first day>`, parsed; with `by_hour`, a
+/// row per hour, or per day from a TokenGauge older than `--by-hour`.
+pub fn spend(tokengauge: Option<&Path>, days: u32, by_hour: bool) -> Result<UsageExport> {
     let program = tokengauge.context("TokenGauge is not installed")?;
-    let ran = crate::child::run(
-        "TokenGauge",
-        program,
-        &[export::FLAG, export::SINCE, &first_day(days)],
-        WAIT,
-        MAX_EXPORT,
-    )?;
+    let since = first_day(days);
+    let mut args = vec![export::FLAG, export::SINCE, &since];
+    if by_hour {
+        args.push(export::BY_HOUR);
+    }
+    let ran = crate::child::run("TokenGauge", program, &args, WAIT, MAX_EXPORT)?;
     if !ran.ok {
         let said = ran.said();
+        if by_hour && said.contains(export::BY_HOUR) {
+            return spend(tokengauge, days, false);
+        }
         bail!(
             "TokenGauge could not export its usage{}",
             if said.contains("--usage-json") || said.is_empty() {
