@@ -227,9 +227,16 @@ fn spawn(program: &Path, args: &[&OsStr]) -> bool {
     true
 }
 
+/// The desktop's own opener, which hands a file to the default browser.
+const OPENER: &str = if cfg!(target_os = "macos") {
+    "/usr/bin/open"
+} else {
+    "xdg-open"
+};
+
 pub fn open(url: &str) {
     if let Some(page) = redirect_file(url) {
-        spawn(Path::new("xdg-open"), &[page.as_os_str()]);
+        spawn(Path::new(OPENER), &[page.as_os_str()]);
     }
 }
 
@@ -305,11 +312,17 @@ pub fn remote(set: &dyn Fn(&str) -> bool) -> bool {
         || (cfg!(target_os = "linux") && !set("DISPLAY") && !set("WAYLAND_DISPLAY"))
 }
 
-/// Whether a window can be shown here: `DISPLAY` or `WAYLAND_DISPLAY` set.
+/// Whether a window can be shown here: on Linux `DISPLAY` or
+/// `WAYLAND_DISPLAY` set, on macOS anything but an SSH login.
 pub fn displayed() -> bool {
-    ["DISPLAY", "WAYLAND_DISPLAY"]
-        .iter()
-        .any(|v| env::var_os(v).is_some_and(|v| !v.is_empty()))
+    shows(&|v| env::var_os(v).is_some_and(|v| !v.is_empty()))
+}
+
+fn shows(set: &dyn Fn(&str) -> bool) -> bool {
+    match cfg!(target_os = "macos") {
+        true => !set("SSH_CONNECTION") && !set("SSH_TTY"),
+        false => set("DISPLAY") || set("WAYLAND_DISPLAY"),
+    }
 }
 
 /// A login's own browser profile, under the store, so its sessions are kept
@@ -339,7 +352,7 @@ impl Choice {
             return false;
         };
         match &self.browser {
-            None => spawn(Path::new("xdg-open"), &[page.as_os_str()]),
+            None => spawn(Path::new(OPENER), &[page.as_os_str()]),
             Some((b, program)) => {
                 if self.window == Window::Profile && fsx::create_private_dir(profile).is_err() {
                     return false;
@@ -374,6 +387,9 @@ fn arguments(b: &Browser, window: Window, profile: &Path, page: &Path) -> Vec<st
 }
 
 fn default_browser() -> Option<String> {
+    if cfg!(target_os = "macos") {
+        return None;
+    }
     let mut ask = Command::new("xdg-settings");
     ask.args(["get", "default-web-browser"]);
     let id = output_within(ask, ASK_DESKTOP)?.trim().to_owned();
@@ -437,6 +453,17 @@ mod tests {
         assert!(!remote(&only(&["DISPLAY"])));
         assert!(!remote(&only(&["WAYLAND_DISPLAY"])));
         assert_eq!(remote(&only(&[])), cfg!(target_os = "linux"));
+    }
+
+    #[test]
+    fn a_window_shows_on_linux_with_a_display_and_on_a_mac_but_over_ssh() {
+        let only = |vars: &'static [&'static str]| move |var: &str| vars.contains(&var);
+        let mac = cfg!(target_os = "macos");
+        assert_eq!(shows(&only(&[])), mac);
+        assert!(shows(&only(&["DISPLAY"])));
+        assert!(shows(&only(&["WAYLAND_DISPLAY"])));
+        assert!(!shows(&only(&["SSH_TTY"])));
+        assert_eq!(shows(&only(&["SSH_CONNECTION", "DISPLAY"])), !mac);
     }
 
     #[test]

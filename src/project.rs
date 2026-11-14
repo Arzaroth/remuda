@@ -30,14 +30,24 @@ mod tests {
     #[test]
     fn the_release_publishes_the_archive_this_binary_downloads() {
         let release = release_workflow();
-        assert!(release.contains("for arch in x86_64 aarch64; do"));
-        assert!(release.contains("\"dist/remuda-$safe-linux-$arch.tar.gz\""));
+        assert!(
+            release.contains(
+                "for target in linux-x86_64 linux-aarch64 macos-x86_64 macos-aarch64; do"
+            )
+        );
+        assert!(release.contains("\"dist/remuda-$safe-$target.tar.gz\""));
         let wanted = format!(
             "{}{ARCHIVE_SUFFIX}",
             arch_target(&REMUDA).expect("a known arch")
         );
         assert!(
-            ["linux-x86_64.tar.gz", "linux-aarch64.tar.gz"].contains(&wanted.as_str()),
+            [
+                "linux-x86_64.tar.gz",
+                "linux-aarch64.tar.gz",
+                "macos-x86_64.tar.gz",
+                "macos-aarch64.tar.gz"
+            ]
+            .contains(&wanted.as_str()),
             "apply() asks for {wanted}"
         );
         assert!(
@@ -56,7 +66,7 @@ mod tests {
         let install =
             std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/install.sh"))
                 .expect("install.sh");
-        assert!(install.contains("remuda-$tag-linux-$arch.tar.gz"));
+        assert!(install.contains("remuda-$tag-$os-$arch.tar.gz"));
         assert!(install.contains(REMUDA.repo));
     }
 

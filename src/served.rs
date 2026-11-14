@@ -5,9 +5,10 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use selvedge::proc::start_time;
+use crate::pidstart::start_time;
 
 use crate::fsx;
+use crate::units::{Manager, Unit};
 
 /// What a running `serve` tells other programs: no token, so anything of the
 /// user's may read it.
@@ -102,12 +103,11 @@ pub fn taken_over(dir: &Path, port: u16) -> Option<String> {
 
 /// The version of the `serve` that runs, if one does, and whether a remuda
 /// unit runs it.
-pub fn serving(dir: &Path) -> Option<(String, bool)> {
+pub fn serving(dir: &Path, units: &Manager) -> Option<(String, bool)> {
     running(dir)?;
     let status: Status = fsx::read_record(&status_path(dir))?;
-    let cgroup =
-        std::fs::read_to_string(format!("/proc/{}/cgroup", status.pid)).unwrap_or_default();
-    Some((status.version, crate::dirs::in_remuda_unit(&cgroup)))
+    let service = units.runs(Unit::Serve, status.pid);
+    Some((status.version, service))
 }
 
 /// The running page's URL, after starting the service when nothing serves
@@ -124,10 +124,18 @@ pub fn find(dir: &Path, start: impl FnOnce() -> bool, wait: Duration) -> Result<
             }
             std::thread::sleep(Duration::from_millis(100));
         }
-        return running(dir).context("remuda-serve.service started but is not serving; see `journalctl --user -u remuda-serve`");
+        let units = Manager::from_env();
+        return running(dir).with_context(|| {
+            format!(
+                "{} started but is not serving; see {}",
+                units.name(Unit::Serve),
+                units.logs(Unit::Serve)
+            )
+        });
     }
     anyhow::bail!(
-        "remuda is not serving; run `remuda serve`, or install remuda-serve.service with `install.sh --serve`"
+        "remuda is not serving; run `remuda serve`, or install {} with `install.sh --serve`",
+        Manager::from_env().name(Unit::Serve)
     )
 }
 
@@ -270,6 +278,7 @@ mod tests {
     fn a_service_that_never_serves_is_reported() {
         let tmp = tempfile::tempdir().unwrap();
         let err = find(tmp.path(), || true, Duration::from_millis(200)).unwrap_err();
-        assert!(err.to_string().contains("journalctl"), "{err}");
+        let logs = Manager::from_env().logs(Unit::Serve);
+        assert!(err.to_string().contains(&logs), "{err}");
     }
 }

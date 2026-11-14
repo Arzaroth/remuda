@@ -580,17 +580,123 @@ pub fn figures(
     Ok(out)
 }
 
-/// How many processes under `proc` (a `/proc`) run one of `names`: by
-/// name, by a release binary named after its target (`codex-x86_64-...`), or
-/// as a script under node, bun or deno. `me` is left out, and so is a
-/// `remuda run` session's: its environment names, in the variable `apart`
-/// gives, a directory under a store's `.runs`, beside remuda's marker.
-pub fn running(
-    proc: &std::path::Path,
-    names: &[&str],
-    me: u32,
-    apart: Option<&str>,
-) -> std::io::Result<usize> {
+/// A process as `running` matches it: its name, its arguments and
+/// environment as NUL-separated bytes, the environment read only when asked.
+pub struct Process {
+    pub pid: u32,
+    pub comm: Vec<u8>,
+    pub cmdline: Vec<u8>,
+    environ: Environ,
+}
+
+enum Environ {
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    At(std::path::PathBuf),
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    Read(Vec<u8>),
+}
+
+impl Process {
+    fn environ(&self) -> Vec<u8> {
+        match &self.environ {
+            Environ::At(path) => std::fs::read(path).unwrap_or_default(),
+            Environ::Read(bytes) => bytes.clone(),
+        }
+    }
+}
+
+/// The processes under `proc`, a `/proc`.
+#[cfg(any(test, not(target_os = "macos")))]
+pub fn in_proc(proc: &std::path::Path) -> std::io::Result<Vec<Process>> {
+    let mut seen = Vec::new();
+    for entry in std::fs::read_dir(proc)? {
+        let entry = entry?;
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|n| n.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        seen.push(Process {
+            pid,
+            comm: std::fs::read(entry.path().join("comm")).unwrap_or_default(),
+            cmdline: std::fs::read(entry.path().join("cmdline")).unwrap_or_default(),
+            environ: Environ::At(entry.path().join("environ")),
+        });
+    }
+    Ok(seen)
+}
+
+/// This user's processes, as macOS lists them.
+#[cfg(target_os = "macos")]
+pub fn listed() -> std::io::Result<Vec<Process>> {
+    let mut pids = vec![0 as libc::c_int; 4096];
+    let size = (pids.len() * std::mem::size_of::<libc::c_int>()) as libc::c_int;
+    // SAFETY: the buffer holds `size` bytes.
+    let n = unsafe { libc::proc_listallpids(pids.as_mut_ptr().cast(), size) };
+    if n < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    pids.truncate(n as usize);
+    Ok(pids
+        .into_iter()
+        .filter(|pid| *pid > 0)
+        .filter_map(|pid| {
+            let mut name = [0u8; 64];
+            // SAFETY: the buffer holds its length in bytes.
+            let len = unsafe { libc::proc_name(pid, name.as_mut_ptr().cast(), name.len() as u32) };
+            let comm = name[..len.max(0) as usize].to_vec();
+            let (cmdline, environ) = procargs(pid).unwrap_or_default();
+            (!comm.is_empty() || !cmdline.is_empty()).then_some(Process {
+                pid: pid as u32,
+                comm,
+                cmdline,
+                environ: Environ::Read(environ),
+            })
+        })
+        .collect())
+}
+
+/// `KERN_PROCARGS2`: argc, the executable's path, then argv and the
+/// environment, NUL-terminated. Only this user's processes answer.
+#[cfg(target_os = "macos")]
+fn procargs(pid: libc::c_int) -> Option<(Vec<u8>, Vec<u8>)> {
+    let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
+    let mut buf = vec![0u8; 256 * 1024];
+    let mut len = buf.len();
+    // SAFETY: `len` is the buffer's size, and sysctl writes at most that.
+    let rc = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            3,
+            buf.as_mut_ptr().cast(),
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if rc != 0 || len < 4 {
+        return None;
+    }
+    buf.truncate(len);
+    let argc = i32::from_ne_bytes(buf[..4].try_into().ok()?).max(0) as usize;
+    let rest = &buf[4..];
+    let path_end = rest.iter().position(|b| *b == 0)?;
+    let mut strings = rest[path_end..]
+        .split(|b| *b == 0)
+        .skip_while(|s| s.is_empty());
+    let args: Vec<&[u8]> = strings.by_ref().take(argc).collect();
+    let env: Vec<&[u8]> = strings.take_while(|s| !s.is_empty()).collect();
+    Some((args.join(&0), env.join(&0)))
+}
+
+/// How many of `seen` run one of `names`: by name, by a release binary
+/// named after its target (`codex-x86_64-...`), or as a script under node,
+/// bun or deno. `me` is left out, and so is a `remuda run` session's: its
+/// environment names, in the variable `apart` gives, a directory under a
+/// store's `.runs`, beside remuda's marker.
+pub fn running(seen: &[Process], names: &[&str], me: u32, apart: Option<&str>) -> usize {
     let is = |base: &[u8]| {
         names.iter().any(|n| {
             let n = n.as_bytes();
@@ -607,30 +713,25 @@ pub fn running(
             .to_vec()
     };
     let mut count = 0;
-    for entry in std::fs::read_dir(proc)? {
-        let entry = entry?;
-        let Some(pid) = entry
-            .file_name()
-            .to_str()
-            .and_then(|n| n.parse::<u32>().ok())
-        else {
-            continue;
-        };
-        if pid == me {
+    for process in seen {
+        if process.pid == me {
             continue;
         }
-        let comm = std::fs::read(entry.path().join("comm")).unwrap_or_default();
-        let cmdline = std::fs::read(entry.path().join("cmdline")).unwrap_or_default();
-        let args: Vec<Vec<u8>> = cmdline.split(|b| *b == 0).take(2).map(base).collect();
+        let args: Vec<Vec<u8>> = process
+            .cmdline
+            .split(|b| *b == 0)
+            .take(2)
+            .map(base)
+            .collect();
         let script = args
             .first()
             .is_some_and(|a| matches!(a.as_slice(), b"node" | b"bun" | b"deno"))
             && args.get(1).is_some_and(|a| is(a));
-        if !(is(comm.trim_ascii_end()) || args.first().is_some_and(|a| is(a)) || script) {
+        if !(is(process.comm.trim_ascii_end()) || args.first().is_some_and(|a| is(a)) || script) {
             continue;
         }
         let own = apart.is_some_and(|var| {
-            let environ = std::fs::read(entry.path().join("environ")).unwrap_or_default();
+            let environ = process.environ();
             let value = |name: &str| {
                 environ
                     .split(|b| *b == 0)
@@ -644,7 +745,7 @@ pub fn running(
             count += 1;
         }
     }
-    Ok(count)
+    count
 }
 
 /// Why a switch has to wait for the CLI's sessions to end, if it does
@@ -655,12 +756,11 @@ pub fn sessions_open(p: &dyn Provider) -> Option<String> {
         return None;
     }
     let apart = p.run_spec().map(|s| s.var);
-    match running(
-        std::path::Path::new("/proc"),
-        names,
-        std::process::id(),
-        apart,
-    ) {
+    #[cfg(target_os = "macos")]
+    let seen = listed();
+    #[cfg(not(target_os = "macos"))]
+    let seen = in_proc(std::path::Path::new("/proc"));
+    match seen.map(|seen| running(&seen, names, std::process::id(), apart)) {
         Ok(0) => None,
         Ok(_) => Some(format!("waiting for every {} session to end", p.name())),
         Err(e) => Some(format!("cannot see whether {} runs: {e}", p.name())),
@@ -1302,7 +1402,7 @@ reserve = { work = "workday" }
         process(proc, 10, "zsh", &["-zsh"]);
         process(proc, 11, "vim", &["vim", "codex"]);
         process(proc, 12, "codexx", &["/usr/bin/codexx"]);
-        assert_eq!(running(proc, &["codex"], 1, None).unwrap(), 0);
+        assert_eq!(running(&in_proc(proc).unwrap(), &["codex"], 1, None), 0);
 
         process(proc, 20, "codex", &["codex", "exec"]);
         process(
@@ -1317,13 +1417,13 @@ reserve = { work = "workday" }
             "node",
             &["/usr/bin/node", "/usr/lib/node_modules/codex.js"],
         );
-        assert_eq!(running(proc, &["codex"], 1, None).unwrap(), 3);
+        assert_eq!(running(&in_proc(proc).unwrap(), &["codex"], 1, None), 3);
         assert_eq!(
-            running(proc, &["codex"], 20, None).unwrap(),
+            running(&in_proc(proc).unwrap(), &["codex"], 20, None),
             2,
             "itself is left out"
         );
-        assert!(running(&proc.join("gone"), &["codex"], 1, None).is_err());
+        assert!(in_proc(&proc.join("gone")).is_err());
         std::fs::write(
             proc.join("20").join("environ"),
             b"HOME=/h\0REMUDA_OUTER_CODEX_HOME=\0CODEX_HOME=/s/.runs/codex/w/home\0",
@@ -1335,7 +1435,7 @@ reserve = { work = "workday" }
         )
         .unwrap();
         assert_eq!(
-            running(proc, &["codex"], 1, Some("CODEX_HOME")).unwrap(),
+            running(&in_proc(proc).unwrap(), &["codex"], 1, Some("CODEX_HOME")),
             2,
             "a run session's codex is on its own files, one that only kept the marker is not"
         );
@@ -1879,5 +1979,18 @@ order = [["Axeo"], ["perso"]]
             "94% is under the CLI's 97%, not IDC's 93%: {:?}",
             d.action
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_lists_this_process_with_its_arguments_and_environment() {
+        let me = std::process::id();
+        let seen = listed().unwrap();
+        let mine = seen.iter().find(|p| p.pid == me).unwrap();
+        let exe = std::env::current_exe().unwrap();
+        let first = mine.cmdline.split(|b| *b == 0).next().unwrap();
+        assert_eq!(first, exe.as_os_str().as_encoded_bytes());
+        assert!(mine.environ().windows(5).any(|w| w == b"HOME="));
+        assert!(seen.len() > 1);
     }
 }

@@ -27,7 +27,7 @@ switched Claude Code to perso (me@example.com)
 
 ## Install
 
-Linux, x86_64 or aarch64:
+Linux or macOS, x86_64 or aarch64:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Arzaroth/remuda/master/scripts/install.sh | bash
@@ -49,6 +49,25 @@ looks where you do. If you change `CLAUDE_CONFIG_DIR` or `CODEX_HOME` later,
 the timer notices: it compares its view with where your last `remuda` command
 found each CLI, and refuses to refresh one it would look for in the wrong
 place, saying what to set in that file (`journalctl --user -u remuda-refresh`).
+
+### macOS
+
+The same `install.sh` installs the macOS archive. The refresh timer and, with
+`--serve`, the page are LaunchAgents rather than systemd units:
+`~/Library/LaunchAgents/com.github.arzaroth.remuda.refresh.plist` and
+`com.github.arzaroth.remuda.serve.plist`, loaded into your login session
+(`launchctl bootstrap gui/$(id -u)`), logging to `~/Library/Logs/remuda`. The
+installer writes the directory variables your shell sets into the agents
+instead of `environment.d`, and `remuda --update` rewrites and restarts them.
+Loading them needs someone logged in to the Mac's desktop, even when you
+install over SSH.
+
+Claude Code and cursor-agent keep their logins in the login Keychain on a Mac,
+and remuda switches them there ([How a switch works](#how-a-switch-works)).
+Over SSH the Keychain is locked: run `security unlock-keychain` in that shell
+first, or remuda refuses to touch a login the Keychain holds. Sign-ins over SSH
+paste their code (`remuda login --paste`), and `remuda restore FILE --paste`
+sets a Mac up from a Linux machine's `remuda export FILE` the same way.
 
 ### Packages
 
@@ -387,6 +406,9 @@ which listens on every interface and shows the LAN address in the base URLs.
 Traffic is plain HTTP, keys included. When ufw or firewalld blocks the port,
 the card shows the command that opens it (`sudo ufw allow in on eth0 to any port 8317 proto tcp`),
 after `sudo ufw status numbered` when a deny for some machines may still refuse them.
+On macOS, a `serve` started by its LaunchAgent reaches the LAN only once remuda
+is allowed under System Settings, Privacy & Security, Local Network; until then
+LAN clients get `EHOSTUNREACH`.
 
 ## How a switch works
 

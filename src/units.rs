@@ -20,6 +20,185 @@ pub const UNITS: [(&str, &str); 3] = [
     ),
 ];
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Unit {
+    Serve,
+    Timer,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Action {
+    Enable,
+    Unmask,
+    Restart,
+    Status,
+}
+
+/// What runs `serve` and the scheduled refresh: systemd's user units, found
+/// in these directories, or on macOS launchd's agents in this one.
+pub enum Manager {
+    Systemd(Vec<PathBuf>),
+    Launchd { dir: PathBuf, home: PathBuf },
+}
+
+/// Where a service's settings tell it where the CLIs keep their logins.
+pub fn env_hint() -> &'static str {
+    match cfg!(target_os = "macos") {
+        true => "the EnvironmentVariables of the agents in ~/Library/LaunchAgents",
+        false => "~/.config/environment.d/60-remuda.conf",
+    }
+}
+
+fn systemctl(args: &[&str]) -> bool {
+    std::process::Command::new("systemctl")
+        .arg("--user")
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+impl Manager {
+    pub fn from_env() -> Self {
+        if cfg!(target_os = "macos") {
+            let home = crate::paths::home();
+            return Manager::Launchd {
+                dir: crate::launchd::agents_dir(&home),
+                home,
+            };
+        }
+        Manager::Systemd(crate::paths::systemd_user_units())
+    }
+
+    pub fn name(&self, unit: Unit) -> String {
+        match (self, unit) {
+            (Manager::Systemd(_), Unit::Serve) => SERVE.to_owned(),
+            (Manager::Systemd(_), Unit::Timer) => TIMER.to_owned(),
+            (Manager::Launchd { .. }, unit) => crate::launchd::label(unit).to_owned(),
+        }
+    }
+
+    /// Where to read what the service printed.
+    pub fn logs(&self, unit: Unit) -> String {
+        match self {
+            Manager::Systemd(_) => format!(
+                "`journalctl --user -u {}`",
+                self.name(unit).trim_end_matches(".service")
+            ),
+            Manager::Launchd { home, .. } => crate::launchd::logs(home, unit).display().to_string(),
+        }
+    }
+
+    /// Whether this service runs the process `pid`.
+    pub fn runs(&self, unit: Unit, pid: u32) -> bool {
+        match self {
+            Manager::Systemd(_) => {
+                let cgroup =
+                    std::fs::read_to_string(format!("/proc/{pid}/cgroup")).unwrap_or_default();
+                crate::dirs::in_remuda_unit(&cgroup)
+            }
+            Manager::Launchd { .. } => crate::launchd::runs(unit, pid),
+        }
+    }
+
+    /// Starts the service when it is installed.
+    pub fn start(&self, unit: Unit) -> bool {
+        match self {
+            Manager::Systemd(dirs) => {
+                let name = self.name(unit);
+                dirs.iter().any(|dir| dir.join(&name).exists()) && systemctl(&["start", &name])
+            }
+            Manager::Launchd { dir, .. } => {
+                crate::launchd::plist_path(dir, unit).exists() && crate::launchd::start(dir, unit)
+            }
+        }
+    }
+
+    /// Brings the installed services up to this binary and restarts a
+    /// running `serve` on it.
+    pub fn sync(&self) -> anyhow::Result<()> {
+        let env = |v: &str| std::env::var(v).ok();
+        let done = match self {
+            Manager::Systemd(_) => {
+                let done = refresh(&crate::paths::installed_units());
+                if !done.changed.is_empty() {
+                    println!("updated {}", done.changed.join(", "));
+                    if !systemctl(&["daemon-reload"]) {
+                        eprintln!("warning: run `systemctl --user daemon-reload`");
+                    }
+                }
+                if systemctl(&["is-active", "--quiet", SERVE]) && !systemctl(&["restart", SERVE]) {
+                    eprintln!(
+                        "warning: {SERVE} still runs the old binary; run {}",
+                        self.fix(Unit::Serve, Action::Restart)
+                    );
+                }
+                done
+            }
+            Manager::Launchd { dir, home } => {
+                let (done, changed) = crate::launchd::refresh(dir, home, &env);
+                if !done.changed.is_empty() {
+                    println!("updated {}", done.changed.join(", "));
+                }
+                for unit in [Unit::Timer, Unit::Serve] {
+                    let loaded = crate::launchd::loaded(unit).is_some();
+                    let restart = unit == Unit::Serve || changed.contains(&unit);
+                    if loaded && restart && !crate::launchd::start(dir, unit) {
+                        eprintln!(
+                            "warning: {} still runs the old binary; run {}",
+                            self.name(unit),
+                            self.fix(unit, Action::Restart)
+                        );
+                    }
+                }
+                done
+            }
+        };
+        if !done.failed.is_empty() {
+            anyhow::bail!("{}", done.failed.join("\n"));
+        }
+        Ok(())
+    }
+
+    /// `enabled`, `disabled`, `masked` or `absent`.
+    pub fn state(&self, unit: Unit) -> &'static str {
+        match self {
+            Manager::Launchd { dir, .. } => crate::launchd::state(dir, unit),
+            Manager::Systemd(dirs) => {
+                let wants = match unit {
+                    Unit::Serve => "default.target.wants",
+                    Unit::Timer => "timers.target.wants",
+                };
+                state(dirs, &self.name(unit), wants)
+            }
+        }
+    }
+
+    /// The command that does `action` to `unit`, quoted for a fix line.
+    pub fn fix(&self, unit: Unit, action: Action) -> String {
+        let name = self.name(unit);
+        match self {
+            Manager::Systemd(_) => {
+                let verb = match action {
+                    Action::Enable => "enable --now",
+                    Action::Unmask => "unmask",
+                    Action::Restart => "restart",
+                    Action::Status => "status",
+                };
+                format!("`systemctl --user {verb} {name}`")
+            }
+            Manager::Launchd { .. } => match action {
+                Action::Enable => format!(
+                    "`launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/{name}.plist`"
+                ),
+                Action::Unmask => format!("`launchctl enable gui/$(id -u)/{name}`"),
+                Action::Restart => format!("`launchctl kickstart -k gui/$(id -u)/{name}`"),
+                Action::Status => format!("`launchctl print gui/$(id -u)/{name}`"),
+            },
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct Refreshed {
     pub changed: Vec<&'static str>,
