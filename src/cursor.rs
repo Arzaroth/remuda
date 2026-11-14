@@ -243,8 +243,18 @@ impl Provider for Cursor {
             {
                 return Err(Changed.into());
             }
+            let before = Self::item(keychain, REFRESH)?;
             Self::put(keychain, REFRESH, text(&entry.creds, "refreshToken"))?;
-            return Self::put(keychain, ACCESS, Some(access));
+            let Err(e) = Self::put(keychain, ACCESS, Some(access)) else {
+                return Ok(());
+            };
+            if let Err(back) = Self::put(keychain, REFRESH, before.as_deref()) {
+                bail!(
+                    "{e:#}; putting the refresh token back failed too ({back:#}), so cursor-agent's \
+                     Keychain items hold two logins' tokens: sign it in again"
+                );
+            }
+            return Err(e);
         }
         let replacement = entry.creds.clone();
         update_json(&self.auth_path, |file| {
@@ -682,5 +692,34 @@ mod tests {
         c.sign_out(&live).unwrap();
         assert_eq!(fake.get(ACCESS), None);
         assert_eq!(fake.get(REFRESH), None);
+    }
+
+    #[test]
+    fn an_access_token_the_keychain_refuses_puts_the_refresh_token_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let fake = std::sync::Arc::new(crate::securestorage::testing::Fake::default());
+        let c = Cursor::in_keychain(fake.keychain(ACCESS), Api::local(&OFFLINE));
+        let creds = auth("u1", "work", "r-work");
+        let identity = c.identify(&creds).unwrap();
+        store
+            .save(&Entry::new("cursor", "work", creds, identity, 1))
+            .unwrap();
+        fake.put(ACCESS, "a-old");
+        fake.put(REFRESH, "r-old");
+        *fake.refuses.lock().unwrap() = Some(ACCESS.to_owned());
+
+        let work = store.get("cursor", "work").unwrap().unwrap();
+        assert!(c.install(&work, None).is_err());
+        assert_eq!(fake.get(ACCESS).as_deref(), Some("a-old"));
+        assert_eq!(fake.get(REFRESH).as_deref(), Some("r-old"));
+
+        *fake.refuses.lock().unwrap() = Some(REFRESH.to_owned());
+        let err = c.install(&work, None).unwrap_err().to_string();
+        assert!(
+            err.contains("cannot be passed") || err.contains("failed"),
+            "{err}"
+        );
+        assert_eq!(fake.get(REFRESH).as_deref(), Some("r-old"));
     }
 }

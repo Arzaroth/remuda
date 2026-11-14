@@ -19,6 +19,22 @@
   processes apart, and links open in the default browser. A Mac's `serve`
   reaches the LAN only once remuda is allowed under Local Network privacy.
 
+### Fixed
+
+- A Claude login whose subscription lapsed no longer keeps listing its old
+  plan: refreshing a stored login reads the plan its account is on now, and
+  an account with no plan lists as `free`. TokenGauge reads the same fields,
+  so it stops showing the old plan's figures for it too.
+
+## [0.42.2] - 2026-11-13
+
+### Fixed
+
+- The Value tab splits a day's spend where a weekly window reset, rather than
+  across the whole day by the clock: spend from before a reset no longer lands
+  in the new week. It needs TokenGauge 0.62.0 (`--usage-json --by-hour`); an older
+  TokenGauge still gives the day's share.
+
 ## [0.42.1] - 2026-11-12
 
 ### Fixed

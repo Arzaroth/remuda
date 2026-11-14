@@ -183,8 +183,8 @@ fetch at once, so a login it skipped as expired shows its figures within
 seconds rather than at TokenGauge's next poll. Since TokenGauge 0.37 (its ADR 0003), its payloads and
 errors name the stored credential they belong to, so each row shows its own
 login's figures, or its own error, and the tile the active one's. A login
-TokenGauge skipped because its access token expired or it is unverified says
-so. An older snapshot names no credential and holds the
+TokenGauge skipped because its access token expired, it is unverified or its
+account has no plan says so. An older snapshot names no credential and holds the
 login TokenGauge last saw for each CLI: then only the active credential shows
 usage, the others say so, and until TokenGauge has fetched again after a
 switch the new login says it is waiting rather than showing the previous
@@ -243,8 +243,11 @@ Three tabs, each filtered by a CLI and a login, the first two by a range (7,
   percent covers the whole of it. A week is matched to the spend by the account
   TokenGauge recorded it for, so a name the store reused for another account
   keeps the old account's weeks as a history of their own, and by its name
-  only when that account is unknown. A day
-  the week covers in part counts in proportion, today's row as spent so far, a
+  only when that account is unknown. The spend comes by the hour
+  (`--usage-json --by-hour`, TokenGauge 0.62 or later), so a reset mid-day
+  splits the day at the hour it happened; an hour (or a day, from an older
+  TokenGauge or past its hourly retention) the week covers in part counts in
+  proportion, the row still running as spent when the export was made, a
   week reset early ends where the next one opened and says after how many
   days, and the open week runs to now ("so far"). TokenGauge, not remuda,
   tells a reset: a figure that went down starts a new instance, whether the

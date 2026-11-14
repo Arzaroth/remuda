@@ -143,12 +143,16 @@ impl SecureStorage {
                 return Ok(());
             }
             update_json(&self.file, |file| {
-                let login = file.get(OAUTH_KEY);
-                if login.is_some_and(|l| {
-                    Some(l) != was.get(OAUTH_KEY) && Some(l) != value.get(OAUTH_KEY)
-                }) {
+                let differs = file.as_object().into_iter().flatten().find(|(key, held)| {
+                    Some(*held) != was.get(key.as_str()) && Some(*held) != value.get(key.as_str())
+                });
+                if let Some((key, _)) = differs {
+                    let what = match key.as_str() {
+                        OAUTH_KEY => "another Claude Code login".to_owned(),
+                        other => format!("another {other}"),
+                    };
                     bail!(
-                        "{} holds another Claude Code login than the Keychain, which remuda does not write over",
+                        "{} holds {what} than the Keychain, which remuda does not write over",
                         self.file.display()
                     );
                 }
@@ -209,6 +213,7 @@ pub mod testing {
         pub items: Mutex<BTreeMap<String, String>>,
         pub locked: Mutex<bool>,
         pub forgets_writes: Mutex<bool>,
+        pub refuses: Mutex<Option<String>>,
         pub calls: Mutex<Vec<(Vec<String>, Option<String>)>>,
         pub after_read: Mutex<Option<Hook>>,
     }
@@ -310,6 +315,9 @@ pub mod testing {
                             .collect();
                         String::from_utf8(bytes).unwrap()
                     };
+                    if self.refuses.lock().unwrap().as_deref() == Some(svc) {
+                        return Ok(ran(1, ""));
+                    }
                     if !*self.forgets_writes.lock().unwrap() {
                         items.insert(svc.to_owned(), value);
                     }
@@ -477,6 +485,28 @@ mod tests {
 
         assert!(err.contains("another Claude Code login"), "{err}");
         assert_eq!(read_json(storage.file()).unwrap().unwrap(), other);
+        assert!(fake.get(SERVICE).is_some());
+    }
+
+    #[test]
+    fn an_item_too_long_for_stdin_never_drops_what_else_the_file_holds() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (fake, storage) = storage(&tmp);
+        let start = json!({"claudeAiOauth": {"accessToken": "old"}, "mcpOAuth": mcp(20)});
+        fake.put(SERVICE, &serde_json::to_string(&start).unwrap());
+        let newer = json!({"claudeAiOauth": {"accessToken": "old"}, "mcpOAuth": {"srv": {"accessToken": "newer"}}});
+        write_json(storage.file(), &newer).unwrap();
+
+        let err = storage
+            .update(|v| {
+                v["claudeAiOauth"] = json!({"accessToken": "new"});
+                Ok(())
+            })
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("another mcpOAuth"), "{err}");
+        assert_eq!(read_json(storage.file()).unwrap().unwrap(), newer);
         assert!(fake.get(SERVICE).is_some());
     }
 

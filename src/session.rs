@@ -539,11 +539,7 @@ fn finish(store: &Store, p: &dyn Provider, spec: &RunSpec, name: &str) -> Result
             ));
         }
         merge_back(p, session.as_ref(), spec, &home, &base)?;
-        if let Err(e) = session.forget_outside() {
-            said.push(format!(
-                "what the session kept outside its directory stays: {e:#}"
-            ));
-        }
+        session.forget_outside()?;
     }
     for dir in [&home, &base] {
         if dir.exists() {
