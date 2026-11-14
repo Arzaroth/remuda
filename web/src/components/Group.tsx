@@ -77,6 +77,7 @@ export function Logins(props: { p: Provider }) {
 const skipped: Record<string, string> = {
   expired: 'Its access token has expired, so TokenGauge waits for remuda to refresh it',
   unverified: 'TokenGauge skips it until remuda identifies it again',
+  no_plan: 'Its account has no plan, so it has no usage to read',
 };
 
 function WindowCell(props: { w: Window }) {
