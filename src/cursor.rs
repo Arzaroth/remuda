@@ -238,20 +238,29 @@ impl Provider for Cursor {
         if let Some(keychain) = &self.keychain {
             let access =
                 text(&entry.creds, "accessToken").context("stored login has no access token")?;
-            if outgoing
-                .is_some_and(|o| Self::from_keychain(keychain).ok().flatten().as_ref() != Some(o))
-            {
+            let live = Self::from_keychain(keychain)?;
+            if outgoing.is_some_and(|o| live.as_ref() != Some(o)) {
                 return Err(Changed.into());
             }
-            let before = Self::item(keychain, REFRESH)?;
-            Self::put(keychain, REFRESH, text(&entry.creds, "refreshToken"))?;
-            let Err(e) = Self::put(keychain, ACCESS, Some(access)) else {
+            let before_access = Self::item(keychain, ACCESS)?;
+            let before_refresh = Self::item(keychain, REFRESH)?;
+            let written = Self::put(keychain, REFRESH, text(&entry.creds, "refreshToken"))
+                .and_then(|()| Self::put(keychain, ACCESS, Some(access)));
+            let Err(e) = written else {
                 return Ok(());
             };
-            if let Err(back) = Self::put(keychain, REFRESH, before.as_deref()) {
+            let restore = |service: &str, before: Option<&str>| -> Result<()> {
+                match Self::item(keychain, service)?.as_deref() == before {
+                    true => Ok(()),
+                    false => Self::put(keychain, service, before),
+                }
+            };
+            let refresh = restore(REFRESH, before_refresh.as_deref());
+            let access = restore(ACCESS, before_access.as_deref());
+            if let Err(back) = refresh.and(access) {
                 bail!(
-                    "{e:#}; putting the refresh token back failed too ({back:#}), so cursor-agent's \
-                     Keychain items hold two logins' tokens: sign it in again"
+                    "{e:#}; putting the previous tokens back failed too ({back:#}), so cursor-agent's \
+                     Keychain items may hold two logins' tokens: sign it in again"
                 );
             }
             return Err(e);
@@ -276,7 +285,18 @@ impl Provider for Cursor {
                 return Err(Changed.into());
             }
             Self::put(keychain, ACCESS, None)?;
-            return Self::put(keychain, REFRESH, None);
+            let Err(e) = Self::put(keychain, REFRESH, None) else {
+                return Ok(());
+            };
+            let access = text(outgoing, "accessToken");
+            if let Err(back) = Self::put(keychain, ACCESS, access) {
+                bail!(
+                    "{e:#}; putting the access token back failed too ({back:#}), so the refresh \
+                     token stays in cursor-agent's Keychain item {REFRESH}: delete it with \
+                     `security delete-generic-password -a cursor-user -s {REFRESH}`"
+                );
+            }
+            return Err(e);
         }
         crate::fsx::remove_json_if(&self.auth_path, outgoing)
     }
@@ -722,4 +742,5 @@ mod tests {
         );
         assert_eq!(fake.get(REFRESH).as_deref(), Some("r-old"));
     }
+
 }

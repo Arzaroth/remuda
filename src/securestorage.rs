@@ -1,5 +1,8 @@
 use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result, bail};
@@ -18,19 +21,28 @@ pub struct SecureStorage {
 }
 
 /// Claude Code's lock on its secure storage, a directory it takes for each
-/// write and counts as abandoned after 15 seconds.
-struct Held(PathBuf);
-
-impl Held {
-    fn touch(&self) {
-        if let Ok(dir) = fs::File::open(&self.0) {
-            let _ = dir.set_modified(SystemTime::now());
-        }
-    }
+/// write and counts as abandoned after 15 seconds. A thread keeps it fresh
+/// while it is held, and it is removed only while it is still this one.
+struct Held {
+    path: PathBuf,
+    ino: u64,
+    stop: Arc<AtomicBool>,
+    keeper: Option<std::thread::JoinHandle<()>>,
 }
 
 const STALE: Duration = Duration::from_secs(15);
 const WAIT: Duration = Duration::from_secs(10);
+const KEEP: Duration = Duration::from_secs(5);
+
+fn ino(path: &Path) -> Option<u64> {
+    fs::metadata(path).ok().map(|m| m.ino())
+}
+
+fn touch(path: &Path) {
+    if let Ok(dir) = fs::File::open(path) {
+        let _ = dir.set_modified(SystemTime::now());
+    }
+}
 
 impl Held {
     fn take(dir: &Path) -> Result<Held> {
@@ -39,7 +51,29 @@ impl Held {
         let until = Instant::now() + WAIT;
         loop {
             match fs::create_dir(&path) {
-                Ok(()) => return Ok(Held(path)),
+                Ok(()) => {
+                    let ino = ino(&path).context("the lock directory went at once")?;
+                    let stop = Arc::new(AtomicBool::new(false));
+                    let keeper = {
+                        let (path, stop) = (path.clone(), stop.clone());
+                        std::thread::spawn(move || {
+                            let mut last = Instant::now();
+                            while !stop.load(Ordering::Relaxed) {
+                                std::thread::sleep(Duration::from_millis(100));
+                                if last.elapsed() >= KEEP && self::ino(&path) == Some(ino) {
+                                    touch(&path);
+                                    last = Instant::now();
+                                }
+                            }
+                        })
+                    };
+                    return Ok(Held {
+                        path,
+                        ino,
+                        stop,
+                        keeper: Some(keeper),
+                    });
+                }
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                     let stale = fs::metadata(&path)
                         .and_then(|m| m.modified())
@@ -71,7 +105,13 @@ impl Held {
 
 impl Drop for Held {
     fn drop(&mut self) {
-        let _ = fs::remove_dir(&self.0);
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(keeper) = self.keeper.take() {
+            let _ = keeper.join();
+        }
+        if ino(&self.path) == Some(self.ino) {
+            let _ = fs::remove_dir(&self.path);
+        }
     }
 }
 
@@ -118,9 +158,8 @@ impl SecureStorage {
             return update_json(&self.file, edit);
         };
         let dir = self.file.parent().context("path has no parent")?;
-        let held = Held::take(dir)?;
+        let _held = Held::take(dir)?;
         for _ in 0..10 {
-            held.touch();
             let Item::Held(before) = keychain.read()? else {
                 return update_json(&self.file, edit);
             };
@@ -130,7 +169,6 @@ impl SecureStorage {
             }
             let was = value.clone();
             edit(&mut value)?;
-            held.touch();
             match keychain.read()? {
                 Item::Held(now) if now == before => {}
                 _ => {
@@ -138,7 +176,6 @@ impl SecureStorage {
                     continue;
                 }
             }
-            held.touch();
             if keychain.write(&ascii_json(&value)?)? {
                 return Ok(());
             }
