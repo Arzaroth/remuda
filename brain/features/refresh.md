@@ -16,6 +16,16 @@ are kept in a `.set-aside-...` file named in the error. A refused refresh token
 says to sign that credential in again. Failures are listed per credential and
 the command exits non-zero.
 
+A refreshed Claude credential then has its profile read again
+(`Provider::replan`): `subscriptionType` and `rateLimitTier` beside the
+tokens, and the sidecar's `oauthAccount` laid over the one kept. Claude Code
+writes the plan at sign-in and never lowers it, so without this a lapsed
+subscription would keep its old plan in `ls`, on the page and in TokenGauge.
+An account with no plan has a null `subscriptionType` and the
+`default_claude_ai` tier, which lists as `free`. A profile that cannot be read
+leaves the plan as it was and only warns, since the rotated tokens must be
+saved; one that names another account is refused like a refresh that does.
+
 A credential whose sidecar does not match it (`[unverified]` in `ls`) is not
 refreshed until it has been identified again.
 
@@ -46,5 +56,6 @@ asks, since someone is looking at it.
 
 - [src/commands.rs](../../src/commands.rs) `refresh`
 - [src/ops.rs](../../src/ops.rs) `refresh_entry`
+- [src/claude.rs](../../src/claude.rs) `replan`, `apply_plan`
 - [src/runs.rs](../../src/runs.rs)
 - [systemd/remuda-refresh.timer](../../systemd/remuda-refresh.timer)
