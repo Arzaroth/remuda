@@ -51,7 +51,8 @@ refresh token into "sign this credential in again".
     Code does.
   - write: under Claude Code's own lock (the directory
     `.storage-write.lock`, which Claude Code takes over after 15 seconds, so
-    remuda touches it before each `security` call), compare the item with
+    a thread keeps it fresh while remuda holds it, and it is removed only
+    while it is still the directory remuda made), compare the item with
     what was read, then `add-generic-password -U` through `security -i` on
     stdin, and read it back. The JSON goes as printable ASCII, anything else
     as `\u` escapes, since `security -w` prints other bytes as hex (which a
@@ -199,9 +200,10 @@ refresh token into "sign this credential in again".
   remuda reads the first two as `{accessToken, refreshToken}`, the stored
   shape, and switches them through `security -i` as for Claude Code: the
   refresh token first, then the access token, after comparing both with the
-  login the switch synced. An access token the Keychain refuses puts the
-  previous refresh token back, so the items never hold two logins' tokens
-  unsaid. A sign-out deletes both; an API key stays. A token that `security`
+  login the switch synced. When a write fails, whichever item changed is
+  put back, so the items never hold two logins' tokens unsaid. A sign-out
+  whose refresh token cannot be deleted puts the access token back, so it can
+  be tried again. A sign-out deletes both; an API key stays. A token that `security`
   would print back as hex is refused before anything is written.
 - Codex, Grok and Kimi keep the same files on macOS. Codex can be told to use
   the Keychain (`cli_auth_credentials_store = "keyring"` or `"auto"`), which
