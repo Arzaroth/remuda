@@ -420,6 +420,15 @@ fn finish_login(api: &Api, pkce: &Pkce, code: &str) -> Result<ClaudeLogin> {
     let p = profile(api, &t.access_token)?;
     let mut oauth = Map::new();
     apply_tokens(&mut oauth, &t);
+    apply_plan(&mut oauth, &p);
+    Ok(ClaudeLogin {
+        oauth: Value::Object(oauth),
+        oauth_account: oauth_account_from_profile(&p)?,
+    })
+}
+
+/// The plan a profile names, as Claude Code files it beside the tokens.
+fn apply_plan(oauth: &mut Map<String, Value>, p: &Value) {
     let org = p.get("organization");
     oauth.insert(
         "subscriptionType".into(),
@@ -434,10 +443,6 @@ fn finish_login(api: &Api, pkce: &Pkce, code: &str) -> Result<ClaudeLogin> {
             .cloned()
             .unwrap_or(Value::Null),
     );
-    Ok(ClaudeLogin {
-        oauth: Value::Object(oauth),
-        oauth_account: oauth_account_from_profile(&p)?,
-    })
 }
 
 fn identity_of(oauth_account: Value) -> Result<Identity> {
