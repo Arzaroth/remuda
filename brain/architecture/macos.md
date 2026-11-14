@@ -71,11 +71,12 @@ without a display.
 ## The proxy on the LAN
 
 A non-Apple binary run by launchd, `serve` and its proxy included, is subject
-to macOS's Local Network privacy: until the user allows remuda in System
-Settings, Privacy & Security, Local Network, its traffic with LAN addresses
-fails with `EHOSTUNREACH`. The card's firewall check knows only ufw and
-firewalld, so a Mac gets no firewall notice either. remuda works around
-neither.
+to macOS's Local Network privacy. Listening and accepting a LAN client's
+connection need no permission (Apple's TN3179), but a connection remuda opens
+to a LAN address, such as an upstream there, fails with `EHOSTUNREACH` until
+the user allows remuda in System Settings, Privacy & Security, Local Network.
+The card's firewall check knows only ufw and firewalld, so a Mac gets no
+firewall notice either. remuda works around neither.
 
 ## Release
 

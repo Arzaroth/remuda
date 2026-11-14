@@ -16,8 +16,9 @@
   timer and `--serve` are LaunchAgents in `~/Library/LaunchAgents`, logging to
   `~/Library/Logs/remuda`, which `remuda --update` rewrites and restarts.
   Auto mode sees the CLIs' processes there, `remuda run` and the page tell
-  processes apart, and links open in the default browser. A Mac's `serve`
-  reaches the LAN only once remuda is allowed under Local Network privacy.
+  processes apart, and links open in the default browser. A connection a
+  Mac's `serve` opens to the LAN needs remuda allowed under Local Network
+  privacy; LAN clients reach it without.
 
 ## [0.42.3] - 2026-11-14
 
