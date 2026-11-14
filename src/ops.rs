@@ -1171,4 +1171,91 @@ mod tests {
         assert_eq!(kept.len(), 1, "{kept:?}");
         assert_eq!(e.store.list("claude").unwrap().len(), 1);
     }
+
+    fn refreshing(server: &mut mockito::Server) {
+        server
+            .mock("POST", "/v1/oauth/token")
+            .with_body(
+                json!({"access_token": "a-fresh", "refresh_token": "r-fresh", "expires_in": 28800,
+                       "account": {"uuid": "u-perso"}})
+                .to_string(),
+            )
+            .create();
+    }
+
+    #[test]
+    fn a_refresh_reads_the_plan_the_account_is_on_now() {
+        let mut server = mockito::Server::new();
+        refreshing(&mut server);
+        server
+            .mock("GET", "/api/oauth/profile")
+            .match_header("authorization", "Bearer a-fresh")
+            .with_body(
+                json!({
+                    "account": {"uuid": "u-perso", "email": "u-perso@example.com"},
+                    "organization": {"uuid": "o-1", "organization_type": "claude_free",
+                                     "rate_limit_tier": "default_claude_ai", "billing_type": "none"}
+                })
+                .to_string(),
+            )
+            .create();
+        let e = env(&server.url());
+        e.stored("perso", "u-perso", HOUR);
+        let mut entry = e.store.get("claude", "perso").unwrap().unwrap();
+        entry.meta.oauth_account = Some(
+            json!({"accountUuid": "u-perso", "billingType": "stripe_subscription", "userRateLimitTier": "kept"}),
+        );
+
+        refresh_entry(&e.store, &e.claude, &mut entry).unwrap();
+
+        let oauth = &entry.creds[OAUTH_KEY];
+        assert_eq!(oauth["accessToken"], "a-fresh");
+        assert_eq!(oauth["subscriptionType"], Value::Null);
+        assert_eq!(oauth["rateLimitTier"], "default_claude_ai");
+        assert_eq!(e.claude.plan(&entry.creds), "free");
+        let account = entry.meta.oauth_account.as_ref().unwrap();
+        assert_eq!(account["billingType"], "none");
+        assert_eq!(account["userRateLimitTier"], "kept");
+    }
+
+    #[test]
+    fn a_refresh_whose_profile_fails_keeps_its_new_tokens_and_old_plan() {
+        let mut server = mockito::Server::new();
+        refreshing(&mut server);
+        server
+            .mock("GET", "/api/oauth/profile")
+            .with_status(500)
+            .create();
+        let e = env(&server.url());
+        e.stored("perso", "u-perso", HOUR);
+        let mut entry = e.store.get("claude", "perso").unwrap().unwrap();
+
+        refresh_entry(&e.store, &e.claude, &mut entry).unwrap();
+
+        assert_eq!(e.claude.refresh_token(&entry.creds), Some("r-fresh"));
+        assert_eq!(e.claude.plan(&entry.creds), "max");
+    }
+
+    #[test]
+    fn a_refresh_whose_profile_names_another_account_is_refused() {
+        let mut server = mockito::Server::new();
+        refreshing(&mut server);
+        server
+            .mock("GET", "/api/oauth/profile")
+            .with_body(profile_body("u-someone"))
+            .create();
+        let e = env(&server.url());
+        e.stored("perso", "u-perso", HOUR);
+        let mut entry = e.store.get("claude", "perso").unwrap().unwrap();
+
+        let err = refresh_entry(&e.store, &e.claude, &mut entry).unwrap_err();
+
+        assert!(err.to_string().contains("u-someone"), "{err}");
+        let kept = std::fs::read_dir(e.store.root().join("claude"))
+            .unwrap()
+            .filter_map(|f| f.ok()?.file_name().into_string().ok())
+            .filter(|f| f.starts_with(".set-aside-u-someone-"))
+            .count();
+        assert_eq!(kept, 1);
+    }
 }
