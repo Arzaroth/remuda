@@ -693,4 +693,33 @@ mod tests {
         assert_eq!(fake.get(ACCESS), None);
         assert_eq!(fake.get(REFRESH), None);
     }
+
+    #[test]
+    fn an_access_token_the_keychain_refuses_puts_the_refresh_token_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::open(&tmp.path().join("store"));
+        let fake = std::sync::Arc::new(crate::securestorage::testing::Fake::default());
+        let c = Cursor::in_keychain(fake.keychain(ACCESS), Api::local(&OFFLINE));
+        let creds = auth("u1", "work", "r-work");
+        let identity = c.identify(&creds).unwrap();
+        store
+            .save(&Entry::new("cursor", "work", creds, identity, 1))
+            .unwrap();
+        fake.put(ACCESS, "a-old");
+        fake.put(REFRESH, "r-old");
+        *fake.refuses.lock().unwrap() = Some(ACCESS.to_owned());
+
+        let work = store.get("cursor", "work").unwrap().unwrap();
+        assert!(c.install(&work, None).is_err());
+        assert_eq!(fake.get(ACCESS).as_deref(), Some("a-old"));
+        assert_eq!(fake.get(REFRESH).as_deref(), Some("r-old"));
+
+        *fake.refuses.lock().unwrap() = Some(REFRESH.to_owned());
+        let err = c.install(&work, None).unwrap_err().to_string();
+        assert!(
+            err.contains("cannot be passed") || err.contains("failed"),
+            "{err}"
+        );
+        assert_eq!(fake.get(REFRESH).as_deref(), Some("r-old"));
+    }
 }

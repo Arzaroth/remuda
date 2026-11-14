@@ -296,6 +296,17 @@ mod tests {
         assert!(k.line(&"a".repeat(4000)).is_none());
     }
 
+    #[test]
+    fn a_password_that_would_read_back_as_hex_is_never_written() {
+        let fake = Arc::new(crate::securestorage::testing::Fake::default());
+        let k = fake.keychain("S");
+        assert!(!k.write("c3a9").unwrap());
+        assert_eq!(fake.get("S"), None);
+        assert!(!k.write("deadbeef").unwrap());
+        assert!(k.write("414243").unwrap());
+        assert_eq!(fake.get("S").as_deref(), Some("414243"));
+    }
+
     /// Only where the login Keychain can be written: a Mac's own session,
     /// or one unlocked with `security unlock-keychain`.
     #[cfg(target_os = "macos")]
