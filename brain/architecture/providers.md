@@ -58,13 +58,14 @@ refresh token into "sign this credential in again".
     read decodes). An item too long for that one 4096-byte line is written
     whole to `.credentials.json` and the item deleted: Claude Code then reads
     the file, and moves it back into the Keychain on its next write. The file
-    is written over only when it holds no other `claudeAiOauth`, since a
-    Claude Code that found the Keychain locked keeps its rotated tokens
-    there. With no item, the file is edited as on Linux.
+    is written over only while every key it holds is the Keychain's, before
+    or after the edit, since a Claude Code that found the Keychain locked
+    keeps its rotated tokens and MCP logins there. With no item, the file is edited as on Linux.
   - A `remuda run` session's directory has an item of its own. The session
     starts from the item's copy (`Provider::read_copied`), its changes go
     back there (`Provider::update_copied`), and its item is deleted last
-    (`Provider::forget_outside`); a failure there is only reported.
+    (`Provider::forget_outside`); when that fails the session stays, for the
+    next command to finish.
   - `live_file` is none while the item holds the login, so a login changed
     meanwhile is dated when remuda notices it.
   - Debug builds take another `security` from `REMUDA_TEST_SECURITY`, on any
@@ -196,7 +197,10 @@ refresh token into "sign this credential in again".
   remuda reads the first two as `{accessToken, refreshToken}`, the stored
   shape, and switches them through `security -i` as for Claude Code: the
   refresh token first, then the access token, after comparing both with the
-  login the switch synced. A sign-out deletes both; an API key stays.
+  login the switch synced. An access token the Keychain refuses puts the
+  previous refresh token back, so the items never hold two logins' tokens
+  unsaid. A sign-out deletes both; an API key stays. A token that `security`
+  would print back as hex is refused before anything is written.
 - Codex, Grok and Kimi keep the same files on macOS. Codex can be told to use
   the Keychain (`cli_auth_credentials_store = "keyring"` or `"auto"`), which
   remuda does not read: it then sees no Codex login.
