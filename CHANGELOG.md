@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.42.3] - 2026-11-14
+
 ### Fixed
 
 - A Claude login whose subscription lapsed no longer keeps listing its old
