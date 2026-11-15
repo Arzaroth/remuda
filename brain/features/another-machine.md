@@ -153,6 +153,17 @@ printed when it cannot be set, and the sign-ins go on. Logins skipped, refused, 
 left when the input ends, and all of them with `--no-sign-in`, are printed as
 the `remuda login NAME -p CLI --paste` lines to run later.
 
+## To a Mac
+
+A bundle from Linux restores on a Mac as it is: the store, `config.toml` and
+the proxy's settings live at the same paths there, and none of them names a
+path of its own. The Claude Code logins are signed in again, so they land
+where Claude Code reads them, the login Keychain. Over SSH, restore pastes by
+default, and a Claude Code login the Keychain already holds needs
+`security unlock-keychain` in that shell first
+([macos.md](../architecture/macos.md)). `restore FILE` needs neither wyrmyon
+nor magic-wormhole: the `age` crate opens the file.
+
 ## Sources
 
 - [src/export.rs](../../src/export.rs) `build`, `drop_moved`, `fleet`, `restore`, `keep_received`, `Via`, `Private`

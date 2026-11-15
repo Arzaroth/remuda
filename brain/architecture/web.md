@@ -46,6 +46,8 @@ button runs this.
 
 ## Under systemd
 
+On macOS `serve` is a LaunchAgent instead ([macos.md](macos.md#services)).
+
 `systemd/remuda-serve.service` runs `remuda serve` with `REMUDA_SERVICE=1`.
 It restarts 30 s after a failure and gives up after five starts in ten
 minutes; `remuda open` runs `systemctl --user reset-failed` before it starts

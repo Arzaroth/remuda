@@ -580,17 +580,194 @@ pub fn figures(
     Ok(out)
 }
 
-/// How many processes under `proc` (a `/proc`) run one of `names`: by
-/// name, by a release binary named after its target (`codex-x86_64-...`), or
-/// as a script under node, bun or deno. `me` is left out, and so is a
-/// `remuda run` session's: its environment names, in the variable `apart`
-/// gives, a directory under a store's `.runs`, beside remuda's marker.
-pub fn running(
-    proc: &std::path::Path,
-    names: &[&str],
-    me: u32,
-    apart: Option<&str>,
-) -> std::io::Result<usize> {
+/// A process as `running` matches it: its name, its arguments and
+/// environment as NUL-separated bytes, the environment read only when asked.
+pub struct Process {
+    pub pid: u32,
+    pub comm: Vec<u8>,
+    pub cmdline: Vec<u8>,
+    environ: Environ,
+}
+
+enum Environ {
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    At(std::path::PathBuf),
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    Read(Vec<u8>),
+}
+
+impl Process {
+    fn environ(&self) -> Vec<u8> {
+        match &self.environ {
+            Environ::At(path) => std::fs::read(path).unwrap_or_default(),
+            Environ::Read(bytes) => bytes.clone(),
+        }
+    }
+}
+
+/// The processes under `proc`, a `/proc`.
+#[cfg(any(test, not(target_os = "macos")))]
+pub fn in_proc(proc: &std::path::Path) -> std::io::Result<Vec<Process>> {
+    let mut seen = Vec::new();
+    for entry in std::fs::read_dir(proc)? {
+        let entry = entry?;
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|n| n.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        seen.push(Process {
+            pid,
+            comm: std::fs::read(entry.path().join("comm")).unwrap_or_default(),
+            cmdline: std::fs::read(entry.path().join("cmdline")).unwrap_or_default(),
+            environ: Environ::At(entry.path().join("environ")),
+        });
+    }
+    Ok(seen)
+}
+
+/// This user's processes, as macOS lists them.
+#[cfg(target_os = "macos")]
+pub fn listed() -> std::io::Result<Vec<Process>> {
+    // SAFETY: a null buffer asks for the count alone.
+    let mut capacity = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) }.max(0) as usize;
+    let mut pids = Vec::new();
+    let mut whole = false;
+    for _ in 0..4 {
+        capacity += 256;
+        pids = vec![0 as libc::c_int; capacity];
+        let size = (pids.len() * std::mem::size_of::<libc::c_int>()) as libc::c_int;
+        // SAFETY: the buffer holds `size` bytes.
+        let n = unsafe { libc::proc_listallpids(pids.as_mut_ptr().cast(), size) };
+        if n <= 0 {
+            return Err(std::io::Error::other("macOS listed no processes"));
+        }
+        pids.truncate(n as usize);
+        if (n as usize) < capacity {
+            whole = true;
+            break;
+        }
+        capacity *= 2;
+    }
+    if !whole || !pids.contains(&(std::process::id() as libc::c_int)) {
+        return Err(std::io::Error::other("macOS did not list every process"));
+    }
+    let mut listed = Vec::new();
+    for pid in pids.into_iter().filter(|pid| *pid > 0) {
+        let mut name = [0u8; 64];
+        // SAFETY: the buffer holds its length in bytes.
+        let len = unsafe { libc::proc_name(pid, name.as_mut_ptr().cast(), name.len() as u32) };
+        let comm = name[..len.max(0) as usize].to_vec();
+        let (cmdline, environ) = match arguments(pid) {
+            Ok(args) => args,
+            Err(()) => {
+                return Err(std::io::Error::other(format!(
+                    "macOS gave no arguments for process {pid} ({}), which runs as this user",
+                    String::from_utf8_lossy(&comm)
+                )));
+            }
+        };
+        if !comm.is_empty() || !cmdline.is_empty() {
+            listed.push(Process {
+                pid: pid as u32,
+                comm,
+                cmdline,
+                environ: Environ::Read(environ),
+            });
+        }
+    }
+    Ok(listed)
+}
+
+/// A process's arguments and environment, none for one that is gone, a
+/// zombie or another user's, and an error for one of this user's that still
+/// hides them after a few tries, a process caught exiting or starting
+/// answering within them.
+#[cfg(target_os = "macos")]
+fn arguments(pid: libc::c_int) -> Result<Args, ()> {
+    asked(
+        &|| procargs(pid),
+        &|| crate::pidstart::runs_as_me(pid as u32),
+        std::time::Duration::from_millis(50),
+    )
+}
+
+#[cfg(target_os = "macos")]
+type Args = (Vec<u8>, Vec<u8>);
+
+#[cfg(target_os = "macos")]
+fn asked(
+    args: &dyn Fn() -> Option<Args>,
+    mine: &dyn Fn() -> bool,
+    pause: std::time::Duration,
+) -> Result<Args, ()> {
+    for _ in 0..3 {
+        if let Some(args) = args() {
+            return Ok(args);
+        }
+        if !mine() {
+            return Ok(Default::default());
+        }
+        std::thread::sleep(pause);
+    }
+    args().ok_or(())
+}
+
+/// `KERN_PROCARGS2`: argc, the executable's path, then argv and the
+/// environment, NUL-terminated. Only this user's processes answer.
+#[cfg(target_os = "macos")]
+fn procargs(pid: libc::c_int) -> Option<(Vec<u8>, Vec<u8>)> {
+    let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
+    let mut len = 0;
+    // SAFETY: a null buffer asks for the record's size alone.
+    let rc = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            3,
+            std::ptr::null_mut(),
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if rc != 0 || len < 4 {
+        return None;
+    }
+    let mut buf = vec![0u8; len];
+    // SAFETY: `len` is the buffer's size, and sysctl writes at most that.
+    let rc = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            3,
+            buf.as_mut_ptr().cast(),
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if rc != 0 || len < 4 {
+        return None;
+    }
+    buf.truncate(len);
+    let argc = i32::from_ne_bytes(buf[..4].try_into().ok()?).max(0) as usize;
+    let rest = &buf[4..];
+    let path_end = rest.iter().position(|b| *b == 0)?;
+    let mut strings = rest[path_end..]
+        .split(|b| *b == 0)
+        .skip_while(|s| s.is_empty());
+    let args: Vec<&[u8]> = strings.by_ref().take(argc).collect();
+    let env: Vec<&[u8]> = strings.take_while(|s| !s.is_empty()).collect();
+    Some((args.join(&0), env.join(&0)))
+}
+
+/// How many of `seen` run one of `names`: by name, by a release binary
+/// named after its target (`codex-x86_64-...`), or as a script under node,
+/// bun or deno. `me` is left out, and so is a `remuda run` session's: its
+/// environment names, in the variable `apart` gives, a directory under a
+/// store's `.runs`, beside remuda's marker.
+pub fn running(seen: &[Process], names: &[&str], me: u32, apart: Option<&str>) -> usize {
     let is = |base: &[u8]| {
         names.iter().any(|n| {
             let n = n.as_bytes();
@@ -607,30 +784,25 @@ pub fn running(
             .to_vec()
     };
     let mut count = 0;
-    for entry in std::fs::read_dir(proc)? {
-        let entry = entry?;
-        let Some(pid) = entry
-            .file_name()
-            .to_str()
-            .and_then(|n| n.parse::<u32>().ok())
-        else {
-            continue;
-        };
-        if pid == me {
+    for process in seen {
+        if process.pid == me {
             continue;
         }
-        let comm = std::fs::read(entry.path().join("comm")).unwrap_or_default();
-        let cmdline = std::fs::read(entry.path().join("cmdline")).unwrap_or_default();
-        let args: Vec<Vec<u8>> = cmdline.split(|b| *b == 0).take(2).map(base).collect();
+        let args: Vec<Vec<u8>> = process
+            .cmdline
+            .split(|b| *b == 0)
+            .take(2)
+            .map(base)
+            .collect();
         let script = args
             .first()
             .is_some_and(|a| matches!(a.as_slice(), b"node" | b"bun" | b"deno"))
             && args.get(1).is_some_and(|a| is(a));
-        if !(is(comm.trim_ascii_end()) || args.first().is_some_and(|a| is(a)) || script) {
+        if !(is(process.comm.trim_ascii_end()) || args.first().is_some_and(|a| is(a)) || script) {
             continue;
         }
         let own = apart.is_some_and(|var| {
-            let environ = std::fs::read(entry.path().join("environ")).unwrap_or_default();
+            let environ = process.environ();
             let value = |name: &str| {
                 environ
                     .split(|b| *b == 0)
@@ -644,7 +816,7 @@ pub fn running(
             count += 1;
         }
     }
-    Ok(count)
+    count
 }
 
 /// Why a switch has to wait for the CLI's sessions to end, if it does
@@ -655,12 +827,11 @@ pub fn sessions_open(p: &dyn Provider) -> Option<String> {
         return None;
     }
     let apart = p.run_spec().map(|s| s.var);
-    match running(
-        std::path::Path::new("/proc"),
-        names,
-        std::process::id(),
-        apart,
-    ) {
+    #[cfg(target_os = "macos")]
+    let seen = listed();
+    #[cfg(not(target_os = "macos"))]
+    let seen = in_proc(std::path::Path::new("/proc"));
+    match seen.map(|seen| running(&seen, names, std::process::id(), apart)) {
         Ok(0) => None,
         Ok(_) => Some(format!("waiting for every {} session to end", p.name())),
         Err(e) => Some(format!("cannot see whether {} runs: {e}", p.name())),
@@ -1302,7 +1473,7 @@ reserve = { work = "workday" }
         process(proc, 10, "zsh", &["-zsh"]);
         process(proc, 11, "vim", &["vim", "codex"]);
         process(proc, 12, "codexx", &["/usr/bin/codexx"]);
-        assert_eq!(running(proc, &["codex"], 1, None).unwrap(), 0);
+        assert_eq!(running(&in_proc(proc).unwrap(), &["codex"], 1, None), 0);
 
         process(proc, 20, "codex", &["codex", "exec"]);
         process(
@@ -1317,13 +1488,13 @@ reserve = { work = "workday" }
             "node",
             &["/usr/bin/node", "/usr/lib/node_modules/codex.js"],
         );
-        assert_eq!(running(proc, &["codex"], 1, None).unwrap(), 3);
+        assert_eq!(running(&in_proc(proc).unwrap(), &["codex"], 1, None), 3);
         assert_eq!(
-            running(proc, &["codex"], 20, None).unwrap(),
+            running(&in_proc(proc).unwrap(), &["codex"], 20, None),
             2,
             "itself is left out"
         );
-        assert!(running(&proc.join("gone"), &["codex"], 1, None).is_err());
+        assert!(in_proc(&proc.join("gone")).is_err());
         std::fs::write(
             proc.join("20").join("environ"),
             b"HOME=/h\0REMUDA_OUTER_CODEX_HOME=\0CODEX_HOME=/s/.runs/codex/w/home\0",
@@ -1335,7 +1506,7 @@ reserve = { work = "workday" }
         )
         .unwrap();
         assert_eq!(
-            running(proc, &["codex"], 1, Some("CODEX_HOME")).unwrap(),
+            running(&in_proc(proc).unwrap(), &["codex"], 1, Some("CODEX_HOME")),
             2,
             "a run session's codex is on its own files, one that only kept the marker is not"
         );
@@ -1879,5 +2050,45 @@ order = [["Axeo"], ["perso"]]
             "94% is under the CLI's 97%, not IDC's 93%: {:?}",
             d.action
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_process_of_mine_that_never_gives_its_arguments_is_an_error() {
+        use std::cell::Cell;
+        use std::time::Duration;
+        let tries = Cell::new(0);
+        let none = || {
+            tries.set(tries.get() + 1);
+            None
+        };
+        assert_eq!(asked(&none, &|| true, Duration::ZERO), Err(()));
+        assert_eq!(tries.get(), 4);
+        assert_eq!(
+            asked(&|| None, &|| false, Duration::ZERO),
+            Ok(Default::default())
+        );
+        let late = Cell::new(0);
+        let second = || {
+            late.set(late.get() + 1);
+            (late.get() == 2).then(|| (b"node".to_vec(), Vec::new()))
+        };
+        assert_eq!(
+            asked(&second, &|| true, Duration::ZERO),
+            Ok((b"node".to_vec(), Vec::new()))
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_lists_this_process_with_its_arguments_and_environment() {
+        let me = std::process::id();
+        let seen = listed().unwrap();
+        let mine = seen.iter().find(|p| p.pid == me).unwrap();
+        let exe = std::env::current_exe().unwrap();
+        let first = mine.cmdline.split(|b| *b == 0).next().unwrap();
+        assert_eq!(first, exe.as_os_str().as_encoded_bytes());
+        assert!(mine.environ().windows(5).any(|w| w == b"HOME="));
+        assert!(seen.len() > 1);
     }
 }

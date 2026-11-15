@@ -229,10 +229,11 @@ pub fn update_remuda(runtime: &Path, port: u16) -> Result<Value> {
     let restarting = crate::dirs::is_service(false) && served::hand_off(runtime, port).is_ok();
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(1));
-        let _ = std::process::Command::new(exe)
-            .arg("sync-units")
-            .stdin(std::process::Stdio::null())
-            .status();
+        let mut sync = std::process::Command::new(exe);
+        sync.arg("sync-units").stdin(std::process::Stdio::null());
+        #[cfg(target_os = "macos")]
+        std::os::unix::process::CommandExt::process_group(&mut sync, 0);
+        let _ = sync.status();
     });
     let message = if restarting {
         format!(

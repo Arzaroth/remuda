@@ -4,7 +4,8 @@
 #
 # Installs the latest release into ~/.local/bin, enables the refresh timer and
 # installs completions for the shells it finds. --serve also keeps the page
-# served by a user service, for `remuda open`. The archive is checked against
+# served by a user service, for `remuda open`. On macOS both are LaunchAgents
+# in ~/Library/LaunchAgents rather than systemd units. The archive is checked against
 # the release's SHA256SUMS before anything runs; REMUDA_DOWNLOAD_BASE (a URL or
 # a directory) takes the assets from somewhere else than the GitHub release.
 
@@ -47,9 +48,10 @@ main() {
   done
 
   case "$(uname -s)" in
-  Linux) ;;
+  Linux) os=linux ;;
+  Darwin) os=macos ;;
   *)
-    echo "install: remuda runs on Linux only" >&2
+    echo "install: remuda runs on Linux and macOS only" >&2
     exit 1
     ;;
   esac
@@ -80,18 +82,22 @@ main() {
   curl -fsSL "$base/SHA256SUMS" -o "$tmp/SHA256SUMS" ||
     die "no SHA256SUMS in $base to check the download against"
   if [[ -n $tag ]]; then
-    asset="remuda-$tag-linux-$arch.tar.gz"
+    asset="remuda-$tag-$os-$arch.tar.gz"
   else
-    asset=$(sed -n "s/^[0-9a-f]\{64\}  \(remuda-v[0-9][^ ]*-linux-$arch\.tar\.gz\)$/\1/p" "$tmp/SHA256SUMS")
-    [[ -n $asset ]] || die "no linux-$arch archive in $base"
-    [[ $(wc -l <<<"$asset") -eq 1 ]] || die "several linux-$arch archives in $base: pick one with --version"
+    asset=$(sed -n "s/^[0-9a-f]\{64\}  \(remuda-v[0-9][^ ]*-$os-$arch\.tar\.gz\)$/\1/p" "$tmp/SHA256SUMS")
+    [[ -n $asset ]] || die "no $os-$arch archive in $base"
+    [[ $(wc -l <<<"$asset") -eq 1 ]] || die "several $os-$arch archives in $base: pick one with --version"
   fi
   expected=$(awk -v f="$asset" '$2 == f { print $1 }' "$tmp/SHA256SUMS")
   [[ -n $expected ]] || die "$asset is not in $base/SHA256SUMS"
 
   echo "Downloading $asset"
   curl -fsSL "$base/$asset" -o "$tmp/$asset"
-  actual=$(sha256sum "$tmp/$asset" | cut -d' ' -f1)
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual=$(sha256sum "$tmp/$asset" | cut -d' ' -f1)
+  else
+    actual=$(shasum -a 256 "$tmp/$asset" | cut -d' ' -f1)
+  fi
   [[ $expected == "$actual" ]] || die "$asset does not match its SHA256SUMS entry"
   tar -xzf "$tmp/$asset" -C "$tmp"
 
@@ -110,7 +116,19 @@ main() {
   *) echo "install: warning - $bindir is not on your PATH" >&2 ;;
   esac
 
-  if $want_timer || $want_serve; then
+  if [[ $os == macos ]]; then
+    "$bindir/remuda" ls >/dev/null 2>&1 || true
+    agents=()
+    if $want_timer; then agents+=(--install timer); fi
+    if $want_serve; then agents+=(--install serve); fi
+    if ((${#agents[@]} > 0)); then
+      "$bindir/remuda" sync-units "${agents[@]}" ||
+        echo "install: the LaunchAgents could not be loaded; run 'remuda refresh' yourself to keep stored logins fresh, and 'remuda serve' for the page" >&2
+    else
+      # An agent installed earlier would keep running the old binary.
+      "$bindir/remuda" sync-units >/dev/null || true
+    fi
+  elif $want_timer || $want_serve; then
     mkdir -p "$unitdir"
     if $want_timer; then
       install -m 644 "$tmp/systemd/remuda-refresh.service" "$tmp/systemd/remuda-refresh.timer" "$unitdir/"
@@ -164,7 +182,7 @@ main() {
   fi
 
   # A service installed by an earlier --serve would keep running the old binary.
-  if ! $want_serve && command -v systemctl >/dev/null 2>&1 &&
+  if [[ $os == linux ]] && ! $want_serve && command -v systemctl >/dev/null 2>&1 &&
     systemctl --user is-active --quiet remuda-serve.service 2>/dev/null; then
     systemctl --user restart remuda-serve.service
     echo "Restarted remuda-serve.service"

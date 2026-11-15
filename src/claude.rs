@@ -474,8 +474,9 @@ fn session_of(home: &std::path::Path, pid: u32, start: u64) -> Option<String> {
     }
     let path = home.join("sessions").join(format!("{pid}.json"));
     let running: Running = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
-    (running.proc_start == start.to_string() && !running.session_id.is_empty())
-        .then_some(running.session_id)
+    (running.proc_start == crate::pidstart::claude_proc_start(start)
+        && !running.session_id.is_empty())
+    .then_some(running.session_id)
 }
 
 /// Claude Code: the login is `claudeAiOauth` in `.credentials.json`, and the

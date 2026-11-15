@@ -10,6 +10,15 @@
   the login is refused with `security unlock-keychain` as the fix.
 - On macOS, cursor-agent's login is read from and switched in its two
   Keychain items, `cursor-access-token` and `cursor-refresh-token`.
+- remuda runs on macOS, Apple Silicon and Intel. The release has
+  `remuda-<tag>-macos-aarch64.tar.gz` and `-macos-x86_64.tar.gz`, covered by
+  `SHA256SUMS` and its signature, and `install.sh` installs them. The refresh
+  timer and `--serve` are LaunchAgents in `~/Library/LaunchAgents`, logging to
+  `~/Library/Logs/remuda`, which `remuda --update` rewrites and restarts.
+  Auto mode sees the CLIs' processes there, `remuda run` and the page tell
+  processes apart, and links open in the default browser. From macOS 15,
+  a connection the `serve` LaunchAgent opens to the LAN needs remuda allowed
+  under Local Network privacy; LAN clients reach it without.
 
 ### Fixed
 

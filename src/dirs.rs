@@ -59,9 +59,10 @@ pub fn plan(recorded: Option<&Seen>, now: &Seen, doing: &str) -> Plan {
         match recorded.map(|r| r.homes.get(id)) {
             Some(Some(there)) if there == here => plan.usable.push(id.clone()),
             Some(Some(there)) => plan.skipped.push(format!(
-                "{id}: not {doing}, its login was last found in {} and this run looks in {}; set its directory in ~/.config/environment.d/60-remuda.conf",
+                "{id}: not {doing}, its login was last found in {} and this run looks in {}; set its directory in {}",
                 there.display(),
-                here.display()
+                here.display(),
+                crate::units::env_hint()
             )),
             _ => plan.skipped.push(format!(
                 "{id}: not {doing}, no interactive remuda command has recorded where its login lives in this store yet; run `remuda ls` once"

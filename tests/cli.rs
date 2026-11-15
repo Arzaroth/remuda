@@ -1016,6 +1016,261 @@ fn a_serve_run_by_systemd_leaves_out_the_clis_whose_directory_moved_and_prints_n
     assert!(get_state(&url).starts_with("HTTP/1.1 200"));
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn sync_units_rewrites_the_installed_agents_and_restarts_serve() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = Home::new();
+    let launchctl = home.path("bin/launchctl");
+    let log = home.path("launchctl.log");
+    std::fs::write(
+        &launchctl,
+        format!(
+            "#!/bin/sh\necho \"$*\" >> '{}'\ncase \"$1\" in print) [ -e '{}' ] || exit 113; echo '\tpid = 7';; esac\n",
+            log.display(),
+            home.path("serve-loaded").display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&launchctl, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let agents = home.path("Library/LaunchAgents");
+    std::fs::create_dir_all(&agents).unwrap();
+    let refresh = agents.join("com.github.arzaroth.remuda.refresh.plist");
+    std::fs::write(&refresh, "old").unwrap();
+    let run = |args: &[&str]| {
+        home.command(args)
+            .env("REMUDA_TEST_LAUNCHCTL", &launchctl)
+            .env("REMUDA_STORE", home.path("store"))
+            .output()
+            .unwrap()
+    };
+
+    let out = run(&["sync-units"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let written = std::fs::read_to_string(&refresh).unwrap();
+    assert!(
+        written.contains("<string>--scheduled</string>"),
+        "{written}"
+    );
+    assert!(
+        written.contains(&home.path("store").display().to_string()),
+        "{written}"
+    );
+    assert!(
+        !agents
+            .join("com.github.arzaroth.remuda.serve.plist")
+            .exists()
+    );
+    let calls = std::fs::read_to_string(&log).unwrap();
+    assert!(!calls.contains("kickstart"), "{calls}");
+
+    std::fs::write(home.path("serve-loaded"), "").unwrap();
+    let out = run(&["sync-units", "--install", "serve"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        agents
+            .join("com.github.arzaroth.remuda.serve.plist")
+            .exists()
+    );
+    assert!(home.path("Library/Logs/remuda").is_dir());
+    let calls = std::fs::read_to_string(&log).unwrap();
+    assert!(calls.contains("bootstrap gui/"), "{calls}");
+
+    std::fs::remove_file(&log).unwrap();
+    assert!(run(&["sync-units"]).status.success());
+    let calls = std::fs::read_to_string(&log).unwrap();
+    assert!(calls.contains("kickstart -k gui/"), "{calls}");
+    assert!(
+        calls.contains("com.github.arzaroth.remuda.serve"),
+        "{calls}"
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_reload_launchd_refuses_loads_the_old_agent_back_for_the_next_sync() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = Home::new();
+    let launchctl = home.path("bin/launchctl");
+    let out = home.path("booted-out");
+    let failed = home.path("failed-once");
+    std::fs::write(
+        &launchctl,
+        format!(
+            "#!/bin/sh\ncase \"$1\" in\n\
+             print) [ -e '{out}' ] && exit 113; exit 0;;\n\
+             bootout) touch '{out}';;\n\
+             bootstrap) [ -e '{failed}' ] || {{ touch '{failed}'; exit 5; }}; rm -f '{out}';;\n\
+             esac\n",
+            out = out.display(),
+            failed = failed.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&launchctl, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let agents = home.path("Library/LaunchAgents");
+    std::fs::create_dir_all(&agents).unwrap();
+    let refresh = agents.join("com.github.arzaroth.remuda.refresh.plist");
+    std::fs::write(&refresh, "old").unwrap();
+    let sync = || {
+        home.command(&["sync-units"])
+            .env("REMUDA_TEST_LAUNCHCTL", &launchctl)
+            .output()
+            .unwrap()
+    };
+
+    let first = sync();
+    let stderr = String::from_utf8_lossy(&first.stderr);
+    assert!(!first.status.success(), "{stderr}");
+    assert!(stderr.contains("was not reloaded"), "{stderr}");
+    assert!(!stderr.contains("loading it again failed"), "{stderr}");
+    assert_eq!(std::fs::read_to_string(&refresh).unwrap(), "old");
+    assert!(!out.exists(), "the old agent was not loaded back");
+
+    let second = sync();
+    assert!(
+        second.status.success(),
+        "{}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    assert!(
+        std::fs::read_to_string(&refresh)
+            .unwrap()
+            .contains("<string>--scheduled</string>")
+    );
+    assert!(!out.exists());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn the_timer_is_replaced_only_once_the_store_it_refreshes_is_free() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = Home::new();
+    let launchctl = home.path("bin/launchctl");
+    let log = home.path("launchctl.log");
+    let loaded_store = home.path("store-a");
+    std::fs::write(
+        &launchctl,
+        format!(
+            "#!/bin/sh\necho \"$1\" >> '{}'\n\
+             [ \"$1\" = print ] || exit 0\n\
+             [ \"$PRINT_EXIT\" = 0 ] || exit \"$PRINT_EXIT\"\n\
+             printf '\\tinherited environment = {{\\n\\t\\tREMUDA_STORE => %s\\n\\t}}\\n\\tenvironment = {{\\n\\t\\tPATH => /bin\\n\\t}}\\n' '{}'\n",
+            log.display(),
+            loaded_store.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&launchctl, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let agents = home.path("Library/LaunchAgents");
+    std::fs::create_dir_all(&agents).unwrap();
+    let refresh = agents.join("com.github.arzaroth.remuda.refresh.plist");
+    std::fs::create_dir_all(&loaded_store).unwrap();
+    let old = format!(
+        "<plist><dict><key>REMUDA_STORE</key><string>{}</string></dict></plist>",
+        home.path("store-c").display()
+    );
+
+    std::fs::write(&refresh, &old).unwrap();
+    let unknown = home
+        .command(&["sync-units"])
+        .env("REMUDA_TEST_LAUNCHCTL", &launchctl)
+        .env("REMUDA_STORE", home.path("store-b"))
+        .env("PRINT_EXIT", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&unknown.stderr);
+    assert!(!unknown.status.success(), "{stderr}");
+    assert!(stderr.contains("cannot say whether"), "{stderr}");
+    assert_eq!(std::fs::read_to_string(&refresh).unwrap(), old);
+    assert!(!std::fs::read_to_string(&log).unwrap().contains("bootout"));
+    let unknown = home
+        .command(&["sync-units", "--install", "timer"])
+        .env("REMUDA_TEST_LAUNCHCTL", &launchctl)
+        .env("PRINT_EXIT", "1")
+        .output()
+        .unwrap();
+    assert!(!unknown.status.success());
+    assert!(!std::fs::read_to_string(&log).unwrap().contains("bootout"));
+
+    let sync = &["sync-units"][..];
+    let install = &["sync-units", "--install", "timer"][..];
+    let serial = agents.join(".remuda.lock");
+    let store_lock = loaded_store.join(".lock");
+    for (args, print, held) in [
+        (sync, "0", &store_lock),
+        (install, "0", &store_lock),
+        (sync, "0", &serial),
+    ] {
+        std::fs::write(&refresh, &old).unwrap();
+        let _ = std::fs::remove_file(&log);
+        let lock = std::fs::File::create(held).unwrap();
+        lock.lock().unwrap();
+        let log_at = log.clone();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_at)
+                .and_then(|mut f| std::io::Write::write_all(&mut f, b"released\n"))
+                .unwrap();
+            drop(lock);
+        });
+        let out = home
+            .command(args)
+            .env("REMUDA_TEST_LAUNCHCTL", &launchctl)
+            .env("REMUDA_STORE", home.path("store-b"))
+            .env("PRINT_EXIT", print)
+            .output()
+            .unwrap();
+        release.join().unwrap();
+        assert!(
+            out.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let calls = std::fs::read_to_string(&log).unwrap();
+        let released = calls.find("released").unwrap();
+        let bootout = calls.find("bootout").unwrap();
+        assert!(released < bootout, "{args:?} {print} {held:?}: {calls}");
+        assert!(
+            std::fs::read_to_string(&refresh)
+                .unwrap()
+                .contains("store-b")
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn sync_units_refuses_a_relative_claude_config_dir() {
+    let home = Home::new();
+    let out = home
+        .command(&["sync-units", "--install", "timer"])
+        .env("REMUDA_TEST_LAUNCHCTL", "/usr/bin/false")
+        .env("CLAUDE_CONFIG_DIR", "work/.claude")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{stderr}");
+    assert!(stderr.contains("absolute path"), "{stderr}");
+    assert!(
+        !home
+            .path("Library/LaunchAgents/com.github.arzaroth.remuda.refresh.plist")
+            .exists()
+    );
+}
+
+#[cfg(target_os = "linux")]
 #[test]
 fn sync_units_rewrites_the_installed_units_and_reloads_systemd() {
     use std::os::unix::fs::PermissionsExt;
@@ -1159,7 +1414,8 @@ fn fake_claude(home: &Home) -> String {
          for _ in 1 2 3 4 5 6 7 8 9 10; do ls \"$CLAUDE_CONFIG_DIR/..\" | grep -q '^cli-' && break; sleep 0.2; done\n\
          ls \"$CLAUDE_CONFIG_DIR/..\" > \"$HOME/seen-place\"\n\
          cp \"$CLAUDE_CONFIG_DIR/.credentials.json\" \"$HOME/seen-creds\"\n\
-         sed -i 's/\"r-work\"/\"r-rotated\"/; s/\"a-work\"/\"a-rotated\"/' \"$CLAUDE_CONFIG_DIR/.credentials.json\"\n\
+         sed -i.bak 's/\"r-work\"/\"r-rotated\"/; s/\"a-work\"/\"a-rotated\"/' \"$CLAUDE_CONFIG_DIR/.credentials.json\"\n\
+         rm -f \"$CLAUDE_CONFIG_DIR/.credentials.json.bak\"\n\
          exit 7\n",
     )
     .unwrap();

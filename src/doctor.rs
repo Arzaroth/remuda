@@ -15,7 +15,8 @@ use crate::commands::Live;
 use crate::ops::LiveState;
 use crate::provider::Provider;
 use crate::store::Store;
-use crate::{child, gauge, pins, runs, units};
+use crate::units::{Action, Manager, Unit};
+use crate::{child, gauge, pins, runs};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -107,7 +108,7 @@ fn ago(ms: i64) -> String {
 pub struct Checkup<'a> {
     pub store: &'a Store,
     pub lives: &'a [Live<'a>],
-    pub units: &'a [PathBuf],
+    pub units: &'a Manager,
     pub snapshot: &'a Path,
     pub config: &'a Path,
     /// The version of the `remuda serve` that runs, if one does, and
@@ -154,8 +155,8 @@ pub fn vitals(c: &Checkup) -> Vec<Vital> {
         needs.push("the API proxy");
     }
     out.push(serve(c, &needs));
-    let timer = units::state(c.units, units::TIMER, "timers.target.wants");
-    out.push(timer_vital(timer));
+    let timer = c.units.state(Unit::Timer);
+    out.push(timer_vital(c.units, timer));
     out.push(refresh(c, timer));
     out.push(tokengauge(c, needs.iter().any(|n| *n != "the API proxy")));
     out.push(logins(c));
@@ -249,11 +250,11 @@ fn and_list(items: &[&str]) -> String {
 }
 
 fn serve(c: &Checkup, needs: &[&str]) -> Vital {
-    let unit = units::state(c.units, units::SERVE, "default.target.wants");
-    let start = match unit {
-        "masked" => format!("`systemctl --user unmask {}`", units::SERVE),
-        "absent" => "`remuda serve`, or install remuda-serve.service with install.sh".to_owned(),
-        _ => format!("`systemctl --user enable --now {}`", units::SERVE),
+    let name = c.units.name(Unit::Serve);
+    let start = match c.units.state(Unit::Serve) {
+        "masked" => c.units.fix(Unit::Serve, Action::Unmask),
+        "absent" => format!("`remuda serve`, or install {name} with install.sh"),
+        _ => c.units.fix(Unit::Serve, Action::Enable),
     };
     let title = "remuda serve";
     let Some((version, service)) = &c.serving else {
@@ -281,7 +282,7 @@ fn serve(c: &Checkup, needs: &[&str]) -> Vital {
     let ours = env!("CARGO_PKG_VERSION");
     if version != ours {
         let fix = if version_gt(ours, version) {
-            format!("`systemctl --user restart {}`", units::SERVE)
+            c.units.fix(Unit::Serve, Action::Restart)
         } else {
             "`remuda --update`, or look at which remuda comes first on $PATH".to_owned()
         };
@@ -294,12 +295,7 @@ fn serve(c: &Checkup, needs: &[&str]) -> Vital {
         .fix(fix);
     }
     if *service {
-        return Vital::new(
-            "serve",
-            Level::Ok,
-            title,
-            format!("running as {}", units::SERVE),
-        );
+        return Vital::new("serve", Level::Ok, title, format!("running as {name}"));
     }
     let level = if needs.is_empty() {
         Level::Info
@@ -310,22 +306,19 @@ fn serve(c: &Checkup, needs: &[&str]) -> Vital {
         "serve",
         level,
         title,
-        format!(
-            "running, but not as {}: it stops with its terminal or at logout",
-            units::SERVE
-        ),
+        format!("running, but not as {name}: it stops with its terminal or at logout"),
     )
     .fix(start)
 }
 
-fn timer_vital(state: &str) -> Vital {
+fn timer_vital(units: &Manager, state: &str) -> Vital {
     let title = "Refresh timer";
     match state {
         "enabled" => Vital::new("timer", Level::Ok, title, "on, every 30 minutes"),
         "masked" => Vital::new("timer", Level::Warn, title, "masked")
-            .fix(format!("`systemctl --user unmask {}`", units::TIMER)),
+            .fix(units.fix(Unit::Timer, Action::Unmask)),
         "disabled" => Vital::new("timer", Level::Warn, title, "installed but off")
-            .fix(format!("`systemctl --user enable --now {}`", units::TIMER)),
+            .fix(units.fix(Unit::Timer, Action::Enable)),
         _ => Vital::new(
             "timer",
             Level::Warn,
@@ -367,7 +360,7 @@ fn refresh(c: &Checkup, timer: &str) -> Vital {
             "{since}, though the timer runs every 30 minutes",
         )
         .since(run.at)
-        .fix(format!("`systemctl --user status {}`", units::TIMER));
+        .fix(c.units.fix(Unit::Timer, Action::Status));
     }
     Vital::new(
         "refresh",
@@ -718,8 +711,8 @@ mod tests {
     fn setup(e: &Env) -> Setup {
         let units = e.tmp.path().join("units");
         for (unit, wants) in [
-            (units::TIMER, "timers.target.wants"),
-            (units::SERVE, "default.target.wants"),
+            (crate::units::TIMER, "timers.target.wants"),
+            (crate::units::SERVE, "default.target.wants"),
         ] {
             std::fs::create_dir_all(units.join(wants)).unwrap();
             std::fs::write(units.join(unit), "").unwrap();
@@ -770,7 +763,7 @@ mod tests {
         vitals(&Checkup {
             store: &e.store,
             lives: &lives,
-            units: &s.units,
+            units: &Manager::Systemd(s.units.clone()),
             snapshot: &s.snapshot,
             config: &s.config,
             serving,
@@ -891,7 +884,12 @@ mod tests {
     fn the_timer_says_how_to_turn_it_on() {
         let e = env(&OFFLINE);
         let s = setup(&e);
-        std::fs::remove_file(s.units[0].join("timers.target.wants").join(units::TIMER)).unwrap();
+        std::fs::remove_file(
+            s.units[0]
+                .join("timers.target.wants")
+                .join(crate::units::TIMER),
+        )
+        .unwrap();
         let timer = find(&check(&e, &s, LiveState::SignedOut, Some(OURS)), "timer").clone();
         assert_eq!(timer.level, Level::Warn);
         assert_eq!(
@@ -1042,7 +1040,7 @@ mod tests {
             versions(&Checkup {
                 store: &e.store,
                 lives: &lives,
-                units: &s.units,
+                units: &Manager::Systemd(s.units.clone()),
                 snapshot: &s.snapshot,
                 config: &s.config,
                 serving: None,

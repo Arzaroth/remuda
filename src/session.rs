@@ -8,7 +8,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
-use selvedge::proc::start_time;
+use crate::pidstart::start_time;
 
 use crate::fsx::{create_private_dir, now_ms, read_json, write_json};
 use crate::logbook::{self, Event, Kind};

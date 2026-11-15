@@ -3,6 +3,7 @@
 | Doc | Covers |
 | --- | --- |
 | [overview.md](overview.md) | The modules and how a command flows through them |
+| [macos.md](macos.md) | What differs on a Mac: Keychain logins, LaunchAgents, processes, the browser, Local Network privacy, the release |
 | [store.md](store.md) | The credential store on disk, its lock, and the TokenGauge contract |
 | [providers.md](providers.md) | The `Provider` trait, each CLI and its OAuth details, and the API key providers and where their keys live |
 | [config.md](config.md) | `config.toml`: auto mode's settings, their checks, writes that keep comments |

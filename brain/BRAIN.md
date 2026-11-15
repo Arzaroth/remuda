@@ -47,6 +47,7 @@ shared.
 | How do I point an OpenAI or Anthropic client at my logins? | [features/proxy.md](features/proxy.md) |
 | Which login does a proxied request spend, and what is it sent with? | [architecture/proxy.md](architecture/proxy.md) |
 | Which remuda and TokenGauge run here, and how does the page update them? | [features/web-page.md](features/web-page.md), [architecture/web.md](architecture/web.md#restarting-on-an-update) |
+| What differs on macOS, and how do I set a Mac up from Linux? | [architecture/macos.md](architecture/macos.md), [features/another-machine.md](features/another-machine.md) |
 | How is a release built, installed and updated? | [architecture/distribution.md](architecture/distribution.md) |
 | How do tests avoid real logins and the network? | [architecture/testing.md](architecture/testing.md) |
 | What does `claude/work` mean vs `work`? | [features/names-and-labels.md](features/names-and-labels.md) |

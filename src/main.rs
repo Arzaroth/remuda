@@ -20,10 +20,12 @@ mod grok;
 mod http;
 mod keychain;
 mod kimi;
+mod launchd;
 mod logbook;
 mod oauth;
 mod ops;
 mod paths;
+mod pidstart;
 mod pins;
 mod pkce;
 mod project;
@@ -301,9 +303,13 @@ enum Cmd {
     /// artifact for the call. Never fails the call.
     #[command(hide = true)]
     Hook { what: String },
-    /// Run by `--update` as the new binary: bring the installed units up to date.
+    /// Run by `--update` as the new binary: bring the installed units up to
+    /// date. On macOS install.sh asks it for the agents with `--install`.
     #[command(hide = true)]
-    SyncUnits,
+    SyncUnits {
+        #[arg(long)]
+        install: Vec<String>,
+    },
 }
 
 impl Cmd {
@@ -332,7 +338,7 @@ impl Cmd {
             | Cmd::Completions { .. }
             | Cmd::Help { .. }
             | Cmd::Hook { .. }
-            | Cmd::SyncUnits
+            | Cmd::SyncUnits { .. }
             | Cmd::Status => None,
         }
     }
@@ -645,59 +651,46 @@ fn update(check_only: bool) -> Result<()> {
                 .status()
         });
         if !synced.is_ok_and(|s| s.success()) {
-            eprintln!(
-                "warning: the systemd units were not brought up to date; run `remuda sync-units`"
-            );
+            eprintln!("warning: the services were not brought up to date; run `remuda sync-units`");
         }
     }
     Ok(())
 }
 
-fn systemctl(args: &[&str]) -> bool {
-    std::process::Command::new("systemctl")
-        .arg("--user")
-        .args(args)
-        .stdin(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
-}
-
-fn sync_units() -> Result<()> {
-    let done = units::refresh(&paths::installed_units());
-    if !done.changed.is_empty() {
-        println!("updated {}", done.changed.join(", "));
-        if !systemctl(&["daemon-reload"]) {
-            eprintln!("warning: run `systemctl --user daemon-reload`");
+fn sync_units(install: &[String]) -> Result<()> {
+    let manager = units::Manager::from_env();
+    let _serial = match &manager {
+        units::Manager::Launchd { dir, .. } => {
+            if let Some(dir) = launchd::relative_claude_dir(&|v| std::env::var(v).ok()) {
+                bail!(
+                    "CLAUDE_CONFIG_DIR is relative ({dir}); Claude Code names its Keychain item after it as written, so set it to an absolute path before installing the agents"
+                );
+            }
+            Some(launchd::serialize(dir)?)
         }
+        units::Manager::Systemd(_) => None,
+    };
+    if !install.is_empty() {
+        let units::Manager::Launchd { dir, home } = &manager else {
+            bail!("install.sh installs the systemd units");
+        };
+        let mut asked = Vec::new();
+        for name in install {
+            asked.push(match name.as_str() {
+                "serve" => units::Unit::Serve,
+                "timer" => units::Unit::Timer,
+                other => bail!("no agent named {other}; serve or timer"),
+            });
+        }
+        launchd::install(dir, home, &asked, &launchd::shell_env)?;
     }
-    if systemctl(&["is-active", "--quiet", units::SERVE]) && !systemctl(&["restart", units::SERVE])
-    {
-        eprintln!(
-            "warning: {serve} still runs the old binary; run `systemctl --user restart {serve}`",
-            serve = units::SERVE
-        );
-    }
-    if !done.failed.is_empty() {
-        bail!("{}", done.failed.join("\n"));
-    }
-    Ok(())
-}
-
-fn start_service() -> bool {
-    let installed = paths::systemd_user_units()
-        .iter()
-        .any(|dir| dir.join(units::SERVE).exists());
-    if !installed {
-        return false;
-    }
-    systemctl(&["reset-failed", units::SERVE]);
-    systemctl(&["start", units::SERVE])
+    manager.sync()
 }
 
 fn open(no_browser: bool, add: bool) -> Result<()> {
     let url = served::find(
         &paths::runtime_dir(),
-        start_service,
+        || units::Manager::from_env().start(units::Unit::Serve),
         std::time::Duration::from_secs(10),
     )?;
     let url = if add { served::adding(&url) } else { url };
@@ -985,8 +978,8 @@ fn main() -> Result<()> {
     if let Cmd::Open { no_browser, add } = command {
         return open(no_browser, add);
     }
-    if let Cmd::SyncUnits = command {
-        return sync_units();
+    if let Cmd::SyncUnits { install } = &command {
+        return sync_units(install);
     }
     if let Cmd::Completions { shell } = command {
         clap_complete::generate(shell, &mut Cli::command(), "remuda", &mut io::stdout());
@@ -1047,8 +1040,9 @@ fn main() -> Result<()> {
         && !store.root().exists()
     {
         bail!(
-            "not {doing}: there is no store at {}; `remuda import` or `remuda login` starts one, or set REMUDA_STORE in ~/.config/environment.d/60-remuda.conf if yours is elsewhere",
-            store.root().display()
+            "not {doing}: there is no store at {}; `remuda import` or `remuda login` starts one, or set REMUDA_STORE in {} if yours is elsewhere",
+            store.root().display(),
+            units::env_hint()
         );
     }
     let service = dirs::is_service(matches!(
@@ -1325,10 +1319,10 @@ fn main() -> Result<()> {
             let vitals = doctor::vitals(&doctor::Checkup {
                 store: &store,
                 lives: &lives,
-                units: &paths::systemd_user_units(),
+                units: &units::Manager::from_env(),
                 snapshot: &paths::tokengauge_snapshot(),
                 config: &paths::config_file(),
-                serving: served::serving(&paths::runtime_dir()),
+                serving: served::serving(&paths::runtime_dir(), &units::Manager::from_env()),
                 search: search.as_deref(),
                 here: here.as_deref(),
                 claude_settings: &paths::claude_settings(),
@@ -1373,7 +1367,7 @@ fn main() -> Result<()> {
         | Cmd::Completions { .. }
         | Cmd::Help { .. }
         | Cmd::Hook { .. }
-        | Cmd::SyncUnits => {
+        | Cmd::SyncUnits { .. } => {
             unreachable!()
         }
     }
