@@ -314,15 +314,13 @@ fn in_section(printed: &str, section: &str, var: &str) -> Option<String> {
 /// The store a refresh run with the job's environment uses, found as
 /// [`crate::paths::store_root`] finds it; launchd starts jobs in `/`.
 fn loaded_store(printed: &str, home: &Path) -> PathBuf {
-    let set = |var: &str| {
-        Some(var)
-            .and_then(|v| loaded_env(printed, v))
-            .filter(|v| !v.is_empty())
-    };
+    let set = |v: Option<String>| v.filter(|v| !v.is_empty());
     let root = Path::new("/");
-    match set(&crate::paths::outer("REMUDA_STORE")).or_else(|| set("REMUDA_STORE")) {
+    let store = loaded_env(printed, &crate::paths::outer("REMUDA_STORE"))
+        .or_else(|| loaded_env(printed, "REMUDA_STORE"));
+    match set(store) {
         Some(dir) => root.join(dir),
-        None => set("XDG_DATA_HOME")
+        None => set(loaded_env(printed, "XDG_DATA_HOME"))
             .map(|dir| root.join(dir))
             .unwrap_or_else(|| home.join(".local/share"))
             .join("remuda/credentials"),
