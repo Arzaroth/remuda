@@ -145,10 +145,23 @@ impl Manager {
                     println!("updated {}", done.changed.join(", "));
                 }
                 for unit in [Unit::Timer, Unit::Serve] {
-                    if crate::launchd::loaded(unit).is_none() {
-                        continue;
-                    }
                     let before = changed.iter().find(|(u, _)| *u == unit);
+                    match crate::launchd::probe(unit) {
+                        Ok(Some(_)) => {}
+                        Ok(None) => continue,
+                        Err(e) => {
+                            if let Some((_, before)) = before {
+                                let path = crate::launchd::plist_path(dir, unit);
+                                done.failed.push(match fsx::write_private(&path, before) {
+                                    Ok(()) => format!("{e:#}, so its plist was left as it was"),
+                                    Err(w) => {
+                                        format!("{e:#}, and its plist was not put back: {w:#}")
+                                    }
+                                });
+                            }
+                            continue;
+                        }
+                    }
                     if let Some((_, before)) = before {
                         if !crate::launchd::reload(dir, home, unit, before) {
                             let back = match fsx::write_private(

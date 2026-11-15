@@ -204,6 +204,12 @@ pub fn domain() -> String {
 }
 
 fn launchctl(args: &[&str]) -> Option<(bool, String)> {
+    run(args).map(|(code, out)| (code == Some(0), out))
+}
+
+const NOT_FOUND: i32 = 113;
+
+fn run(args: &[&str]) -> Option<(Option<i32>, String)> {
     #[cfg(debug_assertions)]
     let program =
         std::env::var_os("REMUDA_TEST_LAUNCHCTL").unwrap_or_else(|| "/bin/launchctl".into());
@@ -216,7 +222,7 @@ fn launchctl(args: &[&str]) -> Option<(bool, String)> {
         .output()
         .ok()?;
     Some((
-        out.status.success(),
+        out.status.code(),
         String::from_utf8_lossy(&out.stdout).into_owned(),
     ))
 }
@@ -243,9 +249,16 @@ pub fn disabled_in(printed: &str, unit: Unit) -> bool {
 }
 
 pub fn loaded(unit: Unit) -> Option<String> {
-    match launchctl(&["print", &target(unit)])? {
-        (true, printed) => Some(printed),
-        (false, _) => None,
+    probe(unit).ok().flatten()
+}
+
+/// What `launchctl print` says of the agent: loaded, not loaded, or an
+/// error when it cannot say.
+pub fn probe(unit: Unit) -> Result<Option<String>> {
+    match run(&["print", &target(unit)]) {
+        Some((Some(0), printed)) => Ok(Some(printed)),
+        Some((Some(NOT_FOUND), _)) => Ok(None),
+        _ => bail!("launchctl cannot say whether {} is loaded", label(unit)),
     }
 }
 
