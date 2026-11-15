@@ -18,7 +18,9 @@
   Auto mode sees the CLIs' processes there, `remuda run` and the page tell
   processes apart, and links open in the default browser. From macOS 15,
   a connection the `serve` LaunchAgent opens to the LAN needs remuda allowed
-  under Local Network privacy; LAN clients reach it without.
+  under Local Network privacy; LAN clients reach it without. Installing the
+  agents refuses a relative `CLAUDE_CONFIG_DIR`, since Claude Code names its
+  Keychain item after it as written.
 
 ### Fixed
 
