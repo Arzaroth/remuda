@@ -45,8 +45,10 @@ booted out and bootstrapped again. A loaded timer is booted out, by a sync or
 by `--install timer`, only holding the lock of the store it refreshes, which
 every refresh holds while it runs, waiting up to five minutes for one to end,
 so a bootout never cuts one before it saves the tokens it rotated. That store
-is the `REMUDA_STORE` in the job's environment as `launchctl print` shows it,
-else the default, never what the plist on disk says. When `launchctl print`
+is found as a refresh in that job finds it, from the environment
+`launchctl print` shows for it (its own, then what it inherits, as from
+`launchctl setenv`, then launchd's default): `REMUDA_STORE`, else
+`XDG_DATA_HOME`'s, else the default, never what the plist on disk says. When `launchctl print`
 fails with anything but "not found" (113), the install refuses, and a sync
 puts that agent's old plist back and fails. A whole `sync-units` holds
 `~/Library/LaunchAgents/.remuda.lock`, so two never rewrite the agents at
