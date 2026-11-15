@@ -686,17 +686,33 @@ pub fn listed() -> std::io::Result<Vec<Process>> {
 /// hides them after a few tries, a process caught exiting or starting
 /// answering within them.
 #[cfg(target_os = "macos")]
-fn arguments(pid: libc::c_int) -> Result<(Vec<u8>, Vec<u8>), ()> {
+fn arguments(pid: libc::c_int) -> Result<Args, ()> {
+    asked(
+        &|| procargs(pid),
+        &|| crate::pidstart::runs_as_me(pid as u32),
+        std::time::Duration::from_millis(50),
+    )
+}
+
+#[cfg(target_os = "macos")]
+type Args = (Vec<u8>, Vec<u8>);
+
+#[cfg(target_os = "macos")]
+fn asked(
+    args: &dyn Fn() -> Option<Args>,
+    mine: &dyn Fn() -> bool,
+    pause: std::time::Duration,
+) -> Result<Args, ()> {
     for _ in 0..3 {
-        if let Some(args) = procargs(pid) {
+        if let Some(args) = args() {
             return Ok(args);
         }
-        if !crate::pidstart::runs_as_me(pid as u32) {
+        if !mine() {
             return Ok(Default::default());
         }
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        std::thread::sleep(pause);
     }
-    procargs(pid).ok_or(())
+    args().ok_or(())
 }
 
 /// `KERN_PROCARGS2`: argc, the executable's path, then argv and the
