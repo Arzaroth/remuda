@@ -39,6 +39,9 @@ The refresh timer and `serve` are launchd agents rather than systemd units
   `REMUDA_OUTER_` form first inside a `remuda run` session, and a relative
   directory is written absolute, since launchd starts the agent in `/`. A
   variable the shell does not set keeps the value the installed plist has.
+  A relative `CLAUDE_CONFIG_DIR` stops `sync-units`: Claude Code names its
+  Keychain item after the string as written, which an agent run from `/`
+  cannot both keep and resolve.
 
 `install.sh` asks the binary for them (`remuda sync-units --install timer
 --install serve`), which writes each plist, then `launchctl bootout`,
