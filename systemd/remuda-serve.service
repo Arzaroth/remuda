@@ -1,10 +1,13 @@
 [Unit]
 Description=Serve remuda's page on 127.0.0.1
+StartLimitIntervalSec=10min
+StartLimitBurst=5
 
 [Service]
 Environment=REMUDA_SERVICE=1
 ExecStart=%h/.local/bin/remuda serve
-Restart=on-abnormal
+Restart=on-failure
+RestartSec=30s
 
 [Install]
 WantedBy=default.target

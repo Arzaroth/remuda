@@ -11,6 +11,14 @@
 - On macOS, cursor-agent's login is read from and switched in its two
   Keychain items, `cursor-access-token` and `cursor-refresh-token`.
 
+### Fixed
+
+- `remuda-serve.service` no longer exits when one CLI's login directory was
+  never recorded or has moved: it serves the others and logs a line for each
+  CLI it leaves out, so auto mode keeps running for them.
+- `remuda-serve.service` restarts 30 seconds after a failure instead of
+  staying down, and `remuda open` starts it again after it gave up.
+
 ## [0.42.3] - 2026-11-14
 
 ### Fixed

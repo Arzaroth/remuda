@@ -966,7 +966,7 @@ fn open_finds_the_page_a_running_serve_shows() {
 }
 
 #[test]
-fn a_serve_run_by_systemd_checks_the_directories_and_prints_no_token() {
+fn a_serve_run_by_systemd_leaves_out_the_clis_whose_directory_moved_and_prints_no_token() {
     let home = Home::new();
     home.sign_in("a-work", "r-work", "u-work");
     home.ok(&["import", "work"]);
@@ -981,12 +981,32 @@ fn a_serve_run_by_systemd_checks_the_directories_and_prints_no_token() {
         cmd
     };
 
-    let out = unit(&[("CLAUDE_CONFIG_DIR", &home.path("elsewhere"))])
-        .output()
-        .unwrap();
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(!out.status.success());
-    assert!(stderr.contains("claude: not serving"), "{stderr}");
+    let served = |url: &str| -> Vec<String> {
+        let state = get_state(url);
+        let body: Value = serde_json::from_str(state.split_once("\r\n\r\n").unwrap().1).unwrap();
+        body["providers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["id"].as_str().unwrap().to_owned())
+            .collect()
+    };
+
+    let mut moved = Serving(
+        unit(&[("CLAUDE_CONFIG_DIR", &home.path("elsewhere"))])
+            .spawn()
+            .unwrap(),
+    );
+    let mut stderr = moved.0.stderr.take().unwrap();
+    first_line(&mut moved.0);
+    let url = home.ok(&["open", "--no-browser"]);
+    let ids = served(&url);
+    assert!(!ids.iter().any(|id| id == "claude"), "{ids:?}");
+    assert!(ids.iter().any(|id| id == "codex"), "{ids:?}");
+    drop(moved);
+    let mut skipped = String::new();
+    std::io::Read::read_to_string(&mut stderr, &mut skipped).unwrap();
+    assert!(skipped.contains("claude: not serving"), "{skipped}");
 
     let mut serving = Serving(unit(&[]).spawn().unwrap());
     let printed = first_line(&mut serving.0);
