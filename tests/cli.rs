@@ -1163,7 +1163,7 @@ fn the_timer_is_replaced_only_once_the_store_it_refreshes_is_free() {
             "#!/bin/sh\necho \"$1\" >> '{}'\n\
              [ \"$1\" = print ] || exit 0\n\
              [ \"$PRINT_EXIT\" = 0 ] || exit \"$PRINT_EXIT\"\n\
-             printf '\\tenvironment = {{\\n\\t\\tREMUDA_STORE => %s\\n\\t}}\\n' '{}'\n",
+             printf '\\tinherited environment = {{\\n\\t\\tREMUDA_STORE => %s\\n\\t}}\\n\\tenvironment = {{\\n\\t\\tPATH => /bin\\n\\t}}\\n' '{}'\n",
             log.display(),
             loaded_store.display()
         ),
