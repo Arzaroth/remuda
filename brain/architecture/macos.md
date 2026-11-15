@@ -93,11 +93,13 @@ disabled), `enabled` (loaded) and `disabled` (a plist, not loaded).
   arguments and environment with `sysctl(KERN_PROCARGS2)`, which answers for
   this user's own ([auto.rs](../../src/auto.rs)). A list that filled its
   buffer on every try, or lacks remuda's own pid, is an error, and so is a
-  process that may be signalled, is not a zombie (`KERN_PROC_PID`, since
-  `proc_pidinfo` answers nothing for one) and still hides its arguments
-  after three more tries 50 ms apart: auto mode then holds rather than
-  switch past a CLI it could not see. Another user's processes and those
-  that exited count as running no CLI.
+  process that still hides its arguments after three more tries 50 ms
+  apart while `KERN_PROC_PID` shows it this user's (by effective uid), not
+  a zombie and never having changed its credentials (`P_SUGID`, as `login`
+  and an SSH session have, whose arguments macOS withholds): auto mode
+  then holds rather than switch past a CLI it could not see. Another
+  user's processes, those that exited, zombies and `P_SUGID` ones count as
+  running no CLI.
 
 ## Browser
 
