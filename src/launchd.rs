@@ -118,7 +118,7 @@ pub fn plist(unit: Unit, home: &Path, env: &dyn Fn(&str) -> Option<String>) -> S
     out.push_str("\t</dict>\n");
     match unit {
         Unit::Serve => out.push_str(
-            "\t<key>RunAtLoad</key>\n\t<true/>\n\t<key>KeepAlive</key>\n\t<dict>\n\t\t<key>Crashed</key>\n\t\t<true/>\n\t</dict>\n",
+            "\t<key>RunAtLoad</key>\n\t<true/>\n\t<key>KeepAlive</key>\n\t<dict>\n\t\t<key>SuccessfulExit</key>\n\t\t<false/>\n\t</dict>\n\t<key>ThrottleInterval</key>\n\t<integer>30</integer>\n",
         ),
         Unit::Timer => out.push_str("\t<key>StartInterval</key>\n\t<integer>1800</integer>\n"),
     }
@@ -318,7 +318,8 @@ mod tests {
         assert!(plist.contains("<key>REMUDA_STORE</key>\n\t\t<string>/Users/me/a&amp;b</string>"));
         assert!(!plist.contains("CODEX_HOME") && !plist.contains("TERM"));
         assert!(plist.contains("<string>/Users/me/.local/bin:/opt/homebrew/bin:"));
-        assert!(plist.contains("<key>Crashed</key>"));
+        assert!(plist.contains("<key>SuccessfulExit</key>\n\t\t<false/>"));
+        assert!(plist.contains("<key>ThrottleInterval</key>\n\t<integer>30</integer>"));
         assert!(plist.contains("/Users/me/Library/Logs/remuda/serve.log"));
         assert!(!plist.contains("StartInterval"));
     }
