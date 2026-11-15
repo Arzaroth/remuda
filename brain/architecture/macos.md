@@ -39,7 +39,8 @@ The refresh timer and `serve` are launchd agents rather than systemd units
   `REMUDA_OUTER_` form first inside a `remuda run` session, and a relative
   directory is written absolute, since launchd starts the agent in `/`. A
   variable the shell does not set keeps the value the installed plist has.
-  A relative `CLAUDE_CONFIG_DIR` stops `sync-units`: Claude Code names its
+  A `CLAUDE_CONFIG_DIR` that does not start with `/` as written, a leading
+  space or a blank one included, stops `sync-units`: Claude Code names its
   Keychain item after the string as written, which an agent run from `/`
   cannot both keep and resolve.
 
