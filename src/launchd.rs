@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
 
@@ -52,13 +53,37 @@ pub fn set_in(installed: &str, var: &str) -> Option<String> {
     let after = &installed[installed.find(&key)? + key.len()..];
     let value = after.trim_start().strip_prefix("<string>")?;
     let value = &value[..value.find("</string>")?];
-    Some(
-        value
-            .replace("&lt;", "<")
-            .replace("&gt;", ">")
-            .replace("&amp;", "&"),
-    )
-    .filter(|v| !v.is_empty())
+    unescape(value).filter(|v| !v.is_empty())
+}
+
+fn unescape(text: &str) -> Option<String> {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find('&') {
+        out.push_str(&rest[..at]);
+        let end = rest[at..].find(';')? + at;
+        let entity = &rest[at + 1..end];
+        out.push(match entity {
+            "lt" => '<',
+            "gt" => '>',
+            "amp" => '&',
+            "quot" => '"',
+            "apos" => '\'',
+            _ => {
+                let code = match entity
+                    .strip_prefix("#x")
+                    .or_else(|| entity.strip_prefix("#X"))
+                {
+                    Some(hex) => u32::from_str_radix(hex, 16).ok()?,
+                    None => entity.strip_prefix('#')?.parse().ok()?,
+                };
+                char::from_u32(code)?
+            }
+        });
+        rest = &rest[end + 1..];
+    }
+    out.push_str(rest);
+    Some(out)
 }
 
 fn escape(s: &str) -> String {
@@ -135,26 +160,27 @@ pub fn refresh(
     dir: &Path,
     home: &Path,
     env: &dyn Fn(&str) -> Option<String>,
-) -> (Refreshed, Vec<Unit>) {
+) -> (Refreshed, Vec<(Unit, String)>) {
     let mut done = Refreshed::default();
     let mut changed = Vec::new();
     for unit in [Unit::Timer, Unit::Serve] {
         let path = plist_path(dir, unit);
-        let installed = std::fs::read_to_string(&path).unwrap_or_default();
+        let before = std::fs::read_to_string(&path).unwrap_or_default();
+        let installed = before.as_str();
         let kept = |v: &str| {
             env(v)
                 .filter(|x| !x.is_empty())
-                .or_else(|| set_in(&installed, v))
+                .or_else(|| set_in(installed, v))
         };
         let body = plist(unit, home, &kept);
         let installed = std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_file());
-        if !installed || std::fs::read_to_string(&path).is_ok_and(|text| text == body) {
+        if !installed || before == body {
             continue;
         }
         match fsx::write_private(&path, &body) {
             Ok(()) => {
                 done.changed.push(label(unit));
-                changed.push(unit);
+                changed.push((unit, before));
             }
             Err(e) => done
                 .failed
@@ -233,8 +259,17 @@ pub fn runs(unit: Unit, pid: u32) -> bool {
     loaded(unit).and_then(|p| pid_in(&p)) == Some(pid)
 }
 
-/// Loads the agent's plist afresh, so a changed one takes effect.
-pub fn reload(dir: &Path, unit: Unit) -> bool {
+/// Loads the agent's plist afresh, so a changed one takes effect. A refresh
+/// the timer runs is let finish first, since a bootout would end it before
+/// it saved the tokens it rotated; false when it is still running at `wait`.
+pub fn reload(dir: &Path, unit: Unit, wait: Duration) -> bool {
+    let deadline = Instant::now() + wait;
+    while unit == Unit::Timer && loaded(unit).and_then(|p| pid_in(&p)).is_some() {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
     let _ = launchctl(&["bootout", &target(unit)]);
     let plist = plist_path(dir, unit);
     launchctl(&["bootstrap", &domain(), &plist.to_string_lossy()]).is_some_and(|(ok, _)| ok)
@@ -341,7 +376,7 @@ mod tests {
         std::fs::write(plist_path(&dir, Unit::Timer), "old").unwrap();
         let (done, changed) = refresh(&dir, tmp.path(), &env(&[]));
         assert_eq!(done.changed, [REFRESH]);
-        assert_eq!(changed, [Unit::Timer]);
+        assert_eq!(changed, [(Unit::Timer, "old".to_owned())]);
         assert!(!plist_path(&dir, Unit::Serve).exists());
         assert_eq!(
             std::fs::read_to_string(plist_path(&dir, Unit::Timer)).unwrap(),

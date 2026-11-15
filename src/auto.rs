@@ -634,6 +634,7 @@ pub fn listed() -> std::io::Result<Vec<Process>> {
     // SAFETY: a null buffer asks for the count alone.
     let mut capacity = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) }.max(0) as usize;
     let mut pids = Vec::new();
+    let mut whole = false;
     for _ in 0..4 {
         capacity += 256;
         pids = vec![0 as libc::c_int; capacity];
@@ -645,11 +646,12 @@ pub fn listed() -> std::io::Result<Vec<Process>> {
         }
         pids.truncate(n as usize);
         if (n as usize) < capacity {
+            whole = true;
             break;
         }
         capacity *= 2;
     }
-    if !pids.contains(&(std::process::id() as libc::c_int)) {
+    if !whole || !pids.contains(&(std::process::id() as libc::c_int)) {
         return Err(std::io::Error::other("macOS did not list every process"));
     }
     Ok(pids

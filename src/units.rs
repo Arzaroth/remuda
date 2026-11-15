@@ -4,6 +4,7 @@ use crate::fsx;
 
 pub const TIMER: &str = "remuda-refresh.timer";
 pub const SERVE: &str = "remuda-serve.service";
+const REFRESH_WAIT: std::time::Duration = std::time::Duration::from_secs(300);
 
 pub const UNITS: [(&str, &str); 3] = [
     (
@@ -140,7 +141,7 @@ impl Manager {
                 done
             }
             Manager::Launchd { dir, home } => {
-                let (done, changed) = crate::launchd::refresh(dir, home, &env);
+                let (mut done, changed) = crate::launchd::refresh(dir, home, &env);
                 if !done.changed.is_empty() {
                     println!("updated {}", done.changed.join(", "));
                 }
@@ -148,12 +149,23 @@ impl Manager {
                     if crate::launchd::loaded(unit).is_none() {
                         continue;
                     }
-                    let done = match changed.contains(&unit) {
-                        true => crate::launchd::reload(dir, unit),
-                        false if unit == Unit::Serve => crate::launchd::start(dir, unit),
-                        false => true,
-                    };
-                    if !done {
+                    let before = changed.iter().find(|(u, _)| *u == unit);
+                    if let Some((_, before)) = before {
+                        if !crate::launchd::reload(dir, unit, REFRESH_WAIT) {
+                            let restored =
+                                fsx::write_private(&crate::launchd::plist_path(dir, unit), before);
+                            done.failed.push(format!(
+                                "{} was not reloaded{}; run `remuda sync-units` again",
+                                self.name(unit),
+                                match restored {
+                                    Ok(()) => String::new(),
+                                    Err(e) => format!(" and its plist not put back: {e:#}"),
+                                }
+                            ));
+                        }
+                        continue;
+                    }
+                    if unit == Unit::Serve && !crate::launchd::start(dir, unit) {
                         eprintln!(
                             "warning: {} still runs the old binary; run {}",
                             self.name(unit),
