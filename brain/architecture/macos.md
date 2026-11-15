@@ -63,16 +63,18 @@ two never rewrite the agents at once.
 When something fails, the sync fails and says what is left:
 
 - `launchctl print` failing with anything but "not found" (113): the install
-  refuses, and a sync puts that agent's old plist back.
+  refuses, and a sync puts that agent's old plist back. If that write fails
+  too, the error gives it and the `launchctl print` that says whether the
+  agent is loaded, since remuda could not tell.
 - A reload that fails: the old plist goes back and is loaded again, so the
   next sync sees the difference and retries.
-- The old plist goes back but cannot be loaded: the error names the
-  `launchctl bootstrap` that loads it.
-- The old plist cannot be written back: the error gives the write's own
-  error and the same command, to run once the plist is right (rewritten by
-  hand, or by `sync-units` once whatever stopped the write is fixed).
-- Either way a later sync skips an agent that is not loaded, so until then
-  it is the doctor's `disabled` state, with that command as its fix.
+- The old plist goes back but cannot be loaded, or cannot be written back:
+  the error says which, with the doctor's fix for the agent as it stands
+  then, `launchctl kickstart` when it is still loaded (the reload stopped
+  before its bootout) and `launchctl bootstrap` when it is not, to run once
+  the plist is right.
+- A later sync skips an agent that is not loaded, so until then it is the
+  doctor's `disabled` state, with `launchctl bootstrap` as its fix.
 
 `units::Manager` hides which one runs: names, states and fixes for the doctor,
 `remuda open` starting `serve`, and whether a running `serve` is the
