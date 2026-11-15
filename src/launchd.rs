@@ -595,6 +595,44 @@ mod tests {
     }
 
     #[test]
+    fn the_shell_s_directories_are_taken_as_remuda_reads_them() {
+        let shell = |vars: &'static [(&'static str, &'static str)]| {
+            move |v: &str| {
+                vars.iter()
+                    .find(|(k, _)| *k == v)
+                    .map(|(_, x)| (*x).to_owned())
+            }
+        };
+        let cwd = Path::new("/Users/me/work");
+        let inside = shell(&[
+            ("REMUDA_OUTER_CLAUDE_CONFIG_DIR", "/Users/me/.claude"),
+            ("CLAUDE_CONFIG_DIR", "/tmp/session"),
+            ("REMUDA_STORE", "store"),
+            ("AGENT_CLI_CREDENTIAL_STORE", "file"),
+        ]);
+        assert_eq!(
+            from_shell("CLAUDE_CONFIG_DIR", &inside, cwd).as_deref(),
+            Some("/Users/me/.claude")
+        );
+        assert_eq!(
+            from_shell("REMUDA_STORE", &inside, cwd).as_deref(),
+            Some("/Users/me/work/store")
+        );
+        assert_eq!(
+            from_shell("AGENT_CLI_CREDENTIAL_STORE", &inside, cwd).as_deref(),
+            Some("file")
+        );
+        assert_eq!(from_shell("CODEX_HOME", &inside, cwd), None);
+        let plist = plist(
+            Unit::Timer,
+            Path::new("/Users/me"),
+            &env(&[("XDG_DATA_HOME", "/d"), ("XDG_CONFIG_HOME", "/c")]),
+        );
+        assert!(plist.contains("<key>XDG_DATA_HOME</key>\n\t\t<string>/d</string>"));
+        assert!(plist.contains("<key>XDG_CONFIG_HOME</key>\n\t\t<string>/c</string>"));
+    }
+
+    #[test]
     fn the_fixes_name_launchctl_and_the_agent() {
         let m = Manager::Launchd {
             dir: PathBuf::from("/Users/me/Library/LaunchAgents"),
