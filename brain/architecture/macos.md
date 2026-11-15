@@ -41,10 +41,11 @@ The refresh timer and `serve` are launchd agents rather than systemd units
 `enable` and `bootstrap gui/$UID`. That needs someone logged in to the Mac's
 desktop, SSH or not. After an update, `sync-units` rewrites the plists that
 differ, as it does the systemd units. A loaded agent whose plist changed is
-booted out and bootstrapped again. The timer's is reloaded holding the lock of
-the store it refreshes (its plist's `REMUDA_STORE`, else the default), which
-every refresh holds while it runs, waiting up to five minutes for one to end,
-so a bootout never cuts one before it saves the tokens it rotated. A reload
+booted out and bootstrapped again. A loaded timer is booted out, by a sync or
+by `--install timer`, only holding the lock of the store it refreshes (the
+`REMUDA_STORE` of the plist launchd loaded, else the default), which every
+refresh holds while it runs, waiting up to five minutes for one to end, so a
+bootout never cuts one before it saves the tokens it rotated. A reload
 that fails puts the old plist back, loads it again and fails the sync, so the
 next one tries again. An unchanged loaded `serve` gets
 `launchctl kickstart -k`, onto the new binary. The page's update runs
