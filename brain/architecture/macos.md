@@ -45,7 +45,10 @@ booted out and bootstrapped again. A loaded timer is booted out, by a sync or
 by `--install timer`, only holding the lock of the store it refreshes (the
 `REMUDA_STORE` of the plist launchd loaded, else the default), which every
 refresh holds while it runs, waiting up to five minutes for one to end, so a
-bootout never cuts one before it saves the tokens it rotated. A reload
+bootout never cuts one before it saves the tokens it rotated. It takes that
+lock even when `launchctl print` cannot say the timer is loaded, and a whole
+`sync-units` holds `~/Library/LaunchAgents/.remuda.lock`, so two never
+rewrite the agents at once. A reload
 that fails puts the old plist back, loads it again and fails the sync, so the
 next one tries again. An unchanged loaded `serve` gets
 `launchctl kickstart -k`, onto the new binary. The page's update runs
