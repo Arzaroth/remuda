@@ -43,7 +43,6 @@ pub fn relative_claude_dir(get: &dyn Fn(&str) -> Option<String>) -> Option<Strin
     let var = "CLAUDE_CONFIG_DIR";
     get(&crate::paths::outer(var))
         .or_else(|| get(var))
-        .map(|v| v.trim().to_owned())
         .filter(|v| !v.is_empty() && !v.starts_with('/'))
 }
 
@@ -653,7 +652,7 @@ mod tests {
             }
         };
         assert_eq!(
-            relative_claude_dir(&shell(&[("CLAUDE_CONFIG_DIR", " work/.claude ")])).as_deref(),
+            relative_claude_dir(&shell(&[("CLAUDE_CONFIG_DIR", "work/.claude")])).as_deref(),
             Some("work/.claude")
         );
         assert_eq!(
