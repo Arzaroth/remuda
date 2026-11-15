@@ -99,6 +99,24 @@ pub fn claude_proc_start(start: u64) -> String {
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_process_macos_will_not_describe_still_counts_as_mine() {
+        assert!(live_and_mine(true, None));
+        assert!(live_and_mine(true, Some(2)));
+        assert!(!live_and_mine(true, Some(ZOMBIE)));
+        assert!(!live_and_mine(false, None));
+        assert!(runs_as_me(std::process::id()));
+        assert!(!runs_as_me(1));
+        let mut child = std::process::Command::new("/usr/bin/true").spawn().unwrap();
+        let pid = child.id();
+        while state(pid) != Some(ZOMBIE) {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(!runs_as_me(pid));
+        child.wait().unwrap();
+    }
+
     #[test]
     fn this_process_has_a_start_time_and_a_gone_one_none() {
         assert!(start_time(std::process::id()).is_some());
