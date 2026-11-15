@@ -660,7 +660,14 @@ fn update(check_only: bool) -> Result<()> {
 fn sync_units(install: &[String]) -> Result<()> {
     let manager = units::Manager::from_env();
     let _serial = match &manager {
-        units::Manager::Launchd { dir, .. } => Some(launchd::serialize(dir)?),
+        units::Manager::Launchd { dir, .. } => {
+            if let Some(dir) = launchd::relative_claude_dir(&|v| std::env::var(v).ok()) {
+                bail!(
+                    "CLAUDE_CONFIG_DIR is relative ({dir}); Claude Code names its Keychain item after it as written, so set it to an absolute path before installing the agents"
+                );
+            }
+            Some(launchd::serialize(dir)?)
+        }
         units::Manager::Systemd(_) => None,
     };
     if !install.is_empty() {

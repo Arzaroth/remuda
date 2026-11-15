@@ -36,6 +36,17 @@ pub fn shell_env(var: &str) -> Option<String> {
     from_shell(var, &|v| std::env::var(v).ok(), &cwd)
 }
 
+/// A relative `CLAUDE_CONFIG_DIR`, which no agent can take: Claude Code
+/// names its Keychain item after the string as written, and the agent, run
+/// from `/`, would read another directory under that name.
+pub fn relative_claude_dir(get: &dyn Fn(&str) -> Option<String>) -> Option<String> {
+    let var = "CLAUDE_CONFIG_DIR";
+    get(&crate::paths::outer(var))
+        .or_else(|| get(var))
+        .map(|v| v.trim().to_owned())
+        .filter(|v| !v.is_empty() && !v.starts_with('/'))
+}
+
 fn from_shell(var: &str, get: &dyn Fn(&str) -> Option<String>, cwd: &Path) -> Option<String> {
     let value = get(&crate::paths::outer(var)).or_else(|| get(var))?;
     if value.is_empty() || var == "AGENT_CLI_CREDENTIAL_STORE" {
