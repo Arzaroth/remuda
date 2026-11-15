@@ -1149,6 +1149,72 @@ fn a_reload_launchd_refuses_loads_the_old_agent_back_for_the_next_sync() {
     assert!(!out.exists());
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn the_timer_is_replaced_only_once_the_store_it_refreshes_is_free() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = Home::new();
+    let launchctl = home.path("bin/launchctl");
+    let log = home.path("launchctl.log");
+    std::fs::write(
+        &launchctl,
+        format!("#!/bin/sh\necho \"$1\" >> '{}'\nexit 0\n", log.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&launchctl, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let agents = home.path("Library/LaunchAgents");
+    std::fs::create_dir_all(&agents).unwrap();
+    let refresh = agents.join("com.github.arzaroth.remuda.refresh.plist");
+    let loaded_store = home.path("store-a");
+    std::fs::create_dir_all(&loaded_store).unwrap();
+    let old = format!(
+        "<plist><dict><key>REMUDA_STORE</key><string>{}</string></dict></plist>",
+        loaded_store.display()
+    );
+
+    for args in [
+        &["sync-units"][..],
+        &["sync-units", "--install", "timer"][..],
+    ] {
+        std::fs::write(&refresh, &old).unwrap();
+        let _ = std::fs::remove_file(&log);
+        let lock = std::fs::File::create(loaded_store.join(".lock")).unwrap();
+        lock.lock().unwrap();
+        let log_at = log.clone();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_at)
+                .and_then(|mut f| std::io::Write::write_all(&mut f, b"released\n"))
+                .unwrap();
+            drop(lock);
+        });
+        let out = home
+            .command(args)
+            .env("REMUDA_TEST_LAUNCHCTL", &launchctl)
+            .env("REMUDA_STORE", home.path("store-b"))
+            .output()
+            .unwrap();
+        release.join().unwrap();
+        assert!(
+            out.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let calls = std::fs::read_to_string(&log).unwrap();
+        let released = calls.find("released").unwrap();
+        let bootout = calls.find("bootout").unwrap();
+        assert!(released < bootout, "{args:?}: {calls}");
+        assert!(
+            std::fs::read_to_string(&refresh)
+                .unwrap()
+                .contains("store-b")
+        );
+    }
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn sync_units_rewrites_the_installed_units_and_reloads_systemd() {
