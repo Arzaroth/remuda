@@ -15,12 +15,47 @@ pub fn start_time(pid: u32) -> Option<u64> {
 #[cfg(target_os = "macos")]
 const ZOMBIE: u32 = 5;
 
-/// Whether `pid` runs, not a zombie, as this user.
+/// Whether `pid` runs as this user: a process it may signal that is not
+/// known to be a zombie, even when macOS will not describe it.
 #[cfg(target_os = "macos")]
 pub fn runs_as_me(pid: u32) -> bool {
-    // SAFETY: getuid cannot fail.
-    let me = unsafe { libc::getuid() };
-    bsd_info(pid).is_some_and(|info| info.pbi_uid == me && info.pbi_status != ZOMBIE)
+    // SAFETY: signal 0 only checks that the process exists and may be signalled.
+    let signalled = unsafe { libc::kill(pid as libc::pid_t, 0) } == 0;
+    live_and_mine(signalled, state(pid))
+}
+
+/// The process's `p_stat` from `KERN_PROC_PID`, which also answers for a
+/// zombie, where `proc_pidinfo` does not. The `kinfo_proc` it fills starts
+/// with `extern_proc`, whose `p_stat` follows two list pointers, two more
+/// pointers and the `p_flag` int.
+#[cfg(target_os = "macos")]
+fn state(pid: u32) -> Option<u32> {
+    const P_STAT: usize = 36;
+    let mut mib = [
+        libc::CTL_KERN,
+        libc::KERN_PROC,
+        libc::KERN_PROC_PID,
+        pid as libc::c_int,
+    ];
+    let mut info = [0u8; 1024];
+    let mut len = info.len();
+    // SAFETY: `info` is `len` bytes long, and sysctl writes at most that.
+    let rc = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            4,
+            info.as_mut_ptr().cast(),
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    (rc == 0 && len > P_STAT).then(|| u32::from(info[P_STAT]))
+}
+
+#[cfg(target_os = "macos")]
+fn live_and_mine(signalled: bool, status: Option<u32>) -> bool {
+    signalled && status != Some(ZOMBIE)
 }
 
 #[cfg(target_os = "macos")]

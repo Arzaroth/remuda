@@ -660,14 +660,13 @@ pub fn listed() -> std::io::Result<Vec<Process>> {
         // SAFETY: the buffer holds its length in bytes.
         let len = unsafe { libc::proc_name(pid, name.as_mut_ptr().cast(), name.len() as u32) };
         let comm = name[..len.max(0) as usize].to_vec();
-        let (cmdline, environ) = match procargs(pid) {
-            Some(args) => args,
-            None if crate::pidstart::runs_as_me(pid as u32) => {
+        let (cmdline, environ) = match arguments(pid) {
+            Ok(args) => args,
+            Err(()) => {
                 return Err(std::io::Error::other(format!(
                     "macOS gave no arguments for process {pid}, which runs as this user"
                 )));
             }
-            None => Default::default(),
         };
         if !comm.is_empty() || !cmdline.is_empty() {
             listed.push(Process {
@@ -679,6 +678,24 @@ pub fn listed() -> std::io::Result<Vec<Process>> {
         }
     }
     Ok(listed)
+}
+
+/// A process's arguments and environment, none for one that is gone, a
+/// zombie or another user's, and an error for one of this user's that still
+/// hides them after a few tries, a process caught exiting or starting
+/// answering within them.
+#[cfg(target_os = "macos")]
+fn arguments(pid: libc::c_int) -> Result<(Vec<u8>, Vec<u8>), ()> {
+    for _ in 0..3 {
+        if let Some(args) = procargs(pid) {
+            return Ok(args);
+        }
+        if !crate::pidstart::runs_as_me(pid as u32) {
+            return Ok(Default::default());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    procargs(pid).ok_or(())
 }
 
 /// `KERN_PROCARGS2`: argc, the executable's path, then argv and the

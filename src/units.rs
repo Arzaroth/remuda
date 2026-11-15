@@ -168,7 +168,11 @@ impl Manager {
                                 &crate::launchd::plist_path(dir, unit),
                                 before,
                             ) {
-                                Err(e) => format!(", and its plist was not put back: {e:#}"),
+                                Err(e) => format!(
+                                    ", and its plist was not put back: {e:#}; once it is \
+                                     right, run {}",
+                                    self.fix(unit, Action::Enable)
+                                ),
                                 Ok(()) if !crate::launchd::load(dir, unit) => format!(
                                     ", and is not loaded; run {}",
                                     self.fix(unit, Action::Enable)
