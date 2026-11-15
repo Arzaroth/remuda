@@ -280,23 +280,53 @@ pub fn runs(unit: Unit, pid: u32) -> bool {
     loaded(unit).and_then(|p| pid_in(&p)) == Some(pid)
 }
 
-/// The value `launchctl print` gives `var` in the job's own environment.
+/// The value the job sees for `var`, as `launchctl print` shows it: its own
+/// `environment` first, then what it inherits, then launchd's default.
 fn loaded_env(printed: &str, var: &str) -> Option<String> {
+    [
+        "environment",
+        "inherited environment",
+        "default environment",
+    ]
+    .iter()
+    .find_map(|section| in_section(printed, section, var))
+}
+
+fn in_section(printed: &str, section: &str, var: &str) -> Option<String> {
+    let header = format!("{section} = {{");
     let mut inside = false;
     for line in printed.lines() {
         let line = line.trim();
-        if line == "environment = {" {
+        if line == header {
             inside = true;
         } else if inside && line == "}" {
             return None;
         } else if inside
-            && let Some((k, v)) = line.split_once(" => ")
+            && let Some((k, v)) = line.split_once(" =>")
             && k == var
         {
-            return Some(v.to_owned()).filter(|v| !v.is_empty());
+            return Some(v.trim().to_owned());
         }
     }
     None
+}
+
+/// The store a refresh run with the job's environment uses, found as
+/// [`crate::paths::store_root`] finds it; launchd starts jobs in `/`.
+fn loaded_store(printed: &str, home: &Path) -> PathBuf {
+    let set = |var: &str| {
+        Some(var)
+            .and_then(|v| loaded_env(printed, v))
+            .filter(|v| !v.is_empty())
+    };
+    let root = Path::new("/");
+    match set(&crate::paths::outer("REMUDA_STORE")).or_else(|| set("REMUDA_STORE")) {
+        Some(dir) => root.join(dir),
+        None => set("XDG_DATA_HOME")
+            .map(|dir| root.join(dir))
+            .unwrap_or_else(|| home.join(".local/share"))
+            .join("remuda/credentials"),
+    }
 }
 
 /// The lock of the store the loaded timer refreshes, as launchd holds its
@@ -311,9 +341,7 @@ fn quiet(unit: Unit, home: &Path) -> Result<Option<std::fs::File>> {
     let Some(printed) = probe(unit)? else {
         return Ok(None);
     };
-    let store = loaded_env(&printed, "REMUDA_STORE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".local/share/remuda/credentials"));
+    let store = loaded_store(&printed, home);
     match fsx::lock_within(&store, REFRESH_WAIT)? {
         Some(file) => Ok(Some(file)),
         None => bail!("a refresh of {} is still running", store.display()),
@@ -522,19 +550,25 @@ mod tests {
     }
 
     #[test]
-    fn the_loaded_store_is_read_from_the_job_s_own_environment() {
+    fn the_loaded_store_is_the_one_the_job_s_environment_gives() {
         let printed = "gui/501/com.github.arzaroth.remuda.refresh = {\n\tinherited environment = {\n\t\tREMUDA_STORE => /inherited\n\t}\n\tenvironment = {\n\t\tREMUDA_SERVICE => 1\n\t\tREMUDA_STORE => /loaded/a b\n\t}\n\tpid = 7\n}\n";
+        let home = Path::new("/Users/me");
+        assert_eq!(loaded_store(printed, home), Path::new("/loaded/a b"));
+        let inherited = "\tinherited environment = {\n\t\tREMUDA_STORE => /x\n\t}\n\tenvironment = {\n\t\tPATH => /bin\n\t}\n";
+        assert_eq!(loaded_store(inherited, home), Path::new("/x"));
+        let shadowed = "\tinherited environment = {\n\t\tREMUDA_STORE => /x\n\t}\n\tenvironment = {\n\t\tREMUDA_STORE => \n\t\tXDG_DATA_HOME => /data\n\t}\n";
         assert_eq!(
-            loaded_env(printed, "REMUDA_STORE").as_deref(),
-            Some("/loaded/a b")
+            loaded_store(shadowed, home),
+            Path::new("/data/remuda/credentials")
         );
-        assert_eq!(loaded_env(printed, "CODEX_HOME"), None);
+        let defaulted = "\tdefault environment = {\n\t\tXDG_DATA_HOME => rel\n\t}\n";
         assert_eq!(
-            loaded_env(
-                "\tinherited environment = {\n\t\tREMUDA_STORE => /x\n\t}\n",
-                "REMUDA_STORE"
-            ),
-            None
+            loaded_store(defaulted, home),
+            Path::new("/rel/remuda/credentials")
+        );
+        assert_eq!(
+            loaded_store("", home),
+            Path::new("/Users/me/.local/share/remuda/credentials")
         );
     }
 
