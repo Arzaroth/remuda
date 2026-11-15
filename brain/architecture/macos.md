@@ -72,7 +72,8 @@ When something fails, the sync fails and says what is left:
   the error says which, with the doctor's fix for the agent as it stands
   then, `launchctl kickstart` when it is still loaded (the reload stopped
   before its bootout) and `launchctl bootstrap` when it is not, to run once
-  the plist is right.
+  the plist is right. When launchctl cannot say which, the fix is the
+  `launchctl print` that does, then either.
 - A later sync skips an agent that is not loaded, so until then it is the
   doctor's `disabled` state, with `launchctl bootstrap` as its fix.
 
