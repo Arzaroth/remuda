@@ -66,10 +66,13 @@ When something fails, the sync fails and says what is left:
   refuses, and a sync puts that agent's old plist back.
 - A reload that fails: the old plist goes back and is loaded again, so the
   next sync sees the difference and retries.
-- The old plist cannot be written back, or loaded again: the error says so
-  and names the `launchctl bootstrap` that loads it. A later sync skips an
-  agent that is not loaded, so until then it is the doctor's `disabled`
-  state, with that command as its fix.
+- The old plist goes back but cannot be loaded: the error names the
+  `launchctl bootstrap` that loads it.
+- The old plist cannot be written back: the error gives the write's own
+  error and the same command, to run once the plist is right (rewritten by
+  hand, or by `sync-units` once whatever stopped the write is fixed).
+- Either way a later sync skips an agent that is not loaded, so until then
+  it is the doctor's `disabled` state, with that command as its fix.
 
 `units::Manager` hides which one runs: names, states and fixes for the doctor,
 `remuda open` starting `serve`, and whether a running `serve` is the
@@ -85,7 +88,13 @@ disabled), `enabled` (loaded) and `disabled` (a plist, not loaded).
   prints it, so a session file is compared in that form, to the second.
 - Auto mode lists processes with `proc_listallpids` and reads their
   arguments and environment with `sysctl(KERN_PROCARGS2)`, which answers for
-  this user's own ([auto.rs](../../src/auto.rs)).
+  this user's own ([auto.rs](../../src/auto.rs)). A list that filled its
+  buffer on every try, or lacks remuda's own pid, is an error, and so is a
+  process that may be signalled, is not a zombie (`KERN_PROC_PID`, since
+  `proc_pidinfo` answers nothing for one) and still hides its arguments
+  after three more tries 50 ms apart: auto mode then holds rather than
+  switch past a CLI it could not see. Another user's processes and those
+  that exited count as running no CLI.
 
 ## Browser
 
