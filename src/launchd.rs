@@ -655,6 +655,12 @@ mod tests {
             relative_claude_dir(&shell(&[("CLAUDE_CONFIG_DIR", "work/.claude")])).as_deref(),
             Some("work/.claude")
         );
+        for spaced in [" /tmp/claude", "   "] {
+            for var in ["CLAUDE_CONFIG_DIR", "REMUDA_OUTER_CLAUDE_CONFIG_DIR"] {
+                let get = |v: &str| (v == var).then(|| spaced.to_owned());
+                assert_eq!(relative_claude_dir(&get).as_deref(), Some(spaced), "{var}");
+            }
+        }
         assert_eq!(
             relative_claude_dir(&shell(&[
                 ("REMUDA_OUTER_CLAUDE_CONFIG_DIR", "rel"),
