@@ -18,12 +18,16 @@ const ZOMBIE: u32 = 5;
 /// Whether `pid` runs as this user, with this user's effective uid, is not a
 /// zombie and never changed its credentials (`P_SUGID`, as `login` and an
 /// SSH session do, which macOS keeps their arguments from), even when macOS
-/// will not describe it otherwise.
+/// will not describe it otherwise. One `KERN_PROC_PID` will not describe
+/// either counts as this user's when it may be signalled.
 #[cfg(target_os = "macos")]
 pub fn runs_as_me(pid: u32) -> bool {
     // SAFETY: geteuid cannot fail.
     let me = unsafe { libc::geteuid() };
-    live_and_mine(me, record(pid))
+    live_and_mine(me, record(pid), || {
+        // SAFETY: signal 0 only checks that the process exists and may be signalled.
+        unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+    })
 }
 
 /// The process's `p_stat` and effective uid from `KERN_PROC_PID`, which
@@ -64,8 +68,11 @@ fn record(pid: u32) -> Option<Record> {
 }
 
 #[cfg(target_os = "macos")]
-fn live_and_mine(me: u32, record: Option<Record>) -> bool {
-    record.is_some_and(|r| r.uid == me && r.stat != ZOMBIE && r.flag & P_SUGID == 0)
+fn live_and_mine(me: u32, record: Option<Record>, signalled: impl Fn() -> bool) -> bool {
+    match record {
+        Some(r) => r.uid == me && r.stat != ZOMBIE && r.flag & P_SUGID == 0,
+        None => signalled(),
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -124,11 +131,13 @@ mod tests {
     #[test]
     fn a_zombie_another_uid_and_changed_credentials_are_not_mine() {
         let run = |flag, stat, uid| Some(Record { flag, stat, uid });
-        assert!(live_and_mine(501, run(0x4004, 2, 501)));
-        assert!(!live_and_mine(501, run(0x4004, ZOMBIE, 501)));
-        assert!(!live_and_mine(501, run(0x4004, 2, 0)));
-        assert!(!live_and_mine(501, run(0x104, 2, 501)));
-        assert!(!live_and_mine(501, None));
+        let mine = |record| live_and_mine(501, record, || true);
+        assert!(mine(run(0x4004, 2, 501)));
+        assert!(!mine(run(0x4004, ZOMBIE, 501)));
+        assert!(!mine(run(0x4004, 2, 0)));
+        assert!(!mine(run(0x104, 2, 501)));
+        assert!(mine(None));
+        assert!(!live_and_mine(501, None, || false));
         assert!(runs_as_me(std::process::id()));
         assert!(!runs_as_me(1));
         let mut child = std::process::Command::new("/usr/bin/true").spawn().unwrap();
