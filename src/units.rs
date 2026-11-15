@@ -163,7 +163,7 @@ impl Manager {
                         }
                     }
                     if let Some((_, before)) = before {
-                        if !crate::launchd::reload(dir, home, unit, before) {
+                        if !crate::launchd::reload(dir, home, unit) {
                             let back = match fsx::write_private(
                                 &crate::launchd::plist_path(dir, unit),
                                 before,
