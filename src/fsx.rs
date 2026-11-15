@@ -2,7 +2,7 @@ use std::fs::{self, DirBuilder, File, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -249,16 +249,38 @@ pub fn lock_file(path: &Path) -> Result<File> {
 }
 
 pub fn lock(dir: &Path) -> Result<File> {
+    let file = open_lock(dir)?;
+    file.lock().context("failed to lock the store")?;
+    Ok(file)
+}
+
+/// [`lock`], or none when another process holds it past `wait`.
+pub fn lock_within(dir: &Path, wait: Duration) -> Result<Option<File>> {
+    let file = open_lock(dir)?;
+    let deadline = Instant::now() + wait;
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(Some(file)),
+            Err(fs::TryLockError::WouldBlock) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(200));
+            }
+            Err(fs::TryLockError::WouldBlock) => return Ok(None),
+            Err(fs::TryLockError::Error(e)) => {
+                return Err(e).context("failed to lock the store");
+            }
+        }
+    }
+}
+
+fn open_lock(dir: &Path) -> Result<File> {
     create_private_dir(dir).with_context(|| format!("failed to create {}", dir.display()))?;
-    let file = OpenOptions::new()
+    OpenOptions::new()
         .create(true)
         .truncate(false)
         .write(true)
         .mode(0o600)
         .open(dir.join(".lock"))
-        .context("failed to open the store lock")?;
-    file.lock().context("failed to lock the store")?;
-    Ok(file)
+        .context("failed to open the store lock")
 }
 
 #[cfg(test)]

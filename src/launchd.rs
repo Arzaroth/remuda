@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{Result, bail};
 
@@ -50,8 +50,15 @@ pub fn logs(home: &Path, unit: Unit) -> PathBuf {
 /// What an installed plist sets `var` to, as [`plist`] writes it.
 pub fn set_in(installed: &str, var: &str) -> Option<String> {
     let key = format!("<key>{var}</key>");
-    let after = &installed[installed.find(&key)? + key.len()..];
-    let value = after.trim_start().strip_prefix("<string>")?;
+    let mut after = &installed[installed.find(&key)? + key.len()..];
+    loop {
+        after = after.trim_start();
+        let Some(comment) = after.strip_prefix("<!--") else {
+            break;
+        };
+        after = &comment[comment.find("-->")? + 3..];
+    }
+    let value = after.strip_prefix("<string>")?;
     let value = &value[..value.find("</string>")?];
     unescape(value).filter(|v| !v.is_empty())
 }
@@ -259,20 +266,40 @@ pub fn runs(unit: Unit, pid: u32) -> bool {
     loaded(unit).and_then(|p| pid_in(&p)) == Some(pid)
 }
 
-/// Loads the agent's plist afresh, so a changed one takes effect. A refresh
-/// the timer runs is let finish first, since a bootout would end it before
-/// it saved the tokens it rotated; false when it is still running at `wait`.
-pub fn reload(dir: &Path, unit: Unit, wait: Duration) -> bool {
-    let deadline = Instant::now() + wait;
-    while unit == Unit::Timer && loaded(unit).and_then(|p| pid_in(&p)).is_some() {
-        if Instant::now() >= deadline {
-            return false;
-        }
-        std::thread::sleep(Duration::from_millis(500));
-    }
+/// The store the timer's agent refreshes: the `REMUDA_STORE` its plist
+/// sets, else the default, since launchd passes no `XDG_DATA_HOME`.
+fn timer_store(dir: &Path, home: &Path) -> PathBuf {
+    std::fs::read_to_string(plist_path(dir, Unit::Timer))
+        .ok()
+        .and_then(|text| set_in(&text, "REMUDA_STORE"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".local/share/remuda/credentials"))
+}
+
+/// Loads the agent's plist afresh, so a changed one takes effect. The
+/// timer's is reloaded holding its store's lock, which every refresh holds
+/// while it runs, so a bootout never ends one before it saved the tokens it
+/// rotated; false when a refresh still holds it at `wait`.
+pub fn reload(dir: &Path, home: &Path, unit: Unit, wait: Duration) -> bool {
+    let _held = match unit {
+        Unit::Timer => match fsx::lock_within(&timer_store(dir, home), wait) {
+            Ok(Some(file)) => Some(file),
+            _ => return false,
+        },
+        Unit::Serve => None,
+    };
     let _ = launchctl(&["bootout", &target(unit)]);
+    bootstrap(dir, unit)
+}
+
+fn bootstrap(dir: &Path, unit: Unit) -> bool {
     let plist = plist_path(dir, unit);
     launchctl(&["bootstrap", &domain(), &plist.to_string_lossy()]).is_some_and(|(ok, _)| ok)
+}
+
+/// Loads the agent unless it is loaded already.
+pub fn load(dir: &Path, unit: Unit) -> bool {
+    loaded(unit).is_some() || bootstrap(dir, unit)
 }
 
 /// Loads the agent, or restarts it when it is loaded already.
@@ -280,8 +307,7 @@ pub fn start(dir: &Path, unit: Unit) -> bool {
     if loaded(unit).is_some() {
         return launchctl(&["kickstart", "-k", &target(unit)]).is_some_and(|(ok, _)| ok);
     }
-    let plist = plist_path(dir, unit);
-    launchctl(&["bootstrap", &domain(), &plist.to_string_lossy()]).is_some_and(|(ok, _)| ok)
+    bootstrap(dir, unit)
 }
 
 /// Writes the agents asked for and loads them, replacing what runs.

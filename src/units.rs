@@ -151,16 +151,21 @@ impl Manager {
                     }
                     let before = changed.iter().find(|(u, _)| *u == unit);
                     if let Some((_, before)) = before {
-                        if !crate::launchd::reload(dir, unit, REFRESH_WAIT) {
-                            let restored =
-                                fsx::write_private(&crate::launchd::plist_path(dir, unit), before);
+                        if !crate::launchd::reload(dir, home, unit, REFRESH_WAIT) {
+                            let back = match fsx::write_private(
+                                &crate::launchd::plist_path(dir, unit),
+                                before,
+                            ) {
+                                Err(e) => format!(", and its plist was not put back: {e:#}"),
+                                Ok(()) if !crate::launchd::load(dir, unit) => format!(
+                                    ", and is not loaded; run {}",
+                                    self.fix(unit, Action::Enable)
+                                ),
+                                Ok(()) => String::new(),
+                            };
                             done.failed.push(format!(
-                                "{} was not reloaded{}; run `remuda sync-units` again",
-                                self.name(unit),
-                                match restored {
-                                    Ok(()) => String::new(),
-                                    Err(e) => format!(" and its plist not put back: {e:#}"),
-                                }
+                                "{} was not reloaded{back}; run `remuda sync-units` again",
+                                self.name(unit)
                             ));
                         }
                         continue;
