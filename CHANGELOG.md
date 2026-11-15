@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-11-15
+
 ### Added
 
 - On macOS, Claude Code's login is read from and switched in the login
