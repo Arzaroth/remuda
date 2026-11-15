@@ -522,6 +522,23 @@ mod tests {
     }
 
     #[test]
+    fn the_loaded_store_is_read_from_the_job_s_own_environment() {
+        let printed = "gui/501/com.github.arzaroth.remuda.refresh = {\n\tinherited environment = {\n\t\tREMUDA_STORE => /inherited\n\t}\n\tenvironment = {\n\t\tREMUDA_SERVICE => 1\n\t\tREMUDA_STORE => /loaded/a b\n\t}\n\tpid = 7\n}\n";
+        assert_eq!(
+            loaded_env(printed, "REMUDA_STORE").as_deref(),
+            Some("/loaded/a b")
+        );
+        assert_eq!(loaded_env(printed, "CODEX_HOME"), None);
+        assert_eq!(
+            loaded_env(
+                "\tinherited environment = {\n\t\tREMUDA_STORE => /x\n\t}\n",
+                "REMUDA_STORE"
+            ),
+            None
+        );
+    }
+
+    #[test]
     fn the_fixes_name_launchctl_and_the_agent() {
         let m = Manager::Launchd {
             dir: PathBuf::from("/Users/me/Library/LaunchAgents"),

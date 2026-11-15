@@ -1156,11 +1156,16 @@ fn the_timer_is_replaced_only_once_the_store_it_refreshes_is_free() {
     let home = Home::new();
     let launchctl = home.path("bin/launchctl");
     let log = home.path("launchctl.log");
+    let loaded_store = home.path("store-a");
     std::fs::write(
         &launchctl,
         format!(
-            "#!/bin/sh\necho \"$1\" >> '{}'\n[ \"$1\" = print ] && exit \"$PRINT_EXIT\"\nexit 0\n",
-            log.display()
+            "#!/bin/sh\necho \"$1\" >> '{}'\n\
+             [ \"$1\" = print ] || exit 0\n\
+             [ \"$PRINT_EXIT\" = 0 ] || exit \"$PRINT_EXIT\"\n\
+             printf '\\tenvironment = {{\\n\\t\\tREMUDA_STORE => %s\\n\\t}}\\n' '{}'\n",
+            log.display(),
+            loaded_store.display()
         ),
     )
     .unwrap();
@@ -1168,11 +1173,10 @@ fn the_timer_is_replaced_only_once_the_store_it_refreshes_is_free() {
     let agents = home.path("Library/LaunchAgents");
     std::fs::create_dir_all(&agents).unwrap();
     let refresh = agents.join("com.github.arzaroth.remuda.refresh.plist");
-    let loaded_store = home.path("store-a");
     std::fs::create_dir_all(&loaded_store).unwrap();
     let old = format!(
         "<plist><dict><key>REMUDA_STORE</key><string>{}</string></dict></plist>",
-        loaded_store.display()
+        home.path("store-c").display()
     );
 
     std::fs::write(&refresh, &old).unwrap();
@@ -1188,6 +1192,14 @@ fn the_timer_is_replaced_only_once_the_store_it_refreshes_is_free() {
     assert!(stderr.contains("cannot say whether"), "{stderr}");
     assert_eq!(std::fs::read_to_string(&refresh).unwrap(), old);
     assert!(!std::fs::read_to_string(&log).unwrap().contains("bootout"));
+    let unknown = home
+        .command(&["sync-units", "--install", "timer"])
+        .env("REMUDA_TEST_LAUNCHCTL", &launchctl)
+        .env("PRINT_EXIT", "1")
+        .output()
+        .unwrap();
+    assert!(!unknown.status.success());
+    assert!(!std::fs::read_to_string(&log).unwrap().contains("bootout"));
 
     let sync = &["sync-units"][..];
     let install = &["sync-units", "--install", "timer"][..];
@@ -1196,7 +1208,6 @@ fn the_timer_is_replaced_only_once_the_store_it_refreshes_is_free() {
     for (args, print, held) in [
         (sync, "0", &store_lock),
         (install, "0", &store_lock),
-        (install, "113", &store_lock),
         (sync, "0", &serial),
     ] {
         std::fs::write(&refresh, &old).unwrap();
