@@ -106,7 +106,11 @@ impl Manager {
         match self {
             Manager::Systemd(dirs) => {
                 let name = self.name(unit);
-                dirs.iter().any(|dir| dir.join(&name).exists()) && systemctl(&["start", &name])
+                if !dirs.iter().any(|dir| dir.join(&name).exists()) {
+                    return false;
+                }
+                systemctl(&["reset-failed", &name]);
+                systemctl(&["start", &name])
             }
             Manager::Launchd { dir, .. } => {
                 crate::launchd::plist_path(dir, unit).exists() && crate::launchd::start(dir, unit)

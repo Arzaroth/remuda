@@ -104,6 +104,9 @@ pub struct App {
     store: Store,
     places: Places,
     providers: Vec<Box<dyn Provider>>,
+    /// Providers this run does not serve, whose stored logins the config
+    /// may still name.
+    left_out: Vec<String>,
     token: String,
     port: u16,
     open: Box<dyn Opener>,
@@ -247,6 +250,7 @@ impl App {
             store,
             places,
             providers,
+            left_out: Vec::new(),
             token,
             port,
             open,
@@ -260,6 +264,11 @@ impl App {
             firewall: Mutex::default(),
             me: OnceLock::new(),
         }
+    }
+
+    pub fn leaving_out(mut self, ids: Vec<String>) -> Self {
+        self.left_out = ids;
+        self
     }
 
     /// Starts the proxy when its settings say so. The listener holds the app
@@ -831,8 +840,12 @@ impl App {
     }
 
     fn logins(&self, provider: &str) -> Option<Vec<String>> {
-        let p = self.providers().into_iter().find(|p| p.id() == provider)?;
-        let entries = self.store.list(p.id()).ok()?;
+        let known = self.providers().iter().any(|p| p.id() == provider)
+            || self.left_out.iter().any(|id| id == provider);
+        if !known {
+            return None;
+        }
+        let entries = self.store.list(provider).ok()?;
         Some(entries.into_iter().map(|e| e.name).collect())
     }
 
@@ -1971,6 +1984,44 @@ mod tests {
                 .contains("changed since it was read")
         );
         assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+    }
+
+    #[test]
+    fn a_config_naming_a_provider_left_out_still_saves() {
+        let e = env(&OFFLINE);
+        e.stored("work", "u-work", HOUR);
+        let app = App::new(
+            Store::open(e.store.root()),
+            places(&e),
+            Vec::new(),
+            TOKEN.into(),
+            PORT,
+            Box::new(Nowhere),
+        )
+        .leaving_out(vec!["claude".into()]);
+        let (_, r) = call(&app, "GET", "/api/config", Value::Null);
+
+        let config = json!({
+            "auto": {"claude": {"enabled": true, "logins": ["work"]}},
+            "warm": {"claude": ["work"]}
+        });
+        let (status, saved) = call(
+            &app,
+            "POST",
+            "/api/config",
+            json!({"config": config, "version": r["version"]}),
+        );
+        assert_eq!(status, 200, "{saved}");
+        let (_, r) = call(&app, "GET", "/api/config", Value::Null);
+        assert_eq!(r["problems"], json!([]));
+
+        let (status, _) = call(
+            &app,
+            "POST",
+            "/api/config",
+            json!({"config": {"auto": {"claude": {"logins": ["ghost"]}}}, "version": r["version"]}),
+        );
+        assert_eq!(status, 400);
     }
 
     #[test]
