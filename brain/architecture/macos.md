@@ -40,8 +40,12 @@ The refresh timer and `serve` are launchd agents rather than systemd units
 --install serve`), which writes each plist, then `launchctl bootout`,
 `enable` and `bootstrap gui/$UID`. That needs someone logged in to the Mac's
 desktop, SSH or not. After an update, `sync-units` rewrites the plists that
-differ, as it does the systemd units, and `launchctl kickstart -k` restarts a
-loaded `serve` (and an agent whose plist changed). The page's update runs
+differ, as it does the systemd units. A loaded agent whose plist changed is
+booted out and bootstrapped again, the timer's only once a scheduled refresh
+it runs has ended (up to five minutes), since a bootout would cut it before it
+saves the tokens it rotated. A reload that fails puts the old plist back and
+fails the sync, so the next one tries again. An unchanged loaded `serve` gets
+`launchctl kickstart -k`, onto the new binary. The page's update runs
 `sync-units` in a process group of its own, so the restart of `serve` does not
 end it too.
 
