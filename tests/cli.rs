@@ -1158,7 +1158,10 @@ fn the_timer_is_replaced_only_once_the_store_it_refreshes_is_free() {
     let log = home.path("launchctl.log");
     std::fs::write(
         &launchctl,
-        format!("#!/bin/sh\necho \"$1\" >> '{}'\nexit 0\n", log.display()),
+        format!(
+            "#!/bin/sh\necho \"$1\" >> '{}'\n[ \"$1\" = print ] && exit \"$PRINT_EXIT\"\nexit 0\n",
+            log.display()
+        ),
     )
     .unwrap();
     std::fs::set_permissions(&launchctl, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -1172,13 +1175,19 @@ fn the_timer_is_replaced_only_once_the_store_it_refreshes_is_free() {
         loaded_store.display()
     );
 
-    for args in [
-        &["sync-units"][..],
-        &["sync-units", "--install", "timer"][..],
+    let sync = &["sync-units"][..];
+    let install = &["sync-units", "--install", "timer"][..];
+    let serial = agents.join(".remuda.lock");
+    let store_lock = loaded_store.join(".lock");
+    for (args, print, held) in [
+        (sync, "0", &store_lock),
+        (install, "0", &store_lock),
+        (install, "113", &store_lock),
+        (sync, "0", &serial),
     ] {
         std::fs::write(&refresh, &old).unwrap();
         let _ = std::fs::remove_file(&log);
-        let lock = std::fs::File::create(loaded_store.join(".lock")).unwrap();
+        let lock = std::fs::File::create(held).unwrap();
         lock.lock().unwrap();
         let log_at = log.clone();
         let release = std::thread::spawn(move || {
@@ -1195,6 +1204,7 @@ fn the_timer_is_replaced_only_once_the_store_it_refreshes_is_free() {
             .command(args)
             .env("REMUDA_TEST_LAUNCHCTL", &launchctl)
             .env("REMUDA_STORE", home.path("store-b"))
+            .env("PRINT_EXIT", print)
             .output()
             .unwrap();
         release.join().unwrap();
@@ -1206,7 +1216,7 @@ fn the_timer_is_replaced_only_once_the_store_it_refreshes_is_free() {
         let calls = std::fs::read_to_string(&log).unwrap();
         let released = calls.find("released").unwrap();
         let bootout = calls.find("bootout").unwrap();
-        assert!(released < bootout, "{args:?}: {calls}");
+        assert!(released < bootout, "{args:?} {print} {held:?}: {calls}");
         assert!(
             std::fs::read_to_string(&refresh)
                 .unwrap()
