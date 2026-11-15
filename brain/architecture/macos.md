@@ -28,8 +28,9 @@ The refresh timer and `serve` are launchd agents rather than systemd units
 - `~/Library/LaunchAgents/com.github.arzaroth.remuda.refresh.plist` runs
   `~/.local/bin/remuda refresh --scheduled` every 1800 seconds.
 - `com.github.arzaroth.remuda.serve.plist` runs `remuda serve` at load and
-  again after a crash (`KeepAlive` `Crashed`), the closest to
-  `Restart=on-abnormal`.
+  again after a failure (`KeepAlive` `SuccessfulExit` false), at most every
+  30 seconds (`ThrottleInterval`), like the unit's `Restart=on-failure`.
+  launchd has no start limit, so it never gives up.
 - Both set `REMUDA_SERVICE=1`, a `PATH` starting with `~/.local/bin` and
   Homebrew's, and the directory variables the installing shell set
   (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `REMUDA_STORE` and the others
