@@ -154,9 +154,11 @@ impl Manager {
                                 let path = crate::launchd::plist_path(dir, unit);
                                 done.failed.push(match fsx::write_private(&path, before) {
                                     Ok(()) => format!("{e:#}, so its plist was left as it was"),
-                                    Err(w) => {
-                                        format!("{e:#}, and its plist was not put back: {w:#}")
-                                    }
+                                    Err(w) => format!(
+                                        "{e:#}, and its plist was not put back: {w:#}; \
+                                         {} says whether it is loaded",
+                                        self.fix(unit, Action::Status)
+                                    ),
                                 });
                             }
                             continue;
