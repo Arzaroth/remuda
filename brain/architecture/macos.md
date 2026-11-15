@@ -99,7 +99,8 @@ disabled), `enabled` (loaded) and `disabled` (a plist, not loaded).
   and an SSH session have, whose arguments macOS withholds): auto mode
   then holds rather than switch past a CLI it could not see. Another
   user's processes, those that exited, zombies and `P_SUGID` ones count as
-  running no CLI.
+  running no CLI. A process `KERN_PROC_PID` does not describe either counts
+  as this user's when it may be signalled.
 
 ## Browser
 
