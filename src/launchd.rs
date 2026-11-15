@@ -9,6 +9,7 @@ use crate::units::{Refreshed, Unit};
 
 pub const SERVE: &str = "com.github.arzaroth.remuda.serve";
 pub const REFRESH: &str = "com.github.arzaroth.remuda.refresh";
+const REFRESH_WAIT: Duration = Duration::from_secs(300);
 
 /// The variables the shell may set that move what remuda reads, copied into
 /// the agents so they look where it does.
@@ -268,25 +269,32 @@ pub fn runs(unit: Unit, pid: u32) -> bool {
 
 /// The store the timer's agent refreshes: the `REMUDA_STORE` its plist
 /// sets, else the default, since launchd passes no `XDG_DATA_HOME`.
-fn timer_store(dir: &Path, home: &Path) -> PathBuf {
-    std::fs::read_to_string(plist_path(dir, Unit::Timer))
-        .ok()
-        .and_then(|text| set_in(&text, "REMUDA_STORE"))
+pub fn store_in(plist: &str, home: &Path) -> PathBuf {
+    set_in(plist, "REMUDA_STORE")
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".local/share/remuda/credentials"))
 }
 
-/// Loads the agent's plist afresh, so a changed one takes effect. The
-/// timer's is reloaded holding its store's lock, which every refresh holds
-/// while it runs, so a bootout never ends one before it saved the tokens it
-/// rotated; false when a refresh still holds it at `wait`.
-pub fn reload(dir: &Path, home: &Path, unit: Unit, wait: Duration) -> bool {
-    let _held = match unit {
-        Unit::Timer => match fsx::lock_within(&timer_store(dir, home), wait) {
-            Ok(Some(file)) => Some(file),
-            _ => return false,
-        },
-        Unit::Serve => None,
+/// The lock of the store the loaded timer refreshes, as `plist` (the one
+/// launchd loaded) names it, which every refresh holds while it runs: held
+/// across a bootout, it never ends one before it saved the tokens it
+/// rotated. None for `serve`; an error when a refresh still holds it.
+fn quiet(unit: Unit, plist: &str, home: &Path) -> Result<Option<std::fs::File>> {
+    if unit != Unit::Timer || loaded(unit).is_none() {
+        return Ok(None);
+    }
+    let store = store_in(plist, home);
+    match fsx::lock_within(&store, REFRESH_WAIT)? {
+        Some(file) => Ok(Some(file)),
+        None => bail!("a refresh of {} is still running", store.display()),
+    }
+}
+
+/// Loads the agent's plist afresh, so a changed one takes effect, the
+/// timer's under [`quiet`] for `before`, the plist it was loaded from.
+pub fn reload(dir: &Path, home: &Path, unit: Unit, before: &str) -> bool {
+    let Ok(_held) = quiet(unit, before, home) else {
+        return false;
     };
     let _ = launchctl(&["bootout", &target(unit)]);
     bootstrap(dir, unit)
@@ -329,6 +337,7 @@ pub fn install(
                 .filter(|x| !x.is_empty())
                 .or_else(|| set_in(&installed, v))
         };
+        let _held = quiet(*unit, &installed, home)?;
         fsx::write_private(&path, &plist(*unit, home, &kept))?;
         let _ = launchctl(&["bootout", &target(*unit)]);
         let _ = launchctl(&["enable", &target(*unit)]);

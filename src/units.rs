@@ -4,7 +4,6 @@ use crate::fsx;
 
 pub const TIMER: &str = "remuda-refresh.timer";
 pub const SERVE: &str = "remuda-serve.service";
-const REFRESH_WAIT: std::time::Duration = std::time::Duration::from_secs(300);
 
 pub const UNITS: [(&str, &str); 3] = [
     (
@@ -151,7 +150,7 @@ impl Manager {
                     }
                     let before = changed.iter().find(|(u, _)| *u == unit);
                     if let Some((_, before)) = before {
-                        if !crate::launchd::reload(dir, home, unit, REFRESH_WAIT) {
+                        if !crate::launchd::reload(dir, home, unit, before) {
                             let back = match fsx::write_private(
                                 &crate::launchd::plist_path(dir, unit),
                                 before,
