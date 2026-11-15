@@ -1175,6 +1175,20 @@ fn the_timer_is_replaced_only_once_the_store_it_refreshes_is_free() {
         loaded_store.display()
     );
 
+    std::fs::write(&refresh, &old).unwrap();
+    let unknown = home
+        .command(&["sync-units"])
+        .env("REMUDA_TEST_LAUNCHCTL", &launchctl)
+        .env("REMUDA_STORE", home.path("store-b"))
+        .env("PRINT_EXIT", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&unknown.stderr);
+    assert!(!unknown.status.success(), "{stderr}");
+    assert!(stderr.contains("cannot say whether"), "{stderr}");
+    assert_eq!(std::fs::read_to_string(&refresh).unwrap(), old);
+    assert!(!std::fs::read_to_string(&log).unwrap().contains("bootout"));
+
     let sync = &["sync-units"][..];
     let install = &["sync-units", "--install", "timer"][..];
     let serial = agents.join(".remuda.lock");
