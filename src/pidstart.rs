@@ -15,22 +15,27 @@ pub fn start_time(pid: u32) -> Option<u64> {
 #[cfg(target_os = "macos")]
 const ZOMBIE: u32 = 5;
 
-/// Whether `pid` runs as this user: a process it may signal that is not
-/// known to be a zombie, even when macOS will not describe it.
+/// Whether `pid` runs as this user, with this user's effective uid, is not a
+/// zombie and never changed its credentials (`P_SUGID`, as `login` and an
+/// SSH session do, which macOS keeps their arguments from), even when macOS
+/// will not describe it otherwise.
 #[cfg(target_os = "macos")]
 pub fn runs_as_me(pid: u32) -> bool {
-    // SAFETY: signal 0 only checks that the process exists and may be signalled.
-    let signalled = unsafe { libc::kill(pid as libc::pid_t, 0) } == 0;
-    live_and_mine(signalled, state(pid))
+    // SAFETY: geteuid cannot fail.
+    let me = unsafe { libc::geteuid() };
+    live_and_mine(me, record(pid))
 }
 
-/// The process's `p_stat` from `KERN_PROC_PID`, which also answers for a
-/// zombie, where `proc_pidinfo` does not. The `kinfo_proc` it fills starts
-/// with `extern_proc`, whose `p_stat` follows two list pointers, two more
-/// pointers and the `p_flag` int.
+/// The process's `p_stat` and effective uid from `KERN_PROC_PID`, which
+/// answers for a zombie and a setuid process, where `proc_pidinfo` and
+/// `KERN_PROCARGS2` do not. The 64-bit `kinfo_proc` has `p_flag` and
+/// `p_stat` after `extern_proc`'s four pointers, and the uid in
+/// `kp_eproc`'s `e_ucred`, after two pointers and `e_pcred`.
 #[cfg(target_os = "macos")]
-fn state(pid: u32) -> Option<u32> {
+fn record(pid: u32) -> Option<Record> {
+    const P_FLAG: usize = 32;
     const P_STAT: usize = 36;
+    const CR_UID: usize = 420;
     let mut mib = [
         libc::CTL_KERN,
         libc::KERN_PROC,
@@ -50,12 +55,28 @@ fn state(pid: u32) -> Option<u32> {
             0,
         )
     };
-    (rc == 0 && len > P_STAT).then(|| u32::from(info[P_STAT]))
+    let word = |at: usize| u32::from_ne_bytes(info[at..at + 4].try_into().unwrap());
+    (rc == 0 && len >= CR_UID + 4).then(|| Record {
+        flag: word(P_FLAG),
+        stat: u32::from(info[P_STAT]),
+        uid: word(CR_UID),
+    })
 }
 
 #[cfg(target_os = "macos")]
-fn live_and_mine(signalled: bool, status: Option<u32>) -> bool {
-    signalled && status != Some(ZOMBIE)
+fn live_and_mine(me: u32, record: Option<Record>) -> bool {
+    record.is_some_and(|r| r.uid == me && r.stat != ZOMBIE && r.flag & P_SUGID == 0)
+}
+
+#[cfg(target_os = "macos")]
+const P_SUGID: u32 = 0x100;
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy)]
+struct Record {
+    flag: u32,
+    stat: u32,
+    uid: u32,
 }
 
 #[cfg(target_os = "macos")]
@@ -101,16 +122,18 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn a_process_macos_will_not_describe_still_counts_as_mine() {
-        assert!(live_and_mine(true, None));
-        assert!(live_and_mine(true, Some(2)));
-        assert!(!live_and_mine(true, Some(ZOMBIE)));
-        assert!(!live_and_mine(false, None));
+    fn a_zombie_another_uid_and_changed_credentials_are_not_mine() {
+        let run = |flag, stat, uid| Some(Record { flag, stat, uid });
+        assert!(live_and_mine(501, run(0x4004, 2, 501)));
+        assert!(!live_and_mine(501, run(0x4004, ZOMBIE, 501)));
+        assert!(!live_and_mine(501, run(0x4004, 2, 0)));
+        assert!(!live_and_mine(501, run(0x104, 2, 501)));
+        assert!(!live_and_mine(501, None));
         assert!(runs_as_me(std::process::id()));
         assert!(!runs_as_me(1));
         let mut child = std::process::Command::new("/usr/bin/true").spawn().unwrap();
         let pid = child.id();
-        while state(pid) != Some(ZOMBIE) {
+        while record(pid).map(|r| r.stat) != Some(ZOMBIE) {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         assert!(!runs_as_me(pid));

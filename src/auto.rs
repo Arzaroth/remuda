@@ -664,7 +664,8 @@ pub fn listed() -> std::io::Result<Vec<Process>> {
             Ok(args) => args,
             Err(()) => {
                 return Err(std::io::Error::other(format!(
-                    "macOS gave no arguments for process {pid}, which runs as this user"
+                    "macOS gave no arguments for process {pid} ({}), which runs as this user",
+                    String::from_utf8_lossy(&comm)
                 )));
             }
         };
