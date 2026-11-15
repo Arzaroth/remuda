@@ -285,6 +285,20 @@ fn open_lock(dir: &Path) -> Result<File> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_held_store_lock_is_waited_for_and_given_up_on() {
+        let tmp = tempfile::tempdir().unwrap();
+        let held = super::lock(tmp.path()).unwrap();
+        let wait = std::time::Duration::from_millis(300);
+        assert!(super::lock_within(tmp.path(), wait).unwrap().is_none());
+        let freed = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            drop(held);
+        });
+        assert!(super::lock_within(tmp.path(), wait * 10).unwrap().is_some());
+        freed.join().unwrap();
+    }
+
     use super::*;
 
     #[test]

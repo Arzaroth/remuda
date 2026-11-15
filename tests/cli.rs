@@ -1096,13 +1096,23 @@ fn sync_units_rewrites_the_installed_agents_and_restarts_serve() {
 
 #[cfg(target_os = "macos")]
 #[test]
-fn a_reload_launchd_refuses_puts_the_old_agent_back_for_the_next_sync() {
+fn a_reload_launchd_refuses_loads_the_old_agent_back_for_the_next_sync() {
     use std::os::unix::fs::PermissionsExt;
     let home = Home::new();
     let launchctl = home.path("bin/launchctl");
+    let out = home.path("booted-out");
+    let failed = home.path("failed-once");
     std::fs::write(
         &launchctl,
-        "#!/bin/sh\ncase \"$1\" in print) exit 0;; bootstrap) exit 5;; esac\n",
+        format!(
+            "#!/bin/sh\ncase \"$1\" in\n\
+             print) [ -e '{out}' ] && exit 113; exit 0;;\n\
+             bootout) touch '{out}';;\n\
+             bootstrap) [ -e '{failed}' ] || {{ touch '{failed}'; exit 5; }}; rm -f '{out}';;\n\
+             esac\n",
+            out = out.display(),
+            failed = failed.display()
+        ),
     )
     .unwrap();
     std::fs::set_permissions(&launchctl, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -1110,16 +1120,33 @@ fn a_reload_launchd_refuses_puts_the_old_agent_back_for_the_next_sync() {
     std::fs::create_dir_all(&agents).unwrap();
     let refresh = agents.join("com.github.arzaroth.remuda.refresh.plist");
     std::fs::write(&refresh, "old").unwrap();
+    let sync = || {
+        home.command(&["sync-units"])
+            .env("REMUDA_TEST_LAUNCHCTL", &launchctl)
+            .output()
+            .unwrap()
+    };
 
-    let out = home
-        .command(&["sync-units"])
-        .env("REMUDA_TEST_LAUNCHCTL", &launchctl)
-        .output()
-        .unwrap();
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(!out.status.success(), "{stderr}");
+    let first = sync();
+    let stderr = String::from_utf8_lossy(&first.stderr);
+    assert!(!first.status.success(), "{stderr}");
     assert!(stderr.contains("was not reloaded"), "{stderr}");
+    assert!(!stderr.contains("is not loaded"), "{stderr}");
     assert_eq!(std::fs::read_to_string(&refresh).unwrap(), "old");
+    assert!(!out.exists(), "the old agent was not loaded back");
+
+    let second = sync();
+    assert!(
+        second.status.success(),
+        "{}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    assert!(
+        std::fs::read_to_string(&refresh)
+            .unwrap()
+            .contains("<string>--scheduled</string>")
+    );
+    assert!(!out.exists());
 }
 
 #[cfg(target_os = "linux")]

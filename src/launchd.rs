@@ -461,6 +461,10 @@ mod tests {
             None
         );
         assert_eq!(set_in("<key>A</key><string>a&b</string>", "A"), None);
+        assert_eq!(
+            set_in("<key>A</key> <!-- mine --><!----> <string>/a</string>", "A").as_deref(),
+            Some("/a")
+        );
     }
 
     #[test]
