@@ -2054,6 +2054,33 @@ order = [["Axeo"], ["perso"]]
 
     #[cfg(target_os = "macos")]
     #[test]
+    fn a_process_of_mine_that_never_gives_its_arguments_is_an_error() {
+        use std::cell::Cell;
+        use std::time::Duration;
+        let tries = Cell::new(0);
+        let none = || {
+            tries.set(tries.get() + 1);
+            None
+        };
+        assert_eq!(asked(&none, &|| true, Duration::ZERO), Err(()));
+        assert_eq!(tries.get(), 4);
+        assert_eq!(
+            asked(&|| None, &|| false, Duration::ZERO),
+            Ok(Default::default())
+        );
+        let late = Cell::new(0);
+        let second = || {
+            late.set(late.get() + 1);
+            (late.get() == 2).then(|| (b"node".to_vec(), Vec::new()))
+        };
+        assert_eq!(
+            asked(&second, &|| true, Duration::ZERO),
+            Ok((b"node".to_vec(), Vec::new()))
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
     fn macos_lists_this_process_with_its_arguments_and_environment() {
         let me = std::process::id();
         let seen = listed().unwrap();
