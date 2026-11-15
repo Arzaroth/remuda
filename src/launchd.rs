@@ -644,6 +644,38 @@ mod tests {
     }
 
     #[test]
+    fn a_relative_claude_dir_is_found_in_either_form() {
+        let shell = |vars: &'static [(&'static str, &'static str)]| {
+            move |v: &str| {
+                vars.iter()
+                    .find(|(k, _)| *k == v)
+                    .map(|(_, x)| (*x).to_owned())
+            }
+        };
+        assert_eq!(
+            relative_claude_dir(&shell(&[("CLAUDE_CONFIG_DIR", " work/.claude ")])).as_deref(),
+            Some("work/.claude")
+        );
+        assert_eq!(
+            relative_claude_dir(&shell(&[
+                ("REMUDA_OUTER_CLAUDE_CONFIG_DIR", "rel"),
+                ("CLAUDE_CONFIG_DIR", "/tmp/session")
+            ]))
+            .as_deref(),
+            Some("rel")
+        );
+        assert_eq!(
+            relative_claude_dir(&shell(&[("CLAUDE_CONFIG_DIR", "/Users/me/.claude")])),
+            None
+        );
+        assert_eq!(
+            relative_claude_dir(&shell(&[("CLAUDE_CONFIG_DIR", "")])),
+            None
+        );
+        assert_eq!(relative_claude_dir(&shell(&[])), None);
+    }
+
+    #[test]
     fn the_fixes_name_launchctl_and_the_agent() {
         let m = Manager::Launchd {
             dir: PathBuf::from("/Users/me/Library/LaunchAgents"),

@@ -1250,6 +1250,26 @@ fn the_timer_is_replaced_only_once_the_store_it_refreshes_is_free() {
     }
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn sync_units_refuses_a_relative_claude_config_dir() {
+    let home = Home::new();
+    let out = home
+        .command(&["sync-units", "--install", "timer"])
+        .env("REMUDA_TEST_LAUNCHCTL", "/usr/bin/false")
+        .env("CLAUDE_CONFIG_DIR", "work/.claude")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{stderr}");
+    assert!(stderr.contains("absolute path"), "{stderr}");
+    assert!(
+        !home
+            .path("Library/LaunchAgents/com.github.arzaroth.remuda.refresh.plist")
+            .exists()
+    );
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn sync_units_rewrites_the_installed_units_and_reloads_systemd() {
