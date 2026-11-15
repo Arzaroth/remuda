@@ -411,6 +411,33 @@ mod tests {
     }
 
     #[test]
+    fn a_value_an_editor_encoded_is_kept_as_launchd_reads_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("LaunchAgents");
+        std::fs::create_dir_all(&dir).unwrap();
+        let custom = plist(
+            Unit::Serve,
+            tmp.path(),
+            &env(&[("REMUDA_STORE", "/s&t\"é")]),
+        );
+        std::fs::write(
+            plist_path(&dir, Unit::Serve),
+            custom.replace("/s&amp;t\"é", "/s&#38;t&quot;&#xE9;"),
+        )
+        .unwrap();
+        refresh(&dir, tmp.path(), &env(&[]));
+        assert_eq!(
+            std::fs::read_to_string(plist_path(&dir, Unit::Serve)).unwrap(),
+            custom
+        );
+        assert_eq!(
+            set_in("<key>A</key><string>a&#9999999;b</string>", "A"),
+            None
+        );
+        assert_eq!(set_in("<key>A</key><string>a&b</string>", "A"), None);
+    }
+
+    #[test]
     fn launchctl_s_answers_are_read() {
         let printed = "gui/501/com.github.arzaroth.remuda.serve = {\n\tactive count = 1\n\tpid = 4242\n\tstate = running\n}\n";
         assert_eq!(pid_in(printed), Some(4242));

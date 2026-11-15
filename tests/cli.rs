@@ -1094,6 +1094,34 @@ fn sync_units_rewrites_the_installed_agents_and_restarts_serve() {
     );
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn a_reload_launchd_refuses_puts_the_old_agent_back_for_the_next_sync() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = Home::new();
+    let launchctl = home.path("bin/launchctl");
+    std::fs::write(
+        &launchctl,
+        "#!/bin/sh\ncase \"$1\" in print) exit 0;; bootstrap) exit 5;; esac\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&launchctl, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let agents = home.path("Library/LaunchAgents");
+    std::fs::create_dir_all(&agents).unwrap();
+    let refresh = agents.join("com.github.arzaroth.remuda.refresh.plist");
+    std::fs::write(&refresh, "old").unwrap();
+
+    let out = home
+        .command(&["sync-units"])
+        .env("REMUDA_TEST_LAUNCHCTL", &launchctl)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{stderr}");
+    assert!(stderr.contains("was not reloaded"), "{stderr}");
+    assert_eq!(std::fs::read_to_string(&refresh).unwrap(), "old");
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn sync_units_rewrites_the_installed_units_and_reloads_systemd() {
