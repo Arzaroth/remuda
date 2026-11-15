@@ -233,12 +233,16 @@ impl Manager {
                 format!("`systemctl --user {verb} {name}`")
             }
             Manager::Launchd { .. } => match action {
-                Action::Enable if crate::launchd::loaded(unit).is_some() => {
-                    format!("`launchctl kickstart gui/$(id -u)/{name}`")
-                }
-                Action::Enable => format!(
-                    "`launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/{name}.plist`"
-                ),
+                Action::Enable => match crate::launchd::probe(unit) {
+                    Ok(Some(_)) => format!("`launchctl kickstart gui/$(id -u)/{name}`"),
+                    Ok(None) => format!(
+                        "`launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/{name}.plist`"
+                    ),
+                    Err(_) => format!(
+                        "`launchctl print gui/$(id -u)/{name}` to see whether it is loaded, \
+                         then `launchctl kickstart` it if so or `launchctl bootstrap` its plist"
+                    ),
+                },
                 Action::Unmask => format!("`launchctl enable gui/$(id -u)/{name}`"),
                 Action::Restart => format!("`launchctl kickstart -k gui/$(id -u)/{name}`"),
                 Action::Status => format!("`launchctl print gui/$(id -u)/{name}`"),

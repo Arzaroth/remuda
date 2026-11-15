@@ -645,7 +645,10 @@ mod tests {
                 == format!(
                     "`launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/{REFRESH}.plist`"
                 )
-                || enable == format!("`launchctl kickstart gui/$(id -u)/{REFRESH}`"),
+                || enable == format!("`launchctl kickstart gui/$(id -u)/{REFRESH}`")
+                || enable.starts_with(&format!(
+                    "`launchctl print gui/$(id -u)/{REFRESH}` to see whether it is loaded"
+                )),
             "{enable}"
         );
         assert_eq!(
