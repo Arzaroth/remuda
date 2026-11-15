@@ -659,6 +659,10 @@ fn update(check_only: bool) -> Result<()> {
 
 fn sync_units(install: &[String]) -> Result<()> {
     let manager = units::Manager::from_env();
+    let _serial = match &manager {
+        units::Manager::Launchd { dir, .. } => Some(launchd::serialize(dir)?),
+        units::Manager::Systemd(_) => None,
+    };
     if !install.is_empty() {
         let units::Manager::Launchd { dir, home } = &manager else {
             bail!("install.sh installs the systemd units");

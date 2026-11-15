@@ -275,12 +275,13 @@ pub fn store_in(plist: &str, home: &Path) -> PathBuf {
         .unwrap_or_else(|| home.join(".local/share/remuda/credentials"))
 }
 
-/// The lock of the store the loaded timer refreshes, as `plist` (the one
-/// launchd loaded) names it, which every refresh holds while it runs: held
-/// across a bootout, it never ends one before it saved the tokens it
-/// rotated. None for `serve`; an error when a refresh still holds it.
+/// The lock of the store the timer refreshes, as `plist` (the one launchd
+/// loaded) names it, which every refresh holds while it runs: held across a
+/// bootout, it never ends one before it saved the tokens it rotated. Taken
+/// whether launchctl says the timer is loaded or not, since it may be
+/// wrong. None for `serve`; an error when a refresh still holds it.
 fn quiet(unit: Unit, plist: &str, home: &Path) -> Result<Option<std::fs::File>> {
-    if unit != Unit::Timer || loaded(unit).is_none() {
+    if unit != Unit::Timer {
         return Ok(None);
     }
     let store = store_in(plist, home);
@@ -316,6 +317,11 @@ pub fn start(dir: &Path, unit: Unit) -> bool {
         return launchctl(&["kickstart", "-k", &target(unit)]).is_some_and(|(ok, _)| ok);
     }
     bootstrap(dir, unit)
+}
+
+/// Held by a whole `sync-units`, so two never rewrite the agents at once.
+pub fn serialize(dir: &Path) -> Result<std::fs::File> {
+    fsx::lock_file(&dir.join(".remuda.lock"))
 }
 
 /// Writes the agents asked for and loads them, replacing what runs.
