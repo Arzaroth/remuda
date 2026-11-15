@@ -1079,8 +1079,15 @@ fn main() -> Result<()> {
             Box::new(opencode),
             Box::new(openrouter),
         ];
+        let mut left_out = Vec::new();
         if let Some(plan) = &plan {
             providers.retain(|p| plan.usable.iter().any(|id| id == p.id()));
+            left_out = seen
+                .homes
+                .keys()
+                .filter(|id| !plan.usable.contains(id))
+                .cloned()
+                .collect();
         }
         let (listener, port) = http::bind(port)?;
         let token = match served::taken_over(&paths::runtime_dir(), port) {
@@ -1113,7 +1120,8 @@ fn main() -> Result<()> {
             token,
             port,
             open,
-        );
+        )
+        .leaving_out(left_out);
         let app = std::sync::Arc::new(app);
         serve::watch(app.clone());
         app.start();
