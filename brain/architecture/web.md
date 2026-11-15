@@ -54,8 +54,10 @@ the unit, so a unit that gave up starts again. `serve` then:
 - checks the directories record like the scheduled refresh
   ([distribution.md](distribution.md)), printing one line per CLI it would not
   serve and leaving those CLIs out of the page, auto mode and the proxy, so
-  one CLI it cannot vouch for never stops the others. A CLI left out stays out
-  until the service restarts, even once `remuda ls` has recorded it;
+  one CLI it cannot vouch for never stops the others. The config check still
+  knows a CLI left out (`App::leaving_out`), so `[auto]` and `[warm]` entries
+  naming its stored logins stay valid and the page can save. A CLI left out
+  stays out until the service restarts, even once `remuda ls` has recorded it;
 - prints the URL without its token, since stdout is the journal;
 - opens no browser at start. Sign-ins still open their private window when
   the user manager has a display.
