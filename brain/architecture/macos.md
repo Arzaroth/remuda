@@ -33,31 +33,43 @@ The refresh timer and `serve` are launchd agents rather than systemd units
   launchd has no start limit, so it never gives up.
 - Both set `REMUDA_SERVICE=1`, a `PATH` starting with `~/.local/bin` and
   Homebrew's, and the directory variables the installing shell set
-  (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `REMUDA_STORE` and the others
-  `environment.d` holds on Linux), and log to `~/Library/Logs/remuda`.
+  (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `REMUDA_STORE`, `XDG_DATA_HOME`,
+  `XDG_CONFIG_HOME` and the others `environment.d` holds on Linux), and log
+  to `~/Library/Logs/remuda`. Each is read as remuda reads it, its
+  `REMUDA_OUTER_` form first inside a `remuda run` session, and a relative
+  directory is written absolute, since launchd starts the agent in `/`. A
+  variable the shell does not set keeps the value the installed plist has.
 
 `install.sh` asks the binary for them (`remuda sync-units --install timer
 --install serve`), which writes each plist, then `launchctl bootout`,
 `enable` and `bootstrap gui/$UID`. That needs someone logged in to the Mac's
 desktop, SSH or not. After an update, `sync-units` rewrites the plists that
-differ, as it does the systemd units. A loaded agent whose plist changed is
-booted out and bootstrapped again. A loaded timer is booted out, by a sync or
-by `--install timer`, only holding the lock of the store it refreshes, which
-every refresh holds while it runs, waiting up to five minutes for one to end,
-so a bootout never cuts one before it saves the tokens it rotated. That store
-is found as a refresh in that job finds it, from the environment
-`launchctl print` shows for it (its own, then what it inherits, as from
-`launchctl setenv`, then launchd's default): `REMUDA_STORE`, else
-`XDG_DATA_HOME`'s, else the default, never what the plist on disk says. When `launchctl print`
-fails with anything but "not found" (113), the install refuses, and a sync
-puts that agent's old plist back and fails. A whole `sync-units` holds
-`~/Library/LaunchAgents/.remuda.lock`, so two never rewrite the agents at
-once. A reload
-that fails puts the old plist back, loads it again and fails the sync, so the
-next one tries again. An unchanged loaded `serve` gets
+differ, as it does the systemd units, and boots out and bootstraps again a
+loaded agent whose plist changed. An unchanged loaded `serve` gets
 `launchctl kickstart -k`, onto the new binary. The page's update runs
 `sync-units` in a process group of its own, so the restart of `serve` does not
 end it too.
+
+A loaded timer is booted out, by a sync or by `--install timer`, only holding
+the lock of the store it refreshes, which every refresh holds while it runs,
+waiting up to five minutes for one to end, so a bootout never cuts one before
+it saves the tokens it rotated. That store is found as a refresh in that job
+finds it, from the environment `launchctl print` shows for it (its own, then
+what it inherits, as from `launchctl setenv`, then launchd's default):
+`REMUDA_STORE`, else `XDG_DATA_HOME`'s, else the default, never from the plist
+on disk. A whole `sync-units` holds `~/Library/LaunchAgents/.remuda.lock`, so
+two never rewrite the agents at once.
+
+When something fails, the sync fails and says what is left:
+
+- `launchctl print` failing with anything but "not found" (113): the install
+  refuses, and a sync puts that agent's old plist back.
+- A reload that fails: the old plist goes back and is loaded again, so the
+  next sync sees the difference and retries.
+- The old plist cannot be written back, or loaded again: the error says so
+  and names the `launchctl bootstrap` that loads it. A later sync skips an
+  agent that is not loaded, so until then it is the doctor's `disabled`
+  state, with that command as its fix.
 
 `units::Manager` hides which one runs: names, states and fixes for the doctor,
 `remuda open` starting `serve`, and whether a running `serve` is the
@@ -77,19 +89,23 @@ disabled), `enabled` (loaded) and `disabled` (a plist, not loaded).
 
 ## Browser
 
-A window can be shown in any session but an SSH login, and a link opens in
-the default browser through `/usr/bin/open`, never in a private window: the
-browsers' private-window flags need their binaries on `PATH`, which a Mac's
-apps are not. Over SSH, sign-ins paste their code as on a Linux machine
-without a display.
+A window can be shown in any session but an SSH login. A browser chosen by
+name (`--browser`, or `browser` in `config.toml`) whose binary is on `PATH` is
+launched as on Linux, with its private-window flag when one is asked for.
+Otherwise a link opens in the default browser through `/usr/bin/open`, which
+cannot be asked for a private window: remuda does not read the Mac's default
+browser, and the apps' binaries are seldom on `PATH`. Over SSH, sign-ins paste
+their code as on a Linux machine without a display.
 
 ## The proxy on the LAN
 
-A non-Apple binary run by launchd, `serve` and its proxy included, is subject
-to macOS's Local Network privacy. Listening and accepting a LAN client's
-connection need no permission (Apple's TN3179), but a connection remuda opens
-to a LAN address, such as an upstream there, fails with `EHOSTUNREACH` until
-the user allows remuda in System Settings, Privacy & Security, Local Network.
+From macOS 15, a LaunchAgent's process, `serve` and its proxy included, is
+subject to Local Network privacy (Apple's TN3179). Listening and accepting a
+LAN client's connection need no permission, but a connection remuda opens to
+a LAN address, such as an upstream there, fails with `EHOSTUNREACH` until the
+user allows remuda in System Settings, Privacy & Security, Local Network. A
+`serve` started from Terminal or over SSH, and any Mac before macOS 15, are
+not held to it.
 The card's firewall check knows only ufw and firewalld, so a Mac gets no
 firewall notice either. remuda works around neither.
 

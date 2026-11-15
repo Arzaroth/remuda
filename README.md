@@ -406,10 +406,11 @@ which listens on every interface and shows the LAN address in the base URLs.
 Traffic is plain HTTP, keys included. When ufw or firewalld blocks the port,
 the card shows the command that opens it (`sudo ufw allow in on eth0 to any port 8317 proto tcp`),
 after `sudo ufw status numbered` when a deny for some machines may still refuse them.
-On macOS, LAN clients can reach a `serve` started by its LaunchAgent as they
-are, but a connection remuda itself opens to a LAN address fails with
-`EHOSTUNREACH` until remuda is allowed under System Settings, Privacy &
-Security, Local Network.
+On macOS 15 and later, LAN clients can reach a `serve` started by its
+LaunchAgent as they are, but a connection remuda itself opens to a LAN address
+fails with `EHOSTUNREACH` until remuda is allowed under System Settings,
+Privacy & Security, Local Network. A `serve` started from Terminal or over SSH
+is not held to it.
 
 ## How a switch works
 
