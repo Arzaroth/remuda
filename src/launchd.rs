@@ -564,6 +564,11 @@ mod tests {
             loaded_store(defaulted, home),
             Path::new("/rel/remuda/credentials")
         );
+        let outer = "\tenvironment = {\n\t\tREMUDA_OUTER_REMUDA_STORE => \n\t\tREMUDA_STORE => /store-b\n\t\tXDG_DATA_HOME => /data\n\t}\n";
+        assert_eq!(
+            loaded_store(outer, home),
+            Path::new("/data/remuda/credentials")
+        );
         assert_eq!(
             loaded_store("", home),
             Path::new("/Users/me/.local/share/remuda/credentials")
