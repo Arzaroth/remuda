@@ -176,7 +176,7 @@ impl Manager {
                                     self.fix(unit, Action::Enable)
                                 ),
                                 Ok(()) if !crate::launchd::load(dir, unit) => format!(
-                                    ", and is not loaded; run {}",
+                                    ", and loading it again failed; run {}",
                                     self.fix(unit, Action::Enable)
                                 ),
                                 Ok(()) => String::new(),

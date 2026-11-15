@@ -1131,7 +1131,7 @@ fn a_reload_launchd_refuses_loads_the_old_agent_back_for_the_next_sync() {
     let stderr = String::from_utf8_lossy(&first.stderr);
     assert!(!first.status.success(), "{stderr}");
     assert!(stderr.contains("was not reloaded"), "{stderr}");
-    assert!(!stderr.contains("is not loaded"), "{stderr}");
+    assert!(!stderr.contains("loading it again failed"), "{stderr}");
     assert_eq!(std::fs::read_to_string(&refresh).unwrap(), "old");
     assert!(!out.exists(), "the old agent was not loaded back");
 
