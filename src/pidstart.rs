@@ -8,6 +8,23 @@ pub fn start_time(pid: u32) -> Option<u64> {
 
 #[cfg(target_os = "macos")]
 pub fn start_time(pid: u32) -> Option<u64> {
+    let info = bsd_info(pid)?;
+    Some(info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec)
+}
+
+#[cfg(target_os = "macos")]
+const ZOMBIE: u32 = 5;
+
+/// Whether `pid` runs, not a zombie, as this user.
+#[cfg(target_os = "macos")]
+pub fn runs_as_me(pid: u32) -> bool {
+    // SAFETY: getuid cannot fail.
+    let me = unsafe { libc::getuid() };
+    bsd_info(pid).is_some_and(|info| info.pbi_uid == me && info.pbi_status != ZOMBIE)
+}
+
+#[cfg(target_os = "macos")]
+fn bsd_info(pid: u32) -> Option<libc::proc_bsdinfo> {
     let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
     let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
     // SAFETY: `info` is as large as the size given, and read only once
@@ -25,8 +42,7 @@ pub fn start_time(pid: u32) -> Option<u64> {
         return None;
     }
     // SAFETY: filled above.
-    let info = unsafe { info.assume_init() };
-    Some(info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec)
+    Some(unsafe { info.assume_init() })
 }
 
 /// `start_time` the way Claude Code writes it as `procStart` in

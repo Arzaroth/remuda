@@ -675,7 +675,7 @@ fn sync_units(install: &[String]) -> Result<()> {
                 other => bail!("no agent named {other}; serve or timer"),
             });
         }
-        launchd::install(dir, home, &asked, &|v| std::env::var(v).ok())?;
+        launchd::install(dir, home, &asked, &launchd::shell_env)?;
     }
     manager.sync()
 }

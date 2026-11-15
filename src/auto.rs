@@ -654,23 +654,31 @@ pub fn listed() -> std::io::Result<Vec<Process>> {
     if !whole || !pids.contains(&(std::process::id() as libc::c_int)) {
         return Err(std::io::Error::other("macOS did not list every process"));
     }
-    Ok(pids
-        .into_iter()
-        .filter(|pid| *pid > 0)
-        .filter_map(|pid| {
-            let mut name = [0u8; 64];
-            // SAFETY: the buffer holds its length in bytes.
-            let len = unsafe { libc::proc_name(pid, name.as_mut_ptr().cast(), name.len() as u32) };
-            let comm = name[..len.max(0) as usize].to_vec();
-            let (cmdline, environ) = procargs(pid).unwrap_or_default();
-            (!comm.is_empty() || !cmdline.is_empty()).then_some(Process {
+    let mut listed = Vec::new();
+    for pid in pids.into_iter().filter(|pid| *pid > 0) {
+        let mut name = [0u8; 64];
+        // SAFETY: the buffer holds its length in bytes.
+        let len = unsafe { libc::proc_name(pid, name.as_mut_ptr().cast(), name.len() as u32) };
+        let comm = name[..len.max(0) as usize].to_vec();
+        let (cmdline, environ) = match procargs(pid) {
+            Some(args) => args,
+            None if crate::pidstart::runs_as_me(pid as u32) => {
+                return Err(std::io::Error::other(format!(
+                    "macOS gave no arguments for process {pid}, which runs as this user"
+                )));
+            }
+            None => Default::default(),
+        };
+        if !comm.is_empty() || !cmdline.is_empty() {
+            listed.push(Process {
                 pid: pid as u32,
                 comm,
                 cmdline,
                 environ: Environ::Read(environ),
-            })
-        })
-        .collect())
+            });
+        }
+    }
+    Ok(listed)
 }
 
 /// `KERN_PROCARGS2`: argc, the executable's path, then argv and the

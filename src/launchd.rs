@@ -13,7 +13,7 @@ const REFRESH_WAIT: Duration = Duration::from_secs(300);
 
 /// The variables the shell may set that move what remuda reads, copied into
 /// the agents so they look where it does.
-const PASSED: [&str; 9] = [
+const PASSED: [&str; 11] = [
     "CLAUDE_CONFIG_DIR",
     "CODEX_HOME",
     "GROK_HOME",
@@ -23,7 +23,26 @@ const PASSED: [&str; 9] = [
     "AGENT_CLI_CREDENTIAL_STORE",
     "REMUDA_STORE",
     "REMUDA_CONFIG",
+    "XDG_DATA_HOME",
+    "XDG_CONFIG_HOME",
 ];
+
+/// What the installing shell gives `var`, as remuda itself reads it: its
+/// `REMUDA_OUTER_` form first, inside a `remuda run` session, and a
+/// directory named relative to where the shell is made absolute, since the
+/// agent runs from `/`.
+pub fn shell_env(var: &str) -> Option<String> {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+    from_shell(var, &|v| std::env::var(v).ok(), &cwd)
+}
+
+fn from_shell(var: &str, get: &dyn Fn(&str) -> Option<String>, cwd: &Path) -> Option<String> {
+    let value = get(&crate::paths::outer(var)).or_else(|| get(var))?;
+    if value.is_empty() || var == "AGENT_CLI_CREDENTIAL_STORE" {
+        return Some(value);
+    }
+    Some(cwd.join(value).to_string_lossy().into_owned())
+}
 
 pub fn label(unit: Unit) -> &'static str {
     match unit {

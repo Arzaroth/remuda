@@ -121,7 +121,7 @@ impl Manager {
     /// Brings the installed services up to this binary and restarts a
     /// running `serve` on it.
     pub fn sync(&self) -> anyhow::Result<()> {
-        let env = |v: &str| std::env::var(v).ok();
+        let env = crate::launchd::shell_env;
         let done = match self {
             Manager::Systemd(_) => {
                 let done = refresh(&crate::paths::installed_units());
