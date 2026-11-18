@@ -20,6 +20,23 @@ impl Ran {
     }
 }
 
+/// A program something still holds open for writing cannot be run until it
+/// lets go, which takes a moment: one upgraded in place, or a script written
+/// while another thread forked.
+fn spawn(command: &mut Command) -> std::io::Result<std::process::Child> {
+    let until = Instant::now() + Duration::from_secs(1);
+    loop {
+        match command.spawn() {
+            Err(e)
+                if e.kind() == std::io::ErrorKind::ExecutableFileBusy && Instant::now() < until =>
+            {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            spawned => return spawned,
+        }
+    }
+}
+
 /// Runs `program` with nothing on its stdin, killing it at `wait`. `who`
 /// names it in the errors.
 pub fn run(who: &str, program: &Path, args: &[&str], wait: Duration, limit: u64) -> Result<Ran> {
@@ -35,7 +52,8 @@ pub fn run_fed(
     wait: Duration,
     limit: u64,
 ) -> Result<Ran> {
-    let mut child = Command::new(program)
+    let mut command = Command::new(program);
+    command
         .args(args)
         .stdin(if input.is_some() {
             Stdio::piped()
@@ -43,9 +61,9 @@ pub fn run_fed(
             Stdio::null()
         })
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .with_context(|| format!("could not run {}", program.display()))?;
+        .stderr(Stdio::piped());
+    let mut child =
+        spawn(&mut command).with_context(|| format!("could not run {}", program.display()))?;
     if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
         let fed = std::io::Write::write_all(&mut stdin, input);
         drop(stdin);
