@@ -73,11 +73,10 @@ pub fn kimi_home() -> PathBuf {
     var_dir("KIMI_CODE_HOME").unwrap_or_else(|| home().join(".kimi-code"))
 }
 
-/// cursor-agent's login: `CURSOR_CONFIG_DIR`, else `~/.config/cursor`.
+/// cursor-agent's login: `$XDG_CONFIG_HOME/cursor/auth.json`. Its
+/// `CURSOR_CONFIG_DIR` moves its settings, not this file.
 pub fn cursor_auth() -> PathBuf {
-    var_dir("CURSOR_CONFIG_DIR")
-        .unwrap_or_else(|| config_home().join("cursor"))
-        .join("auth.json")
+    config_home().join("cursor/auth.json")
 }
 
 fn opencode_data() -> PathBuf {

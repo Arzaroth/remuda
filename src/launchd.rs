@@ -13,13 +13,12 @@ const REFRESH_WAIT: Duration = Duration::from_secs(300);
 
 /// The variables the shell may set that move what remuda reads, copied into
 /// the agents so they look where it does.
-const PASSED: [&str; 11] = [
+const PASSED: [&str; 10] = [
     "CLAUDE_CONFIG_DIR",
     "CODEX_HOME",
     "GROK_HOME",
     "GROK_AUTH_PATH",
     "KIMI_CODE_HOME",
-    "CURSOR_CONFIG_DIR",
     "AGENT_CLI_CREDENTIAL_STORE",
     "REMUDA_STORE",
     "REMUDA_CONFIG",
