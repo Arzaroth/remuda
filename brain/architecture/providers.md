@@ -190,8 +190,9 @@ refresh token into "sign this credential in again".
 
 ## Cursor
 
-- File: `cursor-agent`'s `auth.json` under `CURSOR_CONFIG_DIR`, else
-  `$XDG_CONFIG_HOME/cursor`: `{accessToken, refreshToken, apiKey}`, stored
+- File: `cursor-agent`'s `auth.json` under `$XDG_CONFIG_HOME/cursor`, which
+  `CURSOR_CONFIG_DIR` does not move (it moves cursor-agent's settings only):
+  `{accessToken, refreshToken, apiKey}`, stored
   whole. A file with only an `apiKey` is a foreign login.
 - On macOS cursor-agent keeps each token in a login Keychain item of its own,
   for the account `cursor-user`: `cursor-access-token`, `cursor-refresh-token`

@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Cursor's login is read from `$XDG_CONFIG_HOME/cursor/auth.json` (else
+  `~/.config/cursor/auth.json`) whatever `CURSOR_CONFIG_DIR` says, as
+  cursor-agent does: that variable moves its settings, not its login. With it
+  set, remuda used to find no Cursor login.
+- A client turned away from a full `remuda serve` gets its 503 instead of a
+  reset connection when its request arrives just after the answer, which
+  macOS made likely.
+- A program remuda runs that is still open for writing for a moment (one
+  being upgraded in place) is tried again for up to a second rather than
+  reported as failing.
+
 ## [0.43.0] - 2026-11-15
 
 ### Added
