@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.43.1] - 2026-11-18
+
 ### Fixed
 
 - Cursor's login is read from `$XDG_CONFIG_HOME/cursor/auth.json` (else
