@@ -104,9 +104,8 @@ list. The verify job and `tests/install.rs` use it.
 
 A systemd user service does not see what a shell exports, so the installer
 writes whichever of `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME`,
-`GROK_AUTH_PATH`, `KIMI_CODE_HOME`, `CURSOR_CONFIG_DIR` and `REMUDA_STORE` are
-set
-to `~/.config/environment.d/60-remuda.conf` and into the running user manager.
+`GROK_AUTH_PATH`, `KIMI_CODE_HOME` and `REMUDA_STORE` are set to
+`~/.config/environment.d/60-remuda.conf` and into the running user manager.
 Without that, the timer would look at the default locations, miss the live
 login, and refresh the active credential.
 

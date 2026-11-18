@@ -97,8 +97,9 @@ Codex `login/finish` holds its request open until the browser calls back, and
 a thread that cannot start is a refused connection rather than a stopped
 server. Every answer but the event stream below closes the connection after
 draining what the client sent, so it is not reset before it reads the
-answer: for at most 300 ms in all, and on the accepting thread (the 503) only
-what has already arrived, so no client without the token can hold a slot past
+answer: for at most 300 ms in all. A 503 is drained the same way on a thread
+of its own, up to 16 at once; past those, on the accepting thread, only what
+has already arrived is, so no client without the token can hold a slot past
 its deadline or stall the accept loop.
 Responses carry `Cache-Control: no-store`, `nosniff` and `no-referrer`.
 

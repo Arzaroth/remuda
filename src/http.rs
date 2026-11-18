@@ -65,13 +65,12 @@ impl Drop for Slot {
 
 pub fn serve(app: Arc<App>, listener: TcpListener, limits: Limits) {
     let busy = Arc::new(AtomicUsize::new(0));
+    let turning = Arc::new(AtomicUsize::new(0));
     let streams = Arc::new(AtomicUsize::new(0));
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
         let Some(slot) = Slot::take(&busy, limits.connections) else {
-            // On the accepting thread: only what has already arrived is
-            // drained, so no client can hold this loop.
-            close_with(stream, &error(503, "busy"), Duration::ZERO);
+            turn_away(stream, &turning);
             continue;
         };
         let app = Arc::clone(&app);
@@ -83,6 +82,22 @@ pub fn serve(app: Arc<App>, listener: TcpListener, limits: Limits) {
             answer(&app, stream, limits, &streams);
         });
     }
+}
+
+/// Turned-away connections drained at once; past them only what has already
+/// arrived is drained, on the accepting thread, so no client can hold it.
+const TURNING: usize = 16;
+
+fn turn_away(stream: TcpStream, turning: &Arc<AtomicUsize>) {
+    let busy = error(503, "busy");
+    let Some(turn) = Slot::take(turning, TURNING) else {
+        close_with(stream, &busy, Duration::ZERO);
+        return;
+    };
+    let _ = std::thread::Builder::new().spawn(move || {
+        let _turn = turn;
+        close_with(stream, &busy, LINGER);
+    });
 }
 
 fn error(status: u16, message: &str) -> Response {
