@@ -2122,3 +2122,25 @@ fn copilot_is_signed_in_as_the_github_cli_is() {
         json!({"key": "gho_from_cli1"})
     );
 }
+
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn cursor_login_is_read_from_the_config_home_whatever_cursor_config_dir_says() {
+    let home = Home::new();
+    write(
+        &home.path(".config/cursor/auth.json"),
+        &json!({"accessToken": "a.b.c", "refreshToken": "r"}),
+    );
+    let out = home
+        .command(&["import", "-p", "cursor", "work"])
+        .env("CURSOR_CONFIG_DIR", home.path("elsewhere"))
+        .env_remove("REMUDA_TEST_SECURITY")
+        .output()
+        .unwrap();
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(!said.contains("not signed in"), "{said}");
+    assert!(
+        said.contains("could not confirm whose Cursor login"),
+        "{said}"
+    );
+}
